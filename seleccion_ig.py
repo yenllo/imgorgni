@@ -1,4 +1,4 @@
-r"""Elige las ~10 mejores fotos de un trabajo deportivo para Instagram y las copia completas.
+r"""Elige las ~20 mejores fotos de un trabajo deportivo para Instagram y las copia completas.
 
     python seleccion_ig.py "Liga ExScuola\Liga ExScuola 2026-1\2026-07-11 F9 (Final)"   # uno, ya
     python seleccion_ig.py --noche     # lo que usa la tarea de las 3:30 (ver abajo)
@@ -21,10 +21,10 @@ Embudo, del mas barato al mas caro. Todo Claude, sin agy ni Gemini (pedido de Re
      OJO: su puntaje NO es editorial, por eso pasan TODAS las PASS al paso 2 y no solo su top.
   2. Filtro Claude Haiku sobre HOJAS DE CONTACTO de 9 fotos (~240 tokens por foto en vez de
      ~1.500 foto por foto): nota gruesa a todas las PASS.
-  3. Claude Sonnet ve las <=60 mejores a 1280 px y elige 10 sin repetir jugada, en orden de
+  3. Claude Sonnet ve las <=60 mejores a 1280 px y elige ELEGIR (20) sin repetir jugada, en orden de
      publicacion. Lee `data/apuntes_renato.md` (lo que aprendio de lo que elige Renato, ver
      aprender_apuntes.py) y deja un apunte de esta seleccion en `_para_publicar\bitacora.md`.
-     Una segunda pasada mira solo las 10 y escribe que se ve (para verificar) y el caption.
+     Una segunda pasada mira solo las elegidas y escribe que se ve (para verificar) y el caption.
   4. Copia el JPEG ORIGINAL COMPLETO, sin recortar ni recomprimir: Renzo sube horizontal y
      recorta/edita el (pedido del 1/10/2026; antes salian recortes 4:5).
 
@@ -62,7 +62,8 @@ MODELO_FILTRO = "haiku"    # nota gruesa sobre hojas de contacto: barato
 MODELO_CLAUDE = "sonnet"   # ponytail: sonnet cuida la cuota semanal; "opus" si el gusto no alcanza
 VISTOS = SALIDA / "vistos.json"   # trabajos ya conocidos: lo que no esta aca es una fecha nueva
 ESTABLE_HORAS = 2                  # una fecha se analiza recien cuando termino de copiarse
-ELEGIR = 10
+ELEGIR = 20  # Renzo aprueba en /panel/revision entre 2 y 10 de cada 10: con 20 le quedan ~10 publicables.
+             # Ajustar con la tasa real de aprobacion de revision.json cuando haya varios trabajos.
 MAX_A_CLAUDE = 60
 POR_HOJA = 9               # 3x3
 HOJAS_POR_LLAMADA = 6      # ~54 fotos por claude -p: reparte el costo fijo de cada llamada
@@ -278,10 +279,12 @@ En esta carpeta hay {len(ids)} fotos candidatas: {', '.join(i + '.jpg' for i in 
 Lee TODAS con la herramienta Read, varias en paralelo por turno para no gastar turnos.
 {_ID_EN_IMAGEN}
 
-Elige hasta {ELEGIR} para publicar (menos si no hay {ELEGIR} buenas de verdad), con estas reglas:
+Elige hasta {ELEGIR} candidatas para publicar (menos si no hay {ELEGIR} buenas de verdad). El
+fotografo las revisa despues y se queda con algunas, asi que conviene variedad. Reglas:
 - Nunca dos fotos de la misma jugada o del mismo momento: quedate con la mejor.
 - Variedad: distintos jugadores/equipos y tipos de momento (accion, arquero, celebracion, historia).
-- Ordenalas en el orden en que conviene publicarlas (la mas fuerte primero).
+- Ordenalas de la mas fuerte a la mas floja: las primeras 10 deben ser las que publicarias si
+  solo pudieras publicar 10.
 - motivo: una frase de por que esa foto, describiendo lo que SE VE en ella.
 - apunte: 2 a 4 lineas para tu bitacora: que hizo fuerte (o flojo) este trabajo, que patron viste,
   que harias distinto la proxima vez. Queda anotado para las siguientes selecciones.
