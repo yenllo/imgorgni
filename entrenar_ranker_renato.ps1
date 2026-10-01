@@ -14,28 +14,36 @@ if (-not $env:CLAUDE_CODE_OAUTH_TOKEN) {
 }
 if (-not $env:CLAUDE_CODE_OAUTH_TOKEN) { Write-Warning "sin CLAUDE_CODE_OAUTH_TOKEN: los apuntes van a fallar (corre claude setup-token + setx)" }
 $AC = "C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe"
-$base = if (Test-Path "K:\Fotos\Galeria\Trabajo") { "K:" } else { "\\192.168.1.62\Fotos" }
-$L = "$base\Fotos\Galeria\Trabajo\Liga ExScuola"
-$E = "$L\Liga ExScuola 2026-1\Entrega_LigaExScuola2026"
+# Siempre la ruta UNC, aunque haya dock: el cache de features se indexa por la ruta del carrete, y
+# con K: cambiaria la clave y se volverian a analizar horas de fotos ya medidas.
+$L = "\\192.168.1.62\Fotos\Fotos\Galeria\Trabajo\Liga ExScuola"
+$S = "$PSScriptRoot\data\selecciones_renato"
+# 1/10/2026: corrido fuera de casa, el NAS no respondia y todo fallo. Mejor parar al tiro y avisar.
+if (-not (Test-Path $L)) {
+    Write-Warning "No llego al NAS ($L). Corre esto en la casa, con la notebook en el wifi de la Pi."
+    exit 1
+}
 
 while ((Get-ScheduledTask -TaskName 'IMGorgni seleccion IG prueba' -ErrorAction SilentlyContinue).State -eq 'Running') {
     Write-Host "esperando a que termine la prueba de seleccion_ig..."; Start-Sleep 60
 }
 
 # Primero los JPEG de 2026 (rapidos); al final los RAW de 2025 (cada ARW pesa 42 MB por la red).
-# 2025: carrete = RAW\ y seleccion = RAW\Seleccionadas, asi los nombres calzan (en la Final 2025 los
-# JPEG se llaman 114918_IMG_0002.jpg; F6 y F7 casi no tienen JPEG).
+# 2026: las elegidas salen de CSV en data\ (sacados por SSH de Entrega_LigaExScuola2026\FechaN el 1/10):
+#   no dependen del NAS y reproducen exacto el ranker hecho con las carpetas.
+# 2025: carrete = RAW\ y seleccion = RAW\Seleccionadas (carpeta: las elegidas se MOVIERON ahi y
+#   archivos_carrete tiene que sumarlas al carrete; en la Final 2025 los JPEG se llaman distinto).
 $pares = @(
-    "$L\Liga ExScuola 2026-1\2026-04-25 F1 - 25-04-2026", "$E\Fecha1",
-    "$L\Liga ExScuola 2026-1\2026-05-09 F2 - 09-05-2026", "$E\Fecha2",
-    "$L\Liga ExScuola 2026-1\2026-05-16 F3 - 16-05-2026", "$E\Fecha3",
-    "$L\Liga ExScuola 2026-1\2026-05-30 F4 - 30-05-2026", "$E\Fecha4",
-    "$L\Liga ExScuola 2026-1\2026-06-06 F5 - 06-06-2026", "$E\Fecha5",
-    "$L\Liga ExScuola 2026-1\2026-06-13 F6 - 13-06-2026", "$E\Fecha6",
-    "$L\Liga ExScuola 2026-1\2026-06-20 F7 - 20-06-2026", "$E\Fecha7",
-    "$L\Liga ExScuola 2026-1\2026-07-04 F8 - 04-07-2026", "$E\Fecha8",
-    "$L\Liga ExScuola 2026-1\2026-07-11 F9 (Final)", "$E\Fecha9",
-    "$L\Liga ExScuola 2026-2\F1 - 13-09-2026\jpeg", "$dir\data\selecciones_renato\2026-2_F1_13-09-2026_galeria.csv",
+    "$L\Liga ExScuola 2026-1\2026-04-25 F1 - 25-04-2026", "$S\2026-1_F1_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-05-09 F2 - 09-05-2026", "$S\2026-1_F2_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-05-16 F3 - 16-05-2026", "$S\2026-1_F3_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-05-30 F4 - 30-05-2026", "$S\2026-1_F4_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-06-06 F5 - 06-06-2026", "$S\2026-1_F5_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-06-13 F6 - 13-06-2026", "$S\2026-1_F6_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-06-20 F7 - 20-06-2026", "$S\2026-1_F7_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-07-04 F8 - 04-07-2026", "$S\2026-1_F8_entrega.csv",
+    "$L\Liga ExScuola 2026-1\2026-07-11 F9 (Final)", "$S\2026-1_F9_entrega.csv",
+    "$L\Liga ExScuola 2026-2\F1 - 13-09-2026\jpeg", "$S\2026-2_F1_13-09-2026_galeria.csv",
     "$L\Liga ExScuola 2025-1\2025-05-10 10-05-2025\RAW", "$L\Liga ExScuola 2025-1\2025-05-10 10-05-2025\RAW\Seleccionadas",
     "$L\Liga ExScuola 2025-2\2025-10-04 F4 - 04-10-2025\RAW", "$L\Liga ExScuola 2025-2\2025-10-04 F4 - 04-10-2025\RAW\Seleccionadas",
     "$L\Liga ExScuola 2025-2\2025-10-18 F6 - 18-10-2025\RAW", "$L\Liga ExScuola 2025-2\2025-10-18 F6 - 18-10-2025\RAW\Seleccionadas",

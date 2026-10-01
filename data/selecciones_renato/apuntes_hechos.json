@@ -257,5 +257,190 @@
    ],
    "speed": "standard"
   }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-05-16 F3 - 16-05-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-05-16 F3 - 16-05-2026",
+  "hallazgo": "La foto de equipo elegida esta fecha SI tenia podio/trofeo y fondo de auspiciadores (y rechazo otra tambien con marcas de fondo) — corrige la hipotesis de \"sin auspiciador\": es cupo puro, no filtro de contenido. Ademas, primer rechazo directo de saque de banda y primer caso de retrato posando con gesto espontaneo (sonrisa, pelota en brazos) sin jugar.",
+  "uso": {
+   "input_tokens": 4,
+   "cache_creation_input_tokens": 25075,
+   "cache_read_input_tokens": 15550,
+   "output_tokens": 7254,
+   "output_tokens_details": {
+    "thinking_tokens": 5086
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 25075,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 6630,
+     "cache_read_input_tokens": 15550,
+     "cache_creation_input_tokens": 9525,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 9525
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-06-06 F5 - 06-06-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-06-06 F5 - 06-06-2026",
+  "hallazgo": "Nuevo caso tentativo: una reunión/charla de equipo entre jugadores (sin árbitro, clima tranquilo) pasó el corte pese a no haber jugada — distinto del grupo parado con árbitro mediando, que sigue rechazado. Además el cupo/redundancia se ve clarísimo: dos tomas casi idénticas de una arquera despejando sola, una entra y la otra no.",
+  "uso": {
+   "input_tokens": 4,
+   "cache_creation_input_tokens": 23400,
+   "cache_read_input_tokens": 16621,
+   "output_tokens": 8199,
+   "output_tokens_details": {
+    "thinking_tokens": 6006
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 23400,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 7774,
+     "cache_read_input_tokens": 15347,
+     "cache_creation_input_tokens": 9327,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 9327
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-07-11 F9 (Final)": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-07-11 F9 (Final)",
+  "hallazgo": "Primera Final del grafo: las celebraciones de título (copa en alto, jugador cargado en hombros, corrida grupal, festejo individual con medalla) pasan fuerte —4 casos en una sola fecha— y por primera vez entran una foto de trofeo solo y una de tribuna llena, algo que antes estaba descartado. Parecen patrones propios de Finales, no de fecha regular.",
+  "uso": {
+   "input_tokens": 4,
+   "cache_creation_input_tokens": 23428,
+   "cache_read_input_tokens": 16652,
+   "output_tokens": 10331,
+   "output_tokens_details": {
+    "thinking_tokens": 7870
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 23428,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 9909,
+     "cache_read_input_tokens": 15378,
+     "cache_creation_input_tokens": 9324,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 9324
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2025-1\\2025-05-10 10-05-2025\\RAW": {
+  "fecha": "2025-05-10 10-05-2025 - RAW",
+  "hallazgo": "Dos cambios fuertes: el encuadre cercano puede ganarle a la regla de \"sin accion se descarta\" (jugador solo caminando con la pelota, cerca y grande en el cuadro, paso el corte) y a la de \"arbitro/staff no sirve como protagonista\" (una mediacion cercana y emotiva si paso). Ademas se repite el patron de arbitro-jugador previo al partido (ya 2 fechas) y se confirma que el huddle de celebracion es cosa de Finales, no de fecha regular.",
+  "uso": {
+   "input_tokens": 4,
+   "cache_creation_input_tokens": 23684,
+   "cache_read_input_tokens": 16916,
+   "output_tokens": 11070,
+   "output_tokens_details": {
+    "thinking_tokens": 8591
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 23684,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 10656,
+     "cache_read_input_tokens": 15642,
+     "cache_creation_input_tokens": 9316,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 9316
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2025-2\\2025-10-04 F4 - 04-10-2025\\RAW": {
+  "fecha": "2025-10-04 F4 - 04-10-2025 - RAW",
+  "hallazgo": "El huddle apretado de equipo (E9) y el saludo/abrazo post-partido entre jugadores (E10) pasaron el corte pese a la cercanía, no el tipo de escena — contradice el rechazo de huddles de la fecha pasada. Además, primer rechazo explícito de duelo aéreo (N15) y primera sanción/tarjeta descartada (N9).",
+  "uso": {
+   "input_tokens": 4,
+   "cache_creation_input_tokens": 23794,
+   "cache_read_input_tokens": 16902,
+   "output_tokens": 13686,
+   "output_tokens_details": {
+    "thinking_tokens": 11093
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 23794,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 13147,
+     "cache_read_input_tokens": 15628,
+     "cache_creation_input_tokens": 9440,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 9440
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
  }
 }

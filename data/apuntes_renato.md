@@ -1,45 +1,49 @@
 # Apuntes del gusto de Renato — Liga ExScuola
 
-## Firme (7 fechas)
+## Firme (12 fechas)
 
 **Momento**
-- Duelo 1v1/2v1 cuerpo a cuerpo con la pelota al pie sigue siendo el nucleo de las elegidas (7 fechas).
-- Retrato individual con la pelota pasa el corte solo con gesto activo (tiro, encare, carrera mirando al frente) (7 fechas).
-- Arquero integrado a una jugada cercana se confirma de nuevo (7 fechas).
-- Dorsal o nombre legible aporta y se repite (7 fechas).
-- Accion individual aislada sin oponente cerca se rechaza en general, pero esta fecha aparecio la primera excepcion clara por composicion/luz (ver Tentativo) (4 fechas de evidencia en contra, 1 excepcion).
+- Duelo 1v1/2v1 cuerpo a cuerpo con la pelota al pie sigue siendo el nucleo (12 fechas).
+- Retrato individual con la pelota pasa el corte con gesto activo (tiro, encare, carrera) — o, si esta muy cercano y grande en el cuadro, incluso posando, caminando o de espaldas (ver correccion, ya 2 fechas) (12 fechas).
+- Arquero integrado a una jugada cercana se confirma de nuevo, hombres y mujeres (12 fechas).
+- Dorsal o nombre legible aporta y se repite (12 fechas).
+- Accion individual aislada sin oponente cerca se rechaza en general; excepciones: contraluz fuerte, rivales visibles aunque lejos, o encuadre muy cercano tipo retrato (11 fechas en contra, 3 tipos de excepcion).
 
 **Encuadre y cercania**
-- Encuadre cercano o medio, sujeto grande en el cuadro, sigue siendo mayoria (7 fechas). Pero ya van 2 fechas con una elegida de plano abierto (arco vacio simetrico; esta fecha un duelo lejano con buena luz de atardecer) — vigilar si se vuelve patron.
+- Encuadre cercano o medio, sujeto grande en el cuadro, sigue siendo mayoria y pesa mas que el momento mismo (12 fechas). Plano abierto con buena composicion sigue en 6 fechas.
 
 **A quien fotografia**
-- Jugadores de campo, masculino y femenino por igual (7 fechas).
-- No elige publico ni staff como protagonista solitario (7 fechas). Trofeo/podio sin jugadores tambien descartado de nuevo esta fecha.
+- Jugadores de campo son el protagonista habitual de una jugada (12 fechas).
+- No elige publico ni staff como protagonista de una jugada aislada ni de una sancion/tarjeta (12 fechas) — pero si como protagonista de un momento humano cercano fuera del juego, y esta fecha se vio que tambien aplica entre jugadores, en un saludo o abrazo post-partido (ver correccion).
 
 **Grupales vs individuales**
-- Mezcla duelos 1v1/2v1 con retratos individuales de buen gesto (7 fechas).
+- Mezcla duelos 1v1/2v1 con retratos individuales de buen gesto (12 fechas).
 
 **Tecnica**
-- Nitidez alta en el sujeto principal, fondo oscuro de cancha nocturna (7 fechas).
-- Luz de reflector no descarta por eso (7 fechas). Esta fecha ademas una elegida con contraluz/atardecer fuerte — primer caso, ver Tentativo.
+- Nitidez alta en el sujeto principal, fondo oscuro de cancha nocturna (12 fechas).
+- Luz de reflector/flash no descarta por eso (12 fechas).
 
 **Que descarta**
-- Jugador de espaldas o quieto sin gesto, aunque este cerca y nitido (7 fechas).
-- Tomas abiertas con varios jugadores lejos, sin foco claro — sigue siendo el motivo mas repetido (7 fechas).
-- Grupo parado sin jugar (arbitro mediando, discusion, saludo informal suelto) sigue sin servir (7 fechas).
-- Duelo aereo/cabezazo sigue sin caso a favor; tercer caso en contra esta fecha (7 fechas sin evidencia a favor).
-- **Nuevo, confirmado:** celebracion de gol con arquero vencido aparecio por primera vez en el carrete (antes solo faltaba la evidencia) y Renato la rechazo. Se confirma la exclusion, no es solo ausencia de casos (1 fecha con evidencia directa).
+- Tomas abiertas con varios jugadores lejos sin foco claro, o jugadas congestionadas cerca del arco con el sujeto tapado, siguen siendo el motivo mas repetido (12 fechas) — salvo que el jugador con la pelota se mantenga identificable pese a la congestion (ver correccion).
+- Grupo parado sin jugar y lejano sigue sin servir (12 fechas) — distinto de un grupo cercano y apretado con emocion genuina, que si sirve (ver correccion).
+- Duelo aereo/cabezazo tuvo su primer rechazo explicito esta fecha (acrobacia tipo chilena): 1 fecha en contra, 10 fechas previas sin caso.
+- Celebracion de gol con arquero vencido descartada (1 fecha). Saque de banda descartado (1 fecha).
+- Sancion/tarjeta con el arbitro como protagonista, descartada (1 fecha, nuevo).
+- Huddle/celebracion grupal en fecha regular (no final): rechazado lejano y caminando una vez, aceptado muy cerca y apretado otra vez — la cercania parece pesar mas que el tipo de reunion (2 fechas, resultado mixto, a confirmar).
 
 ## Correccion
 
-- Equipo posado con fondo simple (sin auspiciador ni trofeo): esta fecha hubo UNA foto de equipo elegida y UNA rechazada, ambas sin podio ni sponsor de fondo. La regla anterior (prensa simple = firme-tentativo) no alcanza a explicar la diferencia — parece mas bien cupo (una sola foto de equipo por fecha) que una regla de contenido. Se baja a tentativo hasta ver una proxima fecha.
+- **Cercania le gana a la falta de accion:** posar, caminar o acomodarse de espaldas pasa el corte si el encuadre es muy intimo — ya 2 fechas con 2 casos cada una, patron confirmado.
+- **Momento humano cercano sirve aunque no sea jugada:** ya se vio con arbitro/staff mediando (1 fecha); esta fecha se suma un saludo/abrazo/intercambio de camiseta entre jugadores tras el partido, muy cerca — mismo principio, ahora tambien entre pares, y un huddle de equipo muy apretado con emocion real (2 fechas, 2 variantes nuevas).
+- **Jugada congestionada puede pasar si el sujeto no esta tapado:** una jugada de gol con varios jugadores en el area paso el corte porque el jugador con la pelota seguia siendo claramente identificable — distinto del patron habitual de rechazo (1 fecha, a confirmar).
+- Equipo posado estatico pierde frente a celebracion dinamica de la misma escena, salvo que no haya alternativa — esta fecha paso de nuevo una foto de equipo posado simple sin alternativa dinamica, y una segunda foto de equipo con staff y publico mezclado quedo afuera por cupo (2 fechas).
 
 ## Tentativo (ver si se repite en proximas fechas)
 
-- Gesto de buena onda cercano sigue sumando casos: esta fecha un companero/entrenador calmando a un jugador con choque de manos, y una fila de saludo grupal post-partido cerca del arco. Mismo espiritu, breve y cercano (4 fechas).
-- Celebracion grupal dinamica (abrazo, huddle) se pone en duda: esta fecha una celebracion grupal cercana de 3 jugadores fue RECHAZADA (podria ser por movimiento/encuadre, no por el gesto en si). Primera evidencia en contra tras 3 fechas a favor — vigilar, no bajar todavia.
-- Plano abierto con buena composicion (arco vacio simetrico, o escena de atardecer) sube a 2 fechas: podria ser gusto por luz/composicion mas que por cercania del sujeto.
-- **Nuevo, un solo caso:** preparacion/anticipacion de jugada (arbitro entregando la pelota antes de un tiro) fue elegida, sin accion todavia en curso. Extiende el retrato individual mas alla del gesto activo puro (1 fecha).
-- **Nuevo, un solo caso:** accion individual aislada sin rival cerca fue elegida por primera vez, pero con fuerte contraluz/atardecer — la excepcion parece ser la luz, no el contenido. No cambia la regla firme todavia (1 fecha).
-- Cupo/redundancia sigue muy fuerte: varias rechazadas de esta fecha son duelos cercanos y nitidos tan buenos como los elegidos — es recorte por cupo, no rechazo de gusto (7 fechas).
-- Staff/arbitro como protagonista de una jugada sigue sin evidencia a favor (7 fechas).
+- Arbitro/jugador en momento previo al partido (coin toss) sigue en 2 fechas, sin caso nuevo.
+- Reunion o charla de equipo caminando juntos, sin arbitro, sigue en 2 fechas, sin caso nuevo (distinto del huddle apretado, ver correccion).
+- Gesto de buena onda cercano sigue en 5 fechas, sin caso nuevo (el saludo post-partido entre jugadores se cuenta aparte, ver correccion).
+- Celebracion de titulo (copa, cargada, festejo) sigue exclusiva de Finales, 1 fecha; esta fecha regular lo refuerza en contra de nuevo.
+- Retrato posando con gesto espontaneo sin jugar ya tiene 2 casos (antes 1).
+- Cupo/redundancia sigue muy fuerte: duelos cercanos y nitidos tan buenos como los elegidos, y hasta una segunda foto de equipo, quedan afuera solo por cupo (12 fechas).
+- Staff/arbitro como protagonista de una jugada (fuera de ceremonia o momento humano cercano) sigue sin evidencia a favor (12 fechas).

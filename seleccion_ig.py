@@ -1,8 +1,8 @@
-r"""Elige las ~10 mejores fotos de un trabajo deportivo para Instagram y deja los recortes 4:5 listos.
+r"""Elige las ~10 mejores fotos de un trabajo deportivo para Instagram y las copia completas.
 
     python seleccion_ig.py "Liga ExScuola\Liga ExScuola 2026-1\2026-07-11 F9 (Final)"   # uno, ya
     python seleccion_ig.py --noche     # lo que usa la tarea de las 3:30 (ver abajo)
-    python seleccion_ig.py --prueba    # self-check de la matematica del recorte
+    python seleccion_ig.py --prueba    # self-check
 
 Trabaja sobre CARPETAS de `Fotos\Galeria\Trabajo` (rutas relativas a esa carpeta), no sobre
 eventos de photos_v2.db: al 30/9/2026 la base todavia apunta a K:\galeria\..., de antes de que
@@ -17,12 +17,14 @@ Embudo, del mas barato al mas caro. Todo Claude, sin agy ni Gemini (pedido de Re
      OJO: su puntaje NO es editorial, por eso pasan TODAS las PASS al paso 2 y no solo su top.
   2. Filtro Claude Haiku sobre HOJAS DE CONTACTO de 9 fotos (~240 tokens por foto en vez de
      ~1.500 foto por foto): nota gruesa a todas las PASS.
-  3. Claude Sonnet ve las <=60 mejores a 1280 px y elige 10 sin repetir jugada, con orden de
-     publicacion, caption y recorte. Lee `data/apuntes_renato.md` (lo que aprendio de lo que elige
-     Renato, ver aprender_apuntes.py) y deja un apunte de esta seleccion en `_para_publicar\bitacora.md`.
-  4. Recortes 4:5 desde el JPEG original a full resolucion.
+  3. Claude Sonnet ve las <=60 mejores a 1280 px y elige 10 sin repetir jugada, en orden de
+     publicacion. Lee `data/apuntes_renato.md` (lo que aprendio de lo que elige Renato, ver
+     aprender_apuntes.py) y deja un apunte de esta seleccion en `_para_publicar\bitacora.md`.
+     Una segunda pasada mira solo las 10 y escribe que se ve (para verificar) y el caption.
+  4. Copia el JPEG ORIGINAL COMPLETO, sin recortar ni recomprimir: Renzo sube horizontal y
+     recorta/edita el (pedido del 1/10/2026; antes salian recortes 4:5).
 
-Salida en `_para_publicar\<trabajo>\`: los recortes `01_DSC....jpg`, `seleccion.json` y los
+Salida en `_para_publicar\<trabajo>\`: las fotos `01_DSC....jpg`, `seleccion.json` y los
 intermedios (autocull.json, filtro.json, ver\, hojas\). Para rehacer un trabajo, borra su carpeta.
 No escribe en photos_v2.db ni en la carpeta de fotos: solo lee de ahi.
 """
@@ -56,7 +58,6 @@ MAX_A_CLAUDE = 60
 POR_HOJA = 9               # 3x3
 HOJAS_POR_LLAMADA = 6      # ~54 fotos por claude -p: reparte el costo fijo de cada llamada
 PX_VER = 1280              # lo que ve el juez final
-PX_RECORTE = (2160, 2700)  # 4:5, el doble de lo que muestra Instagram
 
 
 def log(*a):
@@ -261,7 +262,7 @@ _ID_EN_IMAGEN = ("Cada imagen tiene su id escrito en amarillo en la esquina supe
 
 
 def claude(carpeta, ids, evento):
-    """Paso A: elige y ordena. Solo ids y por que; el recorte lo decide detallar() mirando solo a esas."""
+    """Paso A: elige y ordena. Solo ids y por que; detallar() mira despues solo a esas."""
     prompt = f"""{CRITERIO}{apuntes()}
 Trabajo: {evento}.
 En esta carpeta hay {len(ids)} fotos candidatas: {', '.join(i + '.jpg' for i in ids)}.
@@ -283,27 +284,24 @@ Responde SOLO este JSON:
 
 
 def detallar(carpeta, elegidas, evento):
-    """Paso B: mira SOLO las elegidas (pocas, sin confundirse) y decide recorte y caption de cada una."""
+    """Paso B: mira SOLO las elegidas (pocas, sin confundirse): que se ve en cada una y su caption.
+
+    La 'vista' es la verificacion: el motivo del paso A puede venir de otra foto (paso la primera
+    noche, 6 de 10); esto se escribe mirando ESA imagen sola."""
     ids = [e["id"] for e in elegidas]
     prompt = f"""Trabajo: {evento}. Estas {len(ids)} fotos ya fueron elegidas para Instagram:
 {', '.join(i + '.jpg' for i in ids)}. Lee cada una con Read. {_ID_EN_IMAGEN}
 
 Para cada id:
 - vista: una frase con lo que se ve en ESA imagen (sirve para verificar que no la confundiste).
-- recorte vertical 4:5 sobre la foto completa: centro_x y centro_y (0 a 1) y alto (fraccion del alto
-  de la foto, entre 0.35 y 1; mas chico = mas zoom). Centra la accion (jugador con la pelota, el
-  arquero, la celebracion). Los jugadores salen chicos en cuadro: casi siempre conviene zoom, PERO
-  antes de responder verifica que dentro del recorte quepan COMPLETOS la cabeza del protagonista y la
-  pelota (y los pies si esta rematando). Si no caben, sube alto o mueve el centro: una cabeza cortada
-  arruina la foto (paso en la primera noche, 2 de 10).
 - caption: una linea en español de Chile (tuteo chileno, nunca voseo), sin hashtags.
 
 Responde SOLO este JSON:
-{{"<id>": {{"vista": "...", "centro_x": 0.5, "centro_y": 0.5, "alto": 0.6, "caption": "..."}}}}"""
+{{"<id>": {{"vista": "...", "caption": "..."}}}}"""
     datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE)
     for e in elegidas:
         e.update(datos.get(e["id"], {}))
-    return [e for e in elegidas if "centro_x" in e], uso
+    return elegidas, uso
 
 
 def anotar(evento, elegidas, apunte):
@@ -312,26 +310,6 @@ def anotar(evento, elegidas, apunte):
     lineas += [f"{n}. `{e['archivo']}` — {e.get('vista') or e.get('motivo', '')}" for n, e in enumerate(elegidas, 1)]
     with open(BITACORA, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lineas) + "\n")
-
-
-# ---------------------------------------------------------------- 4. Recortes
-
-def caja_4x5(ancho, alto_img, cx, cy, alto):
-    """Caja (x0, y0, x1, y1) 4:5 centrada en (cx, cy), corrida para no salirse de la foto."""
-    h = alto_img * min(max(alto, 0.2), 1.0)
-    w = h * 4 / 5
-    if w > ancho:  # foto mas angosta que 4:5: manda el ancho
-        w, h = ancho, ancho * 5 / 4
-    x0 = min(max(cx * ancho - w / 2, 0), ancho - w)
-    y0 = min(max(cy * alto_img - h / 2, 0), alto_img - h)
-    return round(x0), round(y0), round(x0 + w), round(y0 + h)
-
-
-def recortar(ruta, e, destino):
-    im = ImageOps.exif_transpose(Image.open(ruta)).convert("RGB")
-    im = im.crop(caja_4x5(*im.size, float(e["centro_x"]), float(e["centro_y"]), float(e["alto"])))
-    im.thumbnail(PX_RECORTE, Image.LANCZOS)
-    im.save(destino, quality=92)
 
 
 # ---------------------------------------------------------------- orquesta
@@ -361,12 +339,12 @@ def procesar(base, trabajo):
     elegidas, apunte, uso = claude(carpeta / VER, a_claude, evento)
     log(f"Claude eligio {len(elegidas)}")
     elegidas, uso_b = detallar(carpeta / VER, elegidas, evento)
-    uso = {"eleccion": uso, "recortes": uso_b}
-    log(f"recortes para {len(elegidas)}; uso: {json.dumps(uso)[:300]}")
+    uso = {"eleccion": uso, "detalle": uso_b}
+    log(f"detalle de {len(elegidas)}; uso: {json.dumps(uso)[:300]}")
     for n, e in enumerate(elegidas, 1):
         e["original"] = mapa[e["id"]]
-        e["archivo"] = f"{n:02d}_{Path(e['original']).stem}.jpg"
-        recortar(e["original"], e, carpeta / e["archivo"])
+        e["archivo"] = f"{n:02d}_{Path(e['original']).name}"
+        shutil.copy2(e["original"], carpeta / e["archivo"])  # completa, sin recomprimir; EXIF intacto
     (carpeta / "seleccion.json").write_text(json.dumps(
         {"trabajo": evento, "apunte": apunte, "elegidas": elegidas, "uso_claude": uso, "filtro_si": si,
          "autocull_pass": len(mapa)}, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -375,13 +353,8 @@ def procesar(base, trabajo):
 
 
 def prueba():
-    assert caja_4x5(1000, 800, 0.5, 0.5, 1.0) == (180, 0, 820, 800)       # 4:5 a todo el alto
-    assert caja_4x5(1000, 800, 0.0, 0.0, 0.5) == (0, 0, 320, 400)         # se pega a la esquina
-    assert caja_4x5(1000, 800, 1.0, 1.0, 0.5) == (680, 400, 1000, 800)    # no se sale por abajo/derecha
-    assert caja_4x5(600, 1000, 0.5, 0.5, 1.0) == (0, 125, 600, 875)       # vertical angosta: manda el ancho
-    x0, y0, x1, y1 = caja_4x5(7952, 5304, 0.3, 0.7, 0.45)
-    assert abs((x1 - x0) / (y1 - y0) - 0.8) < 0.01
     assert extraer_json('bla {"a": {"b": 1}} fin') == {"a": {"b": 1}}
+    assert extraer_json('{"a": "linea1\nlinea2"}') == {"a": "linea1\nlinea2"}
     print("ok")
 
 

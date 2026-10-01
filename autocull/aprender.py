@@ -228,11 +228,12 @@ def main(argv=None):
                     help="carrete completo y la carpeta con las que elegiste de el")
     ap.add_argument("--cache", default="_autocull_aprender")
     ap.add_argument("-o", "--salida", default="ranker.json")
+    ap.add_argument("--forzar", action="store_true", help="reemplazar la salida aunque haya carretes fallidos")
     a = ap.parse_args(argv)
     if not a.par:
         ap.error("hace falta al menos un --par CARRETE SELECCION")
 
-    conjuntos = []
+    conjuntos, fallidos = [], []
     for carrete, seleccion in a.par:
         # Una corrida son horas: un par malo se salta con aviso, no tumba a los demas.
         try:
@@ -240,6 +241,7 @@ def main(argv=None):
             y = np.array(etiquetar(res, leer_seleccion(seleccion)))
         except Exception as e:
             print(f"SALTO {carrete}: {e}", file=sys.stderr, flush=True)
+            fallidos.append(carrete)
             continue
         print(f"{carrete}: {len(res)} fotos elegibles, {int(y.sum())} elegidas", flush=True)
         if y.sum() == 0:
@@ -251,6 +253,13 @@ def main(argv=None):
         conjuntos.append((carrete, Xz, y, base))
     if not conjuntos:
         sys.exit("ningun carrete sirvio: no hay nada que aprender")
+    if fallidos and os.path.exists(a.salida) and not a.forzar:
+        # 1/10/2026: corrida fuera de casa, el NAS no respondia, quedo 1 carrete de 15 y pisó el
+        # ranker bueno de 10 fechas. Un ranker con fechas caidas por error nunca reemplaza al anterior.
+        alt = a.salida.replace(".json", "") + ".parcial.json"
+        print(f"\nOJO: {len(fallidos)} carretes fallaron al leer; NO piso {a.salida}, guardo en {alt} "
+              f"(usa --forzar si de verdad quieres reemplazarlo)", file=sys.stderr, flush=True)
+        a.salida = alt
 
     X = np.vstack([c[1] for c in conjuntos])
     y = np.concatenate([c[2] for c in conjuntos])

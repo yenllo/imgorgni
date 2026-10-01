@@ -7,7 +7,8 @@ Publica (veredicto "si") solo si cumple casi todo esto:
 - Momento peak: contacto con la pelota, duelo, salto, atajada, gol, celebración o emoción clara.
 - Sujeto principal claro y nítido, con la cara o el gesto legible.
 - La acción se entiende sin contexto (idealmente la pelota se ve).
-- Fondo que no compite y composición que aguanta un recorte vertical 4:5.
+- Fondo que no compite y composición que funciona HORIZONTAL: la foto se publica horizontal y el
+  recorte final lo hace el fotógrafo, así que juzga la foto completa.
 Excepción: un momento de historia (arenga, celebración en grupo, trofeo) vale aunque no haya pelota.
 
 Descarta (veredicto "no"): jugadores de espalda o caminando sin acción, fotos "correctas pero aburridas",
