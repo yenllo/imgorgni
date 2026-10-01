@@ -3156,6 +3156,117 @@ def panel_preview(foto_id):
         abort(404)
 
 
+# ---------------------------------------------------------------------------
+# Revision de la seleccion para Instagram (1/10/2026)
+#
+# seleccion_ig.py, en la notebook, elige 10 fotos por trabajo y deja la lista en
+# /mnt/fotos/_para_publicar/<trabajo>/seleccion.json (rutas de la notebook). Aca Renzo
+# confirma foto por foto si pasa a edicion. Lo que pasa se copia a aprobadas/ al lado,
+# para editarlo desde la notebook; los veredictos quedan en revision.json, que es el gusto
+# de Renzo para Instagram (distinto del de Renato, el cliente de la liga).
+# ---------------------------------------------------------------------------
+
+REVISION = RAIZ_FOTOS / "_para_publicar"
+_PREFIJOS_NOTEBOOK = ("//192.168.1.62/fotos/", "//100.78.164.81/fotos/", "k:/")
+
+
+def _ruta_pi(original):
+    r"""\\192.168.1.62\Fotos\X o K:\X (como los guarda la notebook) -> /mnt/fotos/X."""
+    r = (original or "").replace("\\", "/")
+    for pref in _PREFIJOS_NOTEBOOK:
+        if r.lower().startswith(pref):
+            return RAIZ_FOTOS / r[len(pref):]
+    return None
+
+
+def _trabajo(trabajo):
+    """(carpeta, seleccion) de un trabajo, o 404. dentro_de_raiz ataja '..'."""
+    d = REVISION / trabajo
+    if not dentro_de_raiz(d) or not (d / "seleccion.json").exists():
+        abort(404)
+    return d, json.loads((d / "seleccion.json").read_text(encoding="utf-8-sig"))
+
+
+def _veredictos(d):
+    try:
+        return json.loads((d / "revision.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+@app.get("/panel/revision")
+def revision_indice():
+    trabajos = []
+    if REVISION.is_dir():
+        for d in sorted(REVISION.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if not (d / "seleccion.json").exists():
+                continue
+            sel = json.loads((d / "seleccion.json").read_text(encoding="utf-8-sig"))
+            v = _veredictos(d)
+            n = len(sel.get("elegidas", []))
+            pasa = sum(1 for x in v.values() if x.get("pasa"))
+            trabajos.append({"nombre": d.name, "url": urllib.parse.quote(d.name), "n": n, "pasa": pasa,
+                             "no": sum(1 for x in v.values() if not x.get("pasa")),
+                             "faltan": n - len(v),
+                             "fecha": datetime.fromtimestamp(d.stat().st_mtime).strftime("%d/%m %H:%M")})
+    return render_template_string(BASE_HTML, cuerpo=render_template_string(
+        PANEL_REVISION_INDICE, trabajos=trabajos))
+
+
+@app.get("/panel/revision/<path:trabajo>")
+def revision_trabajo(trabajo):
+    d, sel = _trabajo(trabajo)
+    v = _veredictos(d)
+    fotos = [dict(e, n=i, veredicto=v.get(e["archivo"], {}).get("pasa"))
+             for i, e in enumerate(sel.get("elegidas", []), 1)]
+    return render_template_string(BASE_HTML, cuerpo=render_template_string(
+        PANEL_REVISION, nombre=d.name, url=urllib.parse.quote(d.name), fotos=fotos, apunte=sel.get("apunte", "")))
+
+
+@app.get("/panel/revision-foto/<path:trabajo>/<int:n>")
+def revision_foto(trabajo, n):
+    """La foto n del trabajo, sin marca. ?full=1 manda el original tal cual."""
+    _d, sel = _trabajo(trabajo)
+    elegidas = sel.get("elegidas", [])
+    if not 1 <= n <= len(elegidas):
+        abort(404)
+    ruta = _ruta_pi(elegidas[n - 1].get("original"))
+    if ruta is None or not dentro_de_raiz(ruta) or not ruta.exists():
+        abort(404)
+    if request.args.get("full"):
+        return send_file(ruta, mimetype="image/jpeg")
+    return send_file(sin_marca(str(ruta), ancho=1600), mimetype="image/jpeg", max_age=86400)
+
+
+@app.post("/panel/revision/<path:trabajo>/<int:n>")
+def revision_votar(trabajo, n):
+    """Pasa / no pasa. Lo que pasa se copia a aprobadas/; si se arrepiente, se saca."""
+    d, sel = _trabajo(trabajo)
+    elegidas = sel.get("elegidas", [])
+    if not 1 <= n <= len(elegidas):
+        abort(404)
+    e = elegidas[n - 1]
+    pasa = request.form.get("veredicto") == "pasa"
+    v = _veredictos(d)
+    v[e["archivo"]] = {"pasa": pasa, "cuando": datetime.now().isoformat(timespec="seconds")}
+    tmp = d / "revision.json.tmp"
+    tmp.write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, d / "revision.json")
+    copia = d / "aprobadas" / e["archivo"]
+    if pasa and not copia.exists():
+        ruta = _ruta_pi(e.get("original"))
+        if ruta is not None and dentro_de_raiz(ruta) and ruta.exists():
+            copia.parent.mkdir(exist_ok=True)
+            shutil.copy2(ruta, copia)
+    elif not pasa and copia.exists():
+        copia.unlink()  # es la copia que hizo este mismo panel, el original no se toca
+    return jsonify(ok=True, pasa=pasa,
+                   pasan=sum(1 for x in v.values() if x.get("pasa")),
+                   faltan=len(elegidas) - len(v))
+
+
+
+
 @app.get("/panel/eventos")
 def eventos():
     cat = catalogo()
@@ -3500,8 +3611,9 @@ PANEL_BARRA = """<nav class="pbarra">
 {% set sec = request.path.split('/')[2] if request.path.count('/') > 1 else '' %}
 <a class="logo" href="/panel">rb<span>.</span>fotos</a>
 <div class="links">
-<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas') }}"
+<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas','revision','revision-foto') }}"
   >Galerias</a>
+<a href="/panel/revision" class="{{ 'on' if sec in ('revision','revision-foto') }}">Revision</a>
 <a href="/panel/carpetas" class="{{ 'on' if sec == 'carpetas' }}">Carpetas</a>
 <a href="/panel/subir" class="{{ 'on' if sec == 'subir' }}">Subir</a>
 <a href="/panel/eventos" class="{{ 'on' if sec == 'eventos' }}">Eventos</a>
@@ -6515,6 +6627,62 @@ SIN_CATALOGO = PANEL_CSS + PANEL_BARRA + """<main>
 Tailscale:</p>
 <p><code>python exportar_catalogo.py --enviar</code></p>
 <p><a href="/panel">Volver al panel</a></p></main>"""
+
+PANEL_REVISION_INDICE = PANEL_CSS + PANEL_BARRA + """<main>
+<h1 class="tit">Revision para Instagram</h1>
+<p class="migas">Las selecciones que arma Claude cada noche. Tu decides que pasa a edicion:
+lo que pasa queda en <code>_para_publicar/&lt;trabajo&gt;/aprobadas</code> del NAS.</p>
+{% if not trabajos %}<p>No hay selecciones todavia.</p>{% endif %}
+<ul class="evs">
+{% for t in trabajos %}<li><a href="/panel/revision/{{ t.url }}">
+<span class="fec">{{ t.fecha }}</span>
+<span class="nom">{{ t.nombre }}</span>
+<span class="n">{% if t.faltan %}<b>{{ t.faltan }} por revisar</b> &middot; {% endif %}{{ t.pasa }} pasan &middot; {{ t.no }} no</span>
+</a></li>{% endfor %}
+</ul>
+</main>"""
+
+PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
+.rev{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:1.2rem;margin-top:1rem}
+.rev figure{margin:0;background:rgba(127,127,127,.08);border-radius:8px;overflow:hidden;border:3px solid transparent}
+.rev figure.si{border-color:#2e9e4f}.rev figure.no{border-color:#c0392b;opacity:.55}
+.rev img{width:100%;display:block;cursor:zoom-in}
+.rev figcaption{padding:.6rem .8rem;font-size:.9rem;line-height:1.35}
+.rev .cap{font-style:italic;opacity:.85;margin:.3rem 0}
+.rev .botones{display:flex;gap:.5rem;margin-top:.5rem}
+.rev .botones button{flex:1;padding:.6rem;border:0;border-radius:6px;font-size:1rem;cursor:pointer}
+.rev .bsi{background:#2e9e4f;color:#fff}.rev .bno{background:#c0392b;color:#fff}
+.apunte{white-space:pre-wrap;font-size:.9rem;opacity:.8}
+</style><main>
+<h1 class="tit">{{ nombre }}</h1>
+<p class="migas"><a href="/panel/revision">&larr; revision</a> &middot;
+<span id="resumen"></span></p>
+{% if apunte %}<p class="apunte">{{ apunte }}</p>{% endif %}
+<div class="rev">
+{% for f in fotos %}
+<figure id="f{{ f.n }}" class="{{ 'si' if f.veredicto == true else 'no' if f.veredicto == false }}">
+<a href="/panel/revision-foto/{{ url }}/{{ f.n }}?full=1" target="_blank" rel="noopener">
+<img loading="lazy" src="/panel/revision-foto/{{ url }}/{{ f.n }}" alt="{{ f.archivo }}"></a>
+<figcaption><b>{{ f.n }}.</b> {{ f.vista or f.motivo }}
+{% if f.caption %}<div class="cap">&ldquo;{{ f.caption }}&rdquo;</div>{% endif %}
+<div style="opacity:.6;font-size:.8rem">{{ f.archivo }}</div>
+<div class="botones">
+<button class="bsi" onclick="votar({{ f.n }}, 'pasa')">Pasa</button>
+<button class="bno" onclick="votar({{ f.n }}, 'no')">No pasa</button>
+</div></figcaption></figure>
+{% endfor %}
+</div></main>
+<script>
+function votar(n, v) {
+  fetch('/panel/revision/{{ url }}/' + n, {method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'veredicto=' + v})
+  .then(r => r.json()).then(j => {
+    document.getElementById('f' + n).className = j.pasa ? 'si' : 'no';
+    document.getElementById('resumen').textContent =
+      j.pasan + ' pasan' + (j.faltan ? ' · ' + j.faltan + ' por revisar' : ' · revision completa');
+  });
+}
+</script>"""
 
 PANEL_EVENTOS = PANEL_CSS + PANEL_BARRA + """<main>
 <h1 class="tit">Eventos del curador</h1>

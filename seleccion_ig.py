@@ -35,6 +35,8 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -45,6 +47,8 @@ COLA = SALIDA / "cola.txt"
 CRITERIO = (AQUI / "criterio_ig.md").read_text(encoding="utf-8")
 AUTOCULL_DIR = AQUI  # el paquete autocull/ vive en este proyecto
 AUTOCULL_PY = Path(r"C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe")  # el venv no se mueve
+NTFY = AQUI / "ntfy_tema.txt"  # tema privado de ntfy (una linea). Fuera de git: la lista blanca no incluye .txt
+PANEL = "https://rbfotos.studio/panel/revision/"
 APUNTES = AQUI / "data" / "apuntes_renato.md"
 BITACORA = SALIDA / "bitacora.md"
 SISTEMA = ("Eres editor de fotografia deportiva. Miras imagenes con la herramienta Read y respondes "
@@ -312,6 +316,36 @@ def anotar(evento, elegidas, apunte):
         fh.write("\n".join(lineas) + "\n")
 
 
+# ---------------------------------------------------------------- revision en /panel + aviso
+
+def publicar(base, carpeta, evento, n):
+    """Deja la seleccion en el NAS para /panel/revision (galeria.py en la Pi) y avisa por ntfy.
+
+    *base* es <NAS>\\Fotos\\Galeria\\Trabajo; la Pi lee <NAS>\\_para_publicar\\<trabajo>\\seleccion.json
+    y sirve los originales directo del disco: aca no se copia ninguna foto."""
+    nas = Path(base).parents[2] / "_para_publicar" / evento
+    nas.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(carpeta / "seleccion.json", nas / "seleccion.json")
+    avisar(f"{n} fotos listas para revisar", evento, PANEL + urllib.parse.quote(evento))
+
+
+def avisar(titulo, mensaje, link=None):
+    """Notificacion al telefono por ntfy.sh. Sin ntfy_tema.txt no avisa (no es error)."""
+    if not NTFY.exists():
+        return
+    datos = {"topic": NTFY.read_text(encoding="utf-8").strip(), "title": titulo, "message": mensaje,
+             "tags": ["camera"]}
+    if link:
+        datos["click"] = link
+    # JSON y no headers: el titulo y el trabajo llevan tildes, y los headers HTTP no aceptan UTF-8
+    req = urllib.request.Request("https://ntfy.sh/", data=json.dumps(datos).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=20).read()
+    except Exception as e:  # sin aviso igual queda la seleccion: no tumba nada
+        log(f"ntfy fallo: {e}")
+
+
 # ---------------------------------------------------------------- orquesta
 
 def procesar(base, trabajo):
@@ -349,6 +383,10 @@ def procesar(base, trabajo):
         {"trabajo": evento, "apunte": apunte, "elegidas": elegidas, "uso_claude": uso, "filtro_si": si,
          "autocull_pass": len(mapa)}, ensure_ascii=False, indent=1), encoding="utf-8")
     anotar(evento, elegidas, apunte)
+    try:
+        publicar(base, carpeta, evento, len(elegidas))
+    except OSError as e:  # la seleccion ya quedo en la notebook; el panel se puede publicar despues
+        log(f"no pude publicar en el NAS para /panel: {e}")
     log(f"listo: {carpeta}")
 
 
