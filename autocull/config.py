@@ -123,15 +123,21 @@ class AnalysisConfig:
         "fft_blur": 0.05,                  # Tier 1: motion blur / trepidation
         "snr_sharpness_subject": 0.30,     # Tier 2: LOCAL sharpness on player (KEY)
         "subject_exposure": 0.10,          # Tier 2: player brightness
-        "detection_confidence": 0.10,      # Tier 2: YOLO confidence
-        "composition_ball": 0.15,          # Tier 3: Ball presence bonus
-        "composition_crop": 0.10,          # Tier 3: Crop potential margin
+        "detection_confidence": 0.05,      # Tier 2: YOLO confidence (says nothing editorial)
+        "composition_ball": 0.15,          # Tier 3: ball ON the protagonist (proximity), not just in frame
+        "composition_crop": 0.05,          # Tier 3: subject not cut by the frame edge
+        "subject_fill": 0.10,              # Tier 3: protagonist big enough for a 4:5 crop
         "composition_pose": 0.10,          # Tier 4: Face visibility and dynamic stride
     })
 
     # Final score percentile for rejection (absolute across session)
     # Everything below this percentile → REJECT
     final_reject_percentile: float = 30.0
+
+    # Personal ranker learned from past selections (`python -m autocull aprender`). When set, it
+    # replaces the weighted composite as the ORDER of the photos that survived the hard filters;
+    # the hard filters, burst dedup and final percentile cut still run on top of it.
+    ranker_path: str = ""
 
     # Burst grouping: photos captured within this many seconds belong to the
     # same burst. Used by both the culler's dedup (scorer) and the review UI

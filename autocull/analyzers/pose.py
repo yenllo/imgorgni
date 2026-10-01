@@ -142,7 +142,8 @@ def evaluate_pose(detection: dict) -> dict:
     
     # We consider the face visible if the nose and at least one eye have > 0.5 conf
     max_eye_conf = max(leye_conf, reye_conf)
-    face_visible = min(1.0, (nose_conf + max_eye_conf)) / 2.0
+    # (Was min(1, a+b)/2, which capped at 0.5: half the face bonus was unreachable.)
+    face_visible = min(1.0, (nose_conf + max_eye_conf) / 2.0)
     
     # 2. Dynamic Stride (Running vs Standing)
     # Distance between ankles normalized by person bounding box height

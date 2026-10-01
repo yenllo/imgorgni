@@ -167,7 +167,8 @@ def process_single_image(args) -> dict:
                 # Crop the already-denoised frame; σ comes from the ISO, so
                 # every ROI and the frame share it.
                 snr = snr_sharpness_local(img_small, bbox, iso, config,
-                                          denoised_gray=denoised_small)
+                                          denoised_gray=denoised_small,
+                                          keypoints=det.get("keypoints"))
                 exp = analyze_exposure_local(img_small, bbox, config)
                 face = evaluate_facial_expression(img_small, bbox)
                 
@@ -201,7 +202,8 @@ def run_pipeline(
     input_dir: str, 
     config: AnalysisConfig = DEFAULT_CONFIG,
     progress_callback=None,
-    files: list[str] | None = None
+    files: list[str] | None = None,
+    ranker: str | None = None,
 ) -> list[dict]:
     """Run the Autocull pipeline on a directory of images.
     
@@ -212,10 +214,14 @@ def run_pipeline(
         files: Explicit list of image paths to analyze instead of scanning a
             directory. El curador de IMGorgni manda las fotos de un evento, que
             viven desparramadas en varias carpetas de K: y no forman una sola.
-        
+        ranker: Path to a ranker JSON from ``python -m autocull aprender``. Same as
+            setting ``config.ranker_path``; it reorders the survivors of the hard filters.
+
     Returns:
         List of result dictionaries.
     """
+    if ranker:
+        config.ranker_path = ranker
     if files is None:
         files, fmt = find_images(input_dir, config)
     total_files = len(files)

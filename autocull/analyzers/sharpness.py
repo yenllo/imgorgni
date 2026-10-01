@@ -100,6 +100,7 @@ def adaptive_bilateral(
 def gradient_p95(
     denoised_gray: np.ndarray,
     ksize: int = 5,
+    mask: np.ndarray | None = None,
 ) -> float:
     """Compute the 95th-percentile Sobel gradient magnitude.
 
@@ -133,8 +134,58 @@ def gradient_p95(
     grad_y: np.ndarray = cv2.Sobel(denoised_gray, cv2.CV_64F, 0, 1, ksize=ksize)
     magnitude: np.ndarray = np.sqrt(grad_x * grad_x + grad_y * grad_y)
 
+    if mask is not None:
+        magnitude = magnitude[mask]
     p95: float = float(np.percentile(magnitude, 95))
     return p95
+
+
+# ── Body mask (where the player actually is inside their box) ───────────────
+
+# COCO keypoint pairs drawn as thick segments: arms, legs, shoulders, hips, flanks.
+_LIMBS = ((5, 7), (7, 9), (6, 8), (8, 10), (11, 13), (13, 15), (12, 14), (14, 16),
+          (5, 6), (11, 12), (5, 11), (6, 12))
+_KP_MIN_CONF = 0.3
+_MIN_BODY_PIXELS = 150
+
+
+def body_mask(bbox, keypoints, min_conf: float = _KP_MIN_CONF) -> np.ndarray | None:
+    """Boolean mask, in *bbox* coordinates, of the pixels that are the player's body.
+
+    Why: a player's box at 2 MP is mostly BACKGROUND — a sponsor banner, the goal net, a fence.
+    Those are high-contrast, static and in focus, so the box's P95 gradient measured the
+    background: a motion-blurred striker in front of the checkered "EX SCUOLA" banner
+    (DSC09526, final 11/7) scored a sharper "subject" than a tack-sharp one. The pose model
+    already gives us the skeleton; the body is the torso polygon, thick limb segments and a
+    head disc. Returns None when too few keypoints are visible to trust it (caller falls back
+    to the whole box, the old behaviour).
+    """
+    if keypoints is None:
+        return None
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    w, h = max(0, x2 - x1), max(0, y2 - y1)
+    if w < 8 or h < 8:
+        return None
+    kp = [(float(x) - x1, float(y) - y1, float(c)) for x, y, c in keypoints]
+    ok = [c > min_conf for _, _, c in kp]
+    if sum(ok) < 4:
+        return None
+    pt = [(int(round(x)), int(round(y))) for x, y, _ in kp]
+    m = np.zeros((h, w), np.uint8)
+    grosor = max(3, int(0.07 * h))
+    torso = [5, 6, 12, 11]
+    if all(ok[i] for i in torso):
+        cv2.fillPoly(m, [np.array([pt[i] for i in torso], np.int32)], 1)
+    for a, b in _LIMBS:
+        if ok[a] and ok[b]:
+            cv2.line(m, pt[a], pt[b], 1, grosor)
+    cara = [i for i in range(5) if ok[i]]
+    if cara:
+        cx = int(np.mean([pt[i][0] for i in cara]))
+        cy = int(np.mean([pt[i][1] for i in cara]))
+        cv2.circle(m, (cx, cy), grosor, 1, -1)
+    m = m.astype(bool)
+    return m if m.sum() >= _MIN_BODY_PIXELS else None
 
 
 # ── SNR Sharpness (Global) ─────────────────────────────────────────────────
@@ -239,8 +290,12 @@ def snr_sharpness_local(
     config: AnalysisConfig = DEFAULT_CONFIG,
     sigma: float | None = None,
     denoised_gray: np.ndarray | None = None,
+    keypoints=None,
 ) -> float:
     """Compute noise-aware SNR sharpness within a bounding box.
+
+    With *keypoints* (YOLO-pose, COCO order) the P95 is taken only over the player's body
+    (:func:`body_mask`), not the background that fills most of the box.
 
     Same pipeline as :func:`snr_sharpness` but applied only to the ROI
     defined by *bbox* (typically the YOLO-detected player region).
@@ -272,7 +327,10 @@ def snr_sharpness_local(
         if roi is None or roi.size == 0 or roi.shape[0] < 8 or roi.shape[1] < 8:
             return 0.0
         sigma = config.expected_sigma(iso) if sigma is None else max(sigma, config.min_sigma_noise)
-        return gradient_p95(roi) / sigma
+        mask = body_mask(bbox, keypoints)
+        if mask is not None and mask.shape != roi.shape:  # box clamped at the frame edge
+            mask = None
+        return gradient_p95(roi, mask=mask) / sigma
 
     if image_bgr is None or image_bgr.size == 0:
         return 0.0
@@ -341,6 +399,25 @@ if __name__ == "__main__":
     # 5. Invalid / edge-case bounding box (x2 <= x1)
     snr_invalid = snr_sharpness_local(color_img, (-10, -10, -5, -5), iso=3200)
     print(f"[invalid bbox]            SNR = {snr_invalid:.2f}  (expected 0.0)")
+
+    # 5b. Blurred player in front of a sharp banner (DSC09526, final 11/7): the whole box is
+    #     dominated by the banner; the body mask must measure the player, not the background.
+    escena = sharp_noisy.copy()
+    jugador = cv2.GaussianBlur(np.full((200, 80), 120, np.uint8), (1, 1), 0)
+    cv2.rectangle(jugador, (20, 40), (60, 160), 60, -1)          # torso/legs, soft edges below
+    jugador = cv2.GaussianBlur(jugador, (31, 31), 9.0)           # movido
+    escena[100:300, 160:240] = jugador
+    caja = (120, 90, 280, 310)  # like YOLO's box: the player plus the banner around them
+    # skeleton of a standing player inside the box: head, shoulders, hips, knees, ankles
+    kp = [(200, 115, .9), (195, 112, .9), (205, 112, .9), (190, 115, .5), (210, 115, .5),
+          (182, 145, .9), (218, 145, .9), (180, 180, .8), (220, 180, .8), (178, 210, .7), (222, 210, .7),
+          (185, 220, .9), (215, 220, .9), (186, 255, .9), (214, 255, .9), (186, 290, .9), (214, 290, .9)]
+    den = adaptive_bilateral(escena, 3200)
+    snr_caja = snr_sharpness_local(None, caja, 3200, denoised_gray=den)
+    snr_cuerpo = snr_sharpness_local(None, caja, 3200, denoised_gray=den, keypoints=kp)
+    print(f"[blurred player, sharp banner] box SNR = {snr_caja:.1f}  body SNR = {snr_cuerpo:.1f}")
+    assert snr_cuerpo < snr_caja * 0.7, "the body mask must not measure the banner behind the player"
+    assert body_mask(caja, kp[:3] + [(0, 0, 0.0)] * 14) is None, "too few keypoints -> fall back to the box"
 
     # 6. Adaptive bilateral params check
     for iso_val in [400, 800, 3200, 6400, 10000, 25600]:

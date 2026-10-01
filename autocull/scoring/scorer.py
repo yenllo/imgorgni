@@ -7,6 +7,7 @@ the final PASS/REJECT decision based on session-wide percentile ranking.
 The scoring is absolute across the entire session (not per-burst).
 """
 
+import json
 import os
 
 import numpy as np
@@ -61,6 +62,25 @@ def _bbox_point_distance(bbox, point) -> float:
     return float(np.hypot(dx, dy))
 
 
+def _ball_proximity(bbox, ball_centre) -> float:
+    """1.0 when the ball touches the player's box, ~0.5 a body height away, ~0 several away.
+
+    Decays in body heights, not pixels: perspective-correct, a near (big) player legitimately
+    reaches further in pixels than a distant one.
+    """
+    if ball_centre is None:
+        return 0.0
+    reach = max(1.0, (bbox[3] - bbox[1]) * _BALL_REACH_BODY_HEIGHTS)
+    return 1.0 / (1.0 + _bbox_point_distance(bbox, ball_centre) / reach)
+
+
+def _ball_centre(balls):
+    if not balls:
+        return None
+    bx1, by1, bx2, by2 = balls[0]["bbox"]
+    return ((bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
+
+
 def pick_protagonist(
     persons: list[dict],
     balls: list[dict],
@@ -104,10 +124,7 @@ def pick_protagonist(
         areas.append(max(1.0, (x2 - x1) * (y2 - y1)))
     max_area = max(areas)
 
-    ball_centre = None
-    if balls:
-        bx1, by1, bx2, by2 = balls[0]["bbox"]
-        ball_centre = ((bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
+    ball_centre = _ball_centre(balls)
 
     # No ball detected → redistribute its weight over size + centrality.
     w_ball = w.get("ball_proximity", 0.5) if ball_centre else 0.0
@@ -125,13 +142,7 @@ def pick_protagonist(
 
         size = areas[i] / max_area
         centrality = 1.0 - min(1.0, float(np.hypot(px - cx, py - cy)) / (diag / 2.0))
-        ball_prox = 0.0
-        if ball_centre is not None:
-            # Decay in body heights: touching the box ≈ 1.0, ~0.5 at a body
-            # height away, ~0 several away. Perspective-correct — a near (big)
-            # player legitimately reaches further in pixels than a distant one.
-            reach = max(1.0, (y2 - y1) * _BALL_REACH_BODY_HEIGHTS)
-            ball_prox = 1.0 / (1.0 + _bbox_point_distance(p["bbox"], ball_centre) / reach)
+        ball_prox = _ball_proximity(p["bbox"], ball_centre)
 
         score = w_ball * ball_prox + w_size * size + w_centre * centrality
         if score > best_score:
@@ -235,6 +246,8 @@ def compute_tier2_result(
         "has_ball": len(balls) > 0,
         "protagonist_confident": protagonist_confident,
         "crop_potential": 0.0,
+        "subject_fill": 0.0,
+        "ball_on_subject": 0.0,
         "pose_face_visible": 0.0,
         "pose_dynamic_stride": 0.0,
         "face_eyes_closed": False,
@@ -282,7 +295,16 @@ def compute_tier2_result(
         min_margin = min(margin_w, margin_h)
         potential = (min_margin - 0.05) / 0.10
         result["crop_potential"] = max(0.0, min(1.0, potential))
-        
+
+        # Editorial signals (30/9/2026, blind-judged sample of the 11/7 final): the frames
+        # judges picked have the protagonist IN the play and big enough to hold a 4:5 crop.
+        # - ball_on_subject: the old bonus paid for a ball ANYWHERE in frame (18 of 20 sample
+        #   frames had one, so it ranked nothing). What matters is the ball on the subject.
+        # - subject_fill: protagonist height vs. half the frame. A player that fills half the
+        #   frame height survives a 4:5 crop for Instagram; a tiny one is "too small in frame".
+        result["ball_on_subject"] = _ball_proximity(persons[best_idx]["bbox"], _ball_centre(balls))
+        result["subject_fill"] = max(0.0, min(1.0, (p_y2 - p_y1) / (0.5 * img_h)))
+
         # Evaluate Pose Biomechanics
         pose_data = evaluate_pose(persons[best_idx])
         result["pose_face_visible"] = pose_data["face_visible"]
@@ -460,12 +482,12 @@ def compute_final_scores(
         confidence = tier2.get("best_subject_confidence", 0.5)
         score += weights.get("detection_confidence", 0.10) * confidence * 100
 
-        # Tier 3: Composition Bonuses
-        if tier2.get("has_ball", False):
-            score += weights.get("composition_ball", 0.15) * 100
+        # Tier 3: Composition — the ball ON the protagonist, not just somewhere in frame
+        score += weights.get("composition_ball", 0.15) * tier2.get("ball_on_subject", 0.0) * 100
 
         crop_potential = tier2.get("crop_potential", 0.0)
         score += weights.get("composition_crop", 0.10) * crop_potential * 100
+        score += weights.get("subject_fill", 0.0) * tier2.get("subject_fill", 0.0) * 100
 
         # Tier 4: Pose Bonus (average of face visibility and dynamic stride)
         face_v = tier2.get("pose_face_visible", 0.0)
@@ -481,6 +503,19 @@ def compute_final_scores(
         r["decision"] = "PASS"
         r["reject_reason"] = None
         r["reject_tier"] = None
+
+    # ── Personal ranker (learned from past selections) ────────────────
+    # Same survivors, different order: 100 × P(Renzo would pick it). Runs BEFORE burst dedup and
+    # the final cut so both keep the frame the ranker prefers.
+    if config.ranker_path:
+        from autocull.aprender import puntuar
+        with open(config.ranker_path, encoding="utf-8") as fh:
+            modelo = json.load(fh)
+        vivos = [r for r in all_results if r.get("decision") == "PASS" and r.get("tier2")]
+        if vivos:
+            for r, p in zip(vivos, puntuar(modelo, vivos)):
+                r["composite_score"] = r["final_score"]
+                r["final_score"] = round(float(p) * 100, 2)
 
     # ── Tier 5: Burst Deduplication (Group by time) ───────────────────
     # Get all passing photos

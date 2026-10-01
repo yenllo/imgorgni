@@ -117,9 +117,50 @@ FastAPI + UI single-page (vanilla JS en `static/`). Flujo **no destructivo**:
 - Threading: los workers **deben** correr con 1 thread por librería (`OMP/OPENBLAS/MKL/OPENCV_NUM_THREADS=1`),
   seteado tanto en `cli.py` (top-level) como en `init_worker()` — sin esto `np.fft.fft2` cuelga por
   thrashing (16 workers × 16 threads). No quitar esos setenv.
-- Pendiente conocido: la métrica global `snr_sharpness` puede **inflar fotos desenfocadas** (al desenfocar
-  cae el σ de ruido más rápido que el gradiente P95, así que el cociente P95/σ sube). El self-test de
-  `analyzers/sharpness.py` **falla a propósito** por esto: una checkerboard borrosa puntúa 1334 vs 580 la
-  nítida. No es una regresión — es el bug esperando arreglo. El sujeto local (peso 30%) lo compensa en parte.
-  Muy probablemente es lo que puso una foto movida (`DSC09526`) como top 1 de la final del 11/7: ver
-  `data/muestra_final_2026-07-11.json` y `TAREA_FABLE.md` en la raíz.
+- El viejo "σ medido infla las borrosas" **ya está arreglado** (σ sale del ISO; el self-test de
+  `sharpness.py` pasa: 3366 nítida vs 703 borrosa).
+
+## Selección editorial (1/10/2026)
+Medido contra `data/muestra_final_2026-07-11.json` (20 fotos de la final del 11/7 juzgadas a ciegas por 5
+jueces con el criterio de Instagram). Se mide con:
+```powershell
+& $AC -m autocull.evaluar_muestra <carpeta_con_las_20_fotos> [--ranker ranker.json]
+```
+| Código | Spearman(score, votos) | 0 votos en top 5 |
+|---|---|---|
+| antes | +0.002 | 3 |
+| + nitidez del sujeto sobre el cuerpo | +0.369 | 1 |
+| + pelota en el sujeto / tamaño del sujeto | +0.367 | 1 |
+
+- **Nitidez del sujeto sobre el CUERPO, no la caja** (`sharpness.body_mask`). A 2 MP la caja de un jugador
+  es mayormente fondo: el lienzo a cuadros "EX SCUOLA", la malla del arco. Eso es nítido y de alto
+  contraste, así que el P95 de la caja medía el FONDO. El top 1 de la final (`DSC09526`, jugador movido
+  delante del lienzo) daba 303 de "sujeto"; medido sobre el cuerpo da 181 y cae en `subject_out_of_focus`.
+  La máscara = polígono del torso + segmentos gruesos de extremidades + disco de la cabeza, desde los
+  keypoints de YOLO-pose. Con <4 keypoints visibles vuelve a la caja (comportamiento viejo).
+- **`composition_ball` paga por la pelota EN el protagonista** (`ball_on_subject`, la misma cercanía en
+  alturas de cuerpo que usa `pick_protagonist`), no por una pelota en cualquier lado (18 de 20 fotos tenían
+  una: no ordenaba nada). **`subject_fill`** (alto del protagonista vs medio cuadro) premia lo que aguanta un
+  recorte 4:5. `crop_potential` quedaba en 1.0 para todas (planos abiertos) y bajó a 0.05;
+  `detection_confidence` (nada editorial) a 0.05. En 20 fotos estas dos señales NO se pueden validar: el
+  número no se movió. Quedan por razón fotográfica; sus pesos reales deberían salir del ranker.
+- `pose.face_visible` tenía `min(1, a+b)/2`: tope 0.5, medio bono inalcanzable. Arreglado.
+- Pendiente visto: en el cabezazo (`DSC08997`) el protagonista elegido es el #10 de espalda, no el que salta.
+  `pick_protagonist` no sabe de "en el aire".
+
+## Ranker aprendido de selecciones pasadas (`autocull/aprender.py`)
+```powershell
+& $AC -m autocull aprender --par <carrete> <carpeta_seleccion> [--par ...] [--etiquetas x.csv] -o ranker.json
+& $AC -m autocull <carpeta> --dry-run --ranker ranker.json     # o run_pipeline(..., ranker="ranker.json")
+```
+- Positivos = fotos del carrete que están en la selección (cruce por nombre sin extensión ni " (2)";
+  si el nombre se repite en el carrete, desempata la fecha EXIF). Negativos = el resto que pasó los filtros
+  duros. `--etiquetas` (CSV `archivo,elegida`) manda sobre la carpeta: para lo que eligen los clientes.
+- Del carrete se excluyen las subcarpetas derivadas (`Seleccion*`, `Export*`, `Edicion*`, `Compras`,
+  `Marca de agua`, `Entrega*`): son copias de las elegidas, no el carrete crudo.
+- Regresión logística en numpy (sin dependencias nuevas), features en z-score DENTRO de cada carrete, peso
+  por clase. JSON legible con un peso por feature. Con ≥2 `--par` reporta precision@10/@30 dejando un
+  carrete afuera, contra el `final_score` actual: **ese número es el que dice si sirve**.
+- Con `--ranker`, el ranker reemplaza el compuesto como ORDEN de las sobrevivientes; filtros duros, dedup
+  de ráfagas y corte percentil siguen igual. El compuesto queda en `composite_score`.
+- Features cacheadas por carrete en `_autocull_aprender\` (gitignored). Si cambia el análisis, bórralo.

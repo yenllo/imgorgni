@@ -46,6 +46,7 @@ def main():
     parser.add_argument("--xmp", action="store_true", help="Generate XMP sidecars for Lightroom")
     parser.add_argument("--undo", action="store_true", help="Reverse the last move operation")
     parser.add_argument("--from-csv", type=str, help="Path to a previous autocull_report.csv to recalculate threshold instantly")
+    parser.add_argument("--ranker", type=str, default="", help="ranker.json de 'python -m autocull aprender': ordena con tu gusto aprendido")
     
     args = parser.parse_args()
     console = Console()
@@ -82,6 +83,7 @@ def main():
     config.min_persons = args.min_persons
     config.num_workers = args.workers
     config.yolo_backend = args.backend
+    config.ranker_path = args.ranker
     config.__post_init__()
 
     console.print(Panel.fit("🏟️ Autocull v1.0 — Night Sports Culling", style="bold blue"))
