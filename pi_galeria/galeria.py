@@ -3187,6 +3187,29 @@ def _trabajo(trabajo):
     return d, json.loads((d / "seleccion.json").read_text(encoding="utf-8-sig"))
 
 
+_EXT_RAW = (".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2")
+
+
+def _raw_de(jpeg):
+    """El RAW hermano de un JPEG del trabajo, o None. Renzo edita sobre el RAW (Denoise lo exige):
+    vive en <trabajo>/RAW/, en la misma subcarpeta de tarjeta (100MSDCF) o en la raiz de RAW/, con el
+    mismo nombre, incluido el ' (2)' de la segunda tarjeta."""
+    jpeg = Path(jpeg)
+    for trabajo in jpeg.parents:
+        crudo = trabajo / "RAW"
+        if crudo.is_dir():
+            break
+    else:
+        return None
+    for carpeta in (crudo / jpeg.parent.name, crudo):
+        for ext in _EXT_RAW:
+            for e in (ext, ext.upper()):
+                p = carpeta / (jpeg.stem + e)
+                if p.exists():
+                    return p
+    return None
+
+
 def _veredictos(d):
     try:
         return json.loads((d / "revision.json").read_text(encoding="utf-8"))
@@ -3248,18 +3271,26 @@ def revision_votar(trabajo, n):
     e = elegidas[n - 1]
     pasa = request.form.get("veredicto") == "pasa"
     v = _veredictos(d)
-    v[e["archivo"]] = {"pasa": pasa, "cuando": datetime.now().isoformat(timespec="seconds")}
+    anterior = (v.get(e["archivo"]) or {}).get("copia")
+    entrada = {"pasa": pasa, "cuando": datetime.now().isoformat(timespec="seconds")}
+    if pasa:
+        # A aprobadas/ va el RAW (Denoise de Lightroom solo trabaja sobre RAW); si no hay, el JPEG.
+        jpeg = _ruta_pi(e.get("original"))
+        fuente = _raw_de(jpeg) if jpeg is not None else None
+        fuente = fuente or jpeg
+        if fuente is not None and dentro_de_raiz(fuente) and fuente.exists():
+            nombre = Path(e["archivo"]).stem + fuente.suffix  # 01_DSC05000.ARW: conserva el orden
+            copia = d / "aprobadas" / nombre
+            if not copia.exists():
+                copia.parent.mkdir(exist_ok=True)
+                shutil.copy2(fuente, copia)
+            entrada["copia"] = nombre
+    elif anterior and (d / "aprobadas" / anterior).exists():
+        (d / "aprobadas" / anterior).unlink()  # es la copia que hizo este mismo panel, el original no se toca
+    v[e["archivo"]] = entrada
     tmp = d / "revision.json.tmp"
     tmp.write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, d / "revision.json")
-    copia = d / "aprobadas" / e["archivo"]
-    if pasa and not copia.exists():
-        ruta = _ruta_pi(e.get("original"))
-        if ruta is not None and dentro_de_raiz(ruta) and ruta.exists():
-            copia.parent.mkdir(exist_ok=True)
-            shutil.copy2(ruta, copia)
-    elif not pasa and copia.exists():
-        copia.unlink()  # es la copia que hizo este mismo panel, el original no se toca
     return jsonify(ok=True, pasa=pasa,
                    pasan=sum(1 for x in v.values() if x.get("pasa")),
                    faltan=len(elegidas) - len(v))
