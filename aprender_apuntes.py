@@ -40,6 +40,8 @@ def legible(ruta, carpeta, i):
     destino = carpeta / f"raw_{i:03d}.jpg"
     if not destino.exists():
         img = load_image(ruta)
+        if img is None:  # preview embebido danado (F6 2025: "Corrupt JPEG data"): se salta esa foto
+            return None
         h, w = img.shape[:2]
         f = 1200 / max(h, w)
         cv2.imwrite(str(destino), cv2.resize(img, (int(w * f), int(h * f))) if f < 1 else img)
@@ -64,6 +66,7 @@ def fecha(carrete, seleccion, previos):
             grupo = fotos[k:k + 9]
             archivo = f"{lado}_{k // 9 + 1}.jpg"
             rutas = [legible(p, carpeta, k + j + (0 if lado == "elegidas" else 500)) for j, p in enumerate(grupo)]
+            rutas = [r for r in rutas if r is not None]
             s.hoja(rutas, carpeta / archivo, [f"{lado[0].upper()}{k + j + 1}" for j in range(len(grupo))],
                    titulo=f"{'ELEGIDAS por Renato' if lado == 'elegidas' else 'NO elegidas (al azar)'} - {nombre}")
             hojas[lado].append(archivo)
