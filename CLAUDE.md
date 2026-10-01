@@ -81,9 +81,14 @@ Cada pagina de evento tiene el boton "★ Buscar las mejores (Autocull)". Corre
 Autocull sobre los JPEG del evento, muestra el avance y al terminar pone
 estrellas en cada miniatura, con filtros por cantidad de estrellas.
 
+- **El codigo de Autocull vive en `autocull/` de este proyecto** desde el 30/9/2026
+  (su guia: `autocull/CLAUDE.md`; modelos en `models/yolov8s*.onnx`). Repo privado:
+  `yenllo/imgorgni`, con `.gitignore` en lista blanca — para versionar algo nuevo hay que
+  habilitarlo ahi a proposito; la DB, backups, CSV y fotos nunca entran.
 - `autocull_runner.py` (en este proyecto) es el puente. Se ejecuta **con el python
-  del venv de Autocull** (`C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe`)
-  porque Autocull tiene sus propias dependencias pesadas. Va escribiendo el avance
+  del venv de Autocull** (`C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe`, que
+  sigue en la carpeta vieja porque un venv no se mueve) porque Autocull tiene sus
+  propias dependencias pesadas. Va escribiendo el avance
   a `_autocull_curador/<eid>.json`, que el curador poletea.
 - Se le agrego a Autocull un parametro `files=` en `run_pipeline()` para pasarle una
   lista explicita: las fotos de un evento viven desparramadas en varias carpetas de
