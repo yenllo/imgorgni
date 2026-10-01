@@ -31,3 +31,6 @@ __pycache__/
 *.backup*
 *.antes-*
 /autocull_report*.csv
+
+# edicion automatica de Lightroom (plugin)
+!/lightroom/
