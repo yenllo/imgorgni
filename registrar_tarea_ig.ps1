@@ -2,6 +2,9 @@
 # Con -Prueba ademas lanza YA una corrida sobre la final del 11/7 como tarea (fuera de cualquier sandbox).
 param([switch]$Prueba)
 $dir = $PSScriptRoot
+if (-not [Environment]::GetEnvironmentVariable("CLAUDE_CODE_OAUTH_TOKEN", "User")) {
+    Write-Warning "sin CLAUDE_CODE_OAUTH_TOKEN de usuario: la etapa de Claude va a fallar (claude setup-token + setx)"
+}
 $py = (Get-Command python).Source
 New-Item -ItemType Directory -Force (Join-Path $dir '_para_publicar') | Out-Null
 $set = New-ScheduledTaskSettingsSet -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 5) -DontStopOnIdleEnd

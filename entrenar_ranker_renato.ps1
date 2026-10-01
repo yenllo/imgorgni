@@ -8,6 +8,11 @@
 # Espera a que termine la prueba de seleccion_ig si esta corriendo, para no pelear por la CPU.
 
 $dir = $PSScriptRoot
+# setx solo llega a las terminales abiertas DESPUES; en una vieja, se lee del registro del usuario.
+if (-not $env:CLAUDE_CODE_OAUTH_TOKEN) {
+    $env:CLAUDE_CODE_OAUTH_TOKEN = [Environment]::GetEnvironmentVariable("CLAUDE_CODE_OAUTH_TOKEN", "User")
+}
+if (-not $env:CLAUDE_CODE_OAUTH_TOKEN) { Write-Warning "sin CLAUDE_CODE_OAUTH_TOKEN: los apuntes van a fallar (corre claude setup-token + setx)" }
 $AC = "C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe"
 $base = if (Test-Path "K:\Fotos\Galeria\Trabajo") { "K:" } else { "\\192.168.1.62\Fotos" }
 $L = "$base\Fotos\Galeria\Trabajo\Liga ExScuola"
