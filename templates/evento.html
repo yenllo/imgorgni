@@ -1,0 +1,409 @@
+{% extends "base.html" %}
+{% from "_celda.html" import celda %}
+{% from "_barra_orden.html" import barra_orden %}
+{% block title %}{{ titulo }} · Curador{% endblock %}
+
+{% block contenido %}
+{% if error == 'ciclo' %}
+<div class="panel" style="border-color:var(--alerta);color:var(--alerta)">
+  No se puede colgar este evento de uno de sus propios sub-eventos.
+</div>
+{% endif %}
+
+<p class="apagado" style="margin-top:0"><a href="{{ url_for('index') }}">← Eventos</a>
+  {% if padre %} / <a href="{{ url_for('evento', eid=padre.id) }}">{{ padre.name or padre.suggested_name or 'Evento ' ~ padre.id }}</a>{% endif %}
+</p>
+
+{% if hijos %}
+<div class="panel">
+  <div style="display:flex;gap:.8rem;align-items:baseline;flex-wrap:wrap">
+    <label style="margin:0">Sub-eventos ({{ hijos|length }})</label>
+    <span class="crece" style="flex:1"></span>
+    {# El interruptor: por defecto la grilla de abajo trae las fotos de toda la
+       rama. `solo=1` deja unicamente las puestas en este evento. #}
+    <a class="pill {{ '' if solo else 'ok' }}"
+       href="{{ url_for('evento', eid=ev.id) }}">Todas las fotos de la rama</a>
+    <a class="pill {{ 'ok' if solo else '' }}"
+       href="{{ url_for('evento', eid=ev.id, solo=1) }}">Solo las de este evento</a>
+  </div>
+
+  <div class="tarjetas" style="margin-top:.8rem">
+    {% for h in hijos %}
+    <a class="tarjeta" href="{{ url_for('evento', eid=h.id) }}">
+      {% if h.pid %}<img loading="lazy" src="{{ url_for('thumb', pid=h.pid) }}" alt="">
+      {% else %}<div style="height:135px;background:var(--linea)"></div>{% endif %}
+      <div class="cuerpo">
+        <b>{{ h.titulo }}</b>
+        <div class="apagado">
+          {{ (h.start_time or '')[:10] }}{% if h.end_time and h.end_time[:10] != (h.start_time or '')[:10] %} → {{ h.end_time[:10] }}{% endif %}
+          · {{ '{:,}'.format(h.n_total) }} fotos
+        </div>
+        <div style="margin-top:.4rem">
+          {% if h.nietos %}<span class="pill grupo">grupo · {{ h.nietos }} adentro</span>{% endif %}
+          {% if h.confirmado %}<span class="pill ok">revisado</span>{% endif %}
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="apagado" style="margin-top:.7rem">
+    {% if solo %}
+      Abajo hay solo las {{ '{:,}'.format(total) }} fotos puestas directamente en
+      este evento. Las de los sub-eventos no se cuentan.
+    {% else %}
+      Abajo estan las {{ '{:,}'.format(total) }} fotos de toda la rama: las de este
+      evento mas las de sus sub-eventos.
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<form class="panel" method="post" action="{{ url_for('guardar', eid=ev.id) }}">
+  <div class="campos">
+    <div style="grid-column:1/-1">
+      <label for="name">Nombre del evento</label>
+      <input type="text" id="name" name="name" value="{{ ev.name or ev.suggested_name or '' }}">
+      {% if ev.suggested_name %}<div class="apagado" style="margin-top:.25rem">
+        sugerido por la IA: {{ ev.suggested_name }}</div>{% endif %}
+    </div>
+    <div><label for="start_time">Desde</label>
+      <input type="text" id="start_time" name="start_time" value="{{ ev.start_time or '' }}"></div>
+    <div><label for="end_time">Hasta</label>
+      <input type="text" id="end_time" name="end_time" value="{{ ev.end_time or '' }}"></div>
+    <div><label for="coleccion">Colección</label>
+      <input type="text" id="coleccion" name="coleccion" value="{{ ev.coleccion or '' }}"
+             placeholder="ej. VDS 2025"></div>
+    <div><label for="coleccion_tipo">Tipo de colección</label>
+      <select id="coleccion_tipo" name="coleccion_tipo">
+        <option value="">—</option>
+        {% for t in ['viaje_estudio','trabajo','evento_fotografico','familia','proyecto'] %}
+          <option value="{{ t }}" {% if ev.coleccion_tipo==t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select></div>
+    {# Buscador en vez de un <select> de 600 opciones. El <select> real queda
+       oculto porque es el que viaja en el form; el input solo lo setea. #}
+    <div><label for="buscar_padre">Guardar dentro de</label>
+      <input type="text" id="buscar_padre" list="dl_padres" autocomplete="off"
+             placeholder="— suelto: no está dentro de nada —"
+             value="{% if padre %}{{ padre.name or padre.suggested_name or 'Evento ' ~ padre.id }} #{{ padre.id }}{% endif %}">
+      <datalist id="dl_padres">
+        {% for o in posibles_padres %}
+        <option value="{{ o.name or o.suggested_name or 'Evento ' ~ o.id }}{% if o.start_time %} ({{ o.start_time[:10] }}){% endif %} #{{ o.id }}"></option>
+        {% endfor %}
+      </datalist>
+      <select id="parent_id" name="parent_id" hidden>
+        <option value="">— evento suelto —</option>
+        {% for o in posibles_padres %}
+          <option value="{{ o.id }}" {% if ev.parent_id == o.id %}selected{% endif %}>{{ o.id }}</option>
+        {% endfor %}
+      </select>
+      <div class="apagado" style="margin-top:.25rem;font-size:.75rem">
+        las fotos siguen acá; el grupo solo las suma · vaciá el campo para soltarlo</div></div>
+    <div style="grid-column:1/-1"><label for="notas">Notas</label>
+      <textarea id="notas" name="notas" placeholder="Lo que el programa no puede saber…">{{ ev.notas or '' }}</textarea></div>
+  </div>
+  <div style="margin-top:.9rem;display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
+    <button>Guardar</button>
+    <label style="display:flex;gap:.4rem;align-items:center;text-transform:none;
+                  font-size:.9rem;color:var(--texto);margin:0">
+      <input type="checkbox" name="confirmado" style="width:auto"
+             {% if ev.confirmado %}checked{% endif %}> Marcar como revisado
+    </label>
+    <span class="crece"></span>
+    <span class="apagado">{{ '{:,}'.format(n) }} fotos · evento #{{ ev.id }}</span>
+  </div>
+</form>
+
+{% if ev.ocr_texto %}
+<div class="panel"><label>Texto detectado por OCR</label>
+  <div class="apagado">{{ ev.ocr_texto[:400] }}</div></div>
+{% endif %}
+
+<div class="panel" id="autocull">
+  <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap">
+    <button id="ac-correr" onclick="Autocull.correr()">★ Buscar las mejores (Autocull)</button>
+    <span class="apagado" id="ac-cartel">
+      analiza los {{ 'RAW' if formato == 'raw' else 'JPEG' }} del evento y los ordena por puntaje</span>
+    <span class="crece" style="flex:1"></span>
+    <span id="ac-tiempo" class="apagado"></span>
+  </div>
+  <div id="ac-barra" style="display:none;margin-top:.7rem">
+    <div style="height:6px;background:var(--linea);border-radius:3px;overflow:hidden">
+      <div id="ac-progreso" style="height:100%;width:0;background:var(--acento);transition:width .3s"></div>
+    </div>
+  </div>
+  <div id="ac-filtros" style="display:none;margin-top:.8rem;gap:.4rem;flex-wrap:wrap"></div>
+</div>
+
+<div class="panel" id="subir">
+  <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap">
+    <button id="sb-elegir" onclick="document.getElementById('sb-input').click()">
+      ↑ Subir fotos a este evento</button>
+    <input type="file" id="sb-input" multiple hidden
+           accept="image/jpeg,image/png,image/webp,image/tiff,.arw,.cr2,.cr3,.nef,.dng,.raf,.orf">
+    <span class="apagado" id="sb-cartel">o arrastrálas acá — van directo a este evento</span>
+    <span class="crece" style="flex:1"></span>
+    <span id="sb-estado" class="apagado"></span>
+  </div>
+  <div id="sb-barra" style="display:none;margin-top:.7rem">
+    <div style="height:6px;background:var(--linea);border-radius:3px;overflow:hidden">
+      <div id="sb-progreso" style="height:100%;width:0;background:var(--acento);transition:width .3s"></div>
+    </div>
+  </div>
+  <div id="sb-fallos" style="margin-top:.6rem;font-size:.88rem;color:#e0796f"></div>
+</div>
+
+<script>
+// De a una por pedido: Cloudflare corta cualquier request de mas de 100 MB,
+// asi que una fecha entera en un solo POST rebota siempre.
+const SB = {
+  eid: {{ ev.id }},
+  cola: [],
+
+  async mandar() {
+    const zona = document.getElementById('subir');
+    const est = document.getElementById('sb-estado');
+    const fallos = document.getElementById('sb-fallos');
+    const barra = document.getElementById('sb-barra');
+    const prog = document.getElementById('sb-progreso');
+    document.getElementById('sb-elegir').disabled = true;
+    fallos.textContent = '';
+    barra.style.display = 'block';
+    let ok = 0, mal = 0, repes = 0;
+
+    for (let i = 0; i < SB.cola.length; i++) {
+      est.textContent = `subiendo ${i + 1} de ${SB.cola.length}…`;
+      prog.style.width = (100 * i / SB.cola.length) + '%';
+      const d = new FormData();
+      d.append('archivo', SB.cola[i]);
+      try {
+        const r = await fetch(`/evento/${SB.eid}/subir`, {method: 'POST', body: d});
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) { ok++; if (j.repetida) repes++; }
+        else {
+          mal++;
+          const l = document.createElement('div');
+          l.textContent = j.error || (SB.cola[i].name + ': fallo');
+          fallos.appendChild(l);
+        }
+      } catch (e) {
+        mal++;
+        const l = document.createElement('div');
+        l.textContent = SB.cola[i].name + ': se corto la conexion';
+        fallos.appendChild(l);
+      }
+    }
+    prog.style.width = '100%';
+    let msg = `${ok} subidas`;
+    if (repes) msg += `, ${repes} ya estaban en el archivo`;
+    if (mal) msg += `, ${mal} fallaron`;
+    est.textContent = msg + ' — recargando…';
+    SB.cola = [];
+    if (ok) setTimeout(() => location.reload(), 1200);
+    else { document.getElementById('sb-elegir').disabled = false; barra.style.display = 'none'; }
+  }
+};
+
+document.getElementById('sb-input').onchange = e => {
+  SB.cola = [...e.target.files];
+  if (SB.cola.length) SB.mandar();
+};
+
+// arrastrar sobre el panel entero, no solo sobre el boton
+(() => {
+  const zona = document.getElementById('subir');
+  ['dragenter', 'dragover'].forEach(ev => zona.addEventListener(ev, e => {
+    e.preventDefault(); zona.style.outline = '2px dashed var(--acento)';
+  }));
+  ['dragleave', 'drop'].forEach(ev => zona.addEventListener(ev, e => {
+    e.preventDefault(); zona.style.outline = '';
+  }));
+  zona.addEventListener('drop', e => {
+    SB.cola = [...e.dataTransfer.files];
+    if (SB.cola.length) SB.mandar();
+  });
+})();
+</script>
+
+{{ barra_orden(vista, orden, q, desc, n, total, formato) }}
+
+<p class="apagado">
+  Click para seleccionar · Shift+click para un rango · <b>A</b> selecciona lo cargado · <b>Esc</b> limpia
+  · la selección se mantiene mientras scrolleás
+</p>
+
+<div class="rejilla" data-vista="{{ vista }}" data-orden="{{ orden }}" data-q="{{ q }}" data-desc="{{ 1 if desc else 0 }}" data-formato="{{ formato }}" data-eid="{{ ev.id }}">
+{% for f in fotos %}{{ celda(f) }}{% endfor %}
+</div>
+<div id="fin" class="apagado" style="text-align:center;padding:1.4rem"></div>
+
+<form method="post" action="{{ url_for('borrar_evento', eid=ev.id) }}"
+      onsubmit="return confirm('Borrar el evento «{{ titulo }}»? Las fotos NO se borran: quedan sin evento.')"
+      style="margin-top:2rem">
+  <button class="gris">Borrar este evento</button>
+  <span class="apagado">las fotos vuelven a «Sin evento», no se toca ningún archivo</span>
+</form>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> seleccionadas</b>
+  <select id="destino">
+    <option value="nuevo">→ Evento NUEVO…</option>
+    <option value="ninguno">→ Sacar de este evento</option>
+    <optgroup label="Mover a un evento existente">
+    {% for o in otros %}
+      <option value="{{ o.id }}">{{ (o.name or o.suggested_name or 'Evento ' ~ o.id) }}{% if o.start_time %} ({{ o.start_time[:10] }}){% endif %}</option>
+    {% endfor %}
+    </optgroup>
+  </select>
+  <input type="text" id="nombre" placeholder="nombre del evento nuevo">
+  <button onclick="aplicar()">Aplicar</button>
+  <button class="gris" onclick="Sel.basurero()">🗑 Al basurero</button>
+  <button class="gris" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))">Limpiar</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// El buscador de grupo escribe en el <select> oculto, que es el que se envia.
+// Campo vacio = soltar el evento. Texto sin "#id" = no cambia nada.
+document.addEventListener('DOMContentLoaded', () => {
+  const buscar = document.querySelector('#buscar_padre');
+  const campo = document.querySelector('#parent_id');
+  if(!buscar || !campo) return;
+  const sinc = () => {
+    const m = /#(\d+)\s*$/.exec(buscar.value);
+    campo.value = buscar.value.trim() === '' ? '' : (m ? m[1] : campo.value);
+  };
+  buscar.addEventListener('input', sinc);
+  buscar.addEventListener('change', sinc);
+});
+
+function aplicar(){
+  const d = document.querySelector('#destino').value;
+  const n = document.querySelector('#nombre').value;
+  Sel.mover(d, n);
+}
+
+// Autocull sobre este evento: lanza el análisis, sigue el avance y al terminar
+// deja filtrar la rejilla por estrellas. El puntaje es el percentil de la
+// propia sesión, así que "5 estrellas" siempre es el top de ESTE evento.
+window.Autocull = (function(){
+  const EID = {{ ev.id }};
+  const url = '/api/evento/' + EID + '/autocull';
+  // Sobre que corre: lo dice el filtro de la barra. Asi "priorizar el RAW" no
+  // es una politica escondida en el server, es lo que elegiste en la pagina.
+  const FORMATO = {{ (formato or 'jpeg')|tojson }};
+  let porFoto = {}, timer = null, filtro = null;
+  const $ = s => document.querySelector(s);
+
+  async function correr(){
+    $('#ac-correr').disabled = true;
+    $('#ac-cartel').textContent = 'arrancando…';
+    const r = await (await fetch(url + '?formato=' + FORMATO, {method:'POST'})).json();
+    if(!r.ok){
+      $('#ac-cartel').textContent = r.error || 'no se pudo arrancar';
+      $('#ac-correr').disabled = false;
+      return;
+    }
+    $('#ac-barra').style.display = '';
+    seguir();
+  }
+
+  function seguir(){
+    clearInterval(timer);
+    timer = setInterval(mirar, 1200);
+    mirar();
+  }
+
+  async function mirar(){
+    let d;
+    try { d = await (await fetch(url)).json(); } catch(e){ return; }
+    if(d.estado === 'sin_correr'){ clearInterval(timer); return; }
+    const t = d.segundos ? Math.round(d.segundos)+'s' : '';
+    $('#ac-tiempo').textContent = t;
+    if(d.estado === 'arrancando' || d.estado === 'corriendo'){
+      $('#ac-correr').disabled = true;
+      $('#ac-barra').style.display = '';
+      const pct = d.total ? (100*d.hechas/d.total) : 0;
+      $('#ac-progreso').style.width = pct + '%';
+      $('#ac-cartel').textContent = d.hechas.toLocaleString() + ' de ' +
+        d.total.toLocaleString() + ' fotos' + (d.hechas ? ' · ' + Math.round(pct) + '%' : '');
+    } else if(d.estado === 'error'){
+      clearInterval(timer);
+      $('#ac-correr').disabled = false;
+      $('#ac-barra').style.display = 'none';
+      $('#ac-cartel').textContent = 'error: ' + String(d.error||'').split('\n')[0];
+    } else if(d.estado === 'listo'){
+      clearInterval(timer);
+      $('#ac-correr').disabled = false;
+      $('#ac-barra').style.display = 'none';
+      $('#ac-correr').textContent = '★ Volver a analizar';
+      pintar(d.fotos || []);
+    }
+  }
+
+  function pintar(fotos){
+    porFoto = {};
+    const cuenta = [0,0,0,0,0,0];
+    fotos.forEach(f => { porFoto[f.id] = f; cuenta[f.estrellas]++; });
+    $('#ac-cartel').textContent = fotos.length.toLocaleString() + ' fotos analizadas';
+    const cajaF = $('#ac-filtros');
+    cajaF.style.display = 'flex';
+    const btn = (n, txt) =>
+      '<button class="gris" data-e="'+n+'" style="font-size:.85rem">'+txt+'</button>';
+    let html = btn('', 'todas ('+fotos.length.toLocaleString()+')');
+    for(let e=5; e>=1; e--) if(cuenta[e]) html += btn(e, '★'.repeat(e)+' ('+cuenta[e].toLocaleString()+')');
+    if(cuenta[0]) html += btn(0, 'descartadas ('+cuenta[0].toLocaleString()+')');
+    cajaF.innerHTML = html;
+    cajaF.querySelectorAll('button').forEach(b =>
+      b.onclick = () => elegir(b.dataset.e === '' ? null : +b.dataset.e));
+    marcar();
+  }
+
+  // Filtrar solo lo que el scroll ya trajo mostraba 1 de las 20 mejores: las
+  // buenas estan desparramadas entre miles. Con un filtro puesto se pide a la
+  // API justo esas fotos y se reemplaza la rejilla.
+  async function elegir(e){
+    filtro = e;
+    const grid = document.querySelector('.rejilla');
+    const fin = document.querySelector('#fin');
+    if(e === null){ location.reload(); return; }   // volver a la vista normal
+    const ids = Object.values(porFoto).filter(f => f.estrellas === e)
+                  .sort((a,b) => (b.puntaje||0)-(a.puntaje||0)).map(f => f.id);
+    fin.textContent = 'buscando ' + ids.length.toLocaleString() + ' fotos…';
+    const trozos = [];
+    for(let i=0; i<ids.length; i+=500) trozos.push(ids.slice(i, i+500));
+    const partes = await Promise.all(trozos.map(t =>
+      fetch('/api/fotos?ids=' + t.join(',')).then(r => r.json())));
+    const fotos = partes.flatMap(p => p.fotos);
+    grid.innerHTML = fotos.map(Sel.celdaHTML).join('');
+    fin.textContent = '— ' + fotos.length.toLocaleString() + ' con ' +
+                      (e ? e + ' estrella' + (e>1?'s':'') : 'descarte') + ' —';
+    marcar();
+  }
+
+  // La rejilla trae fotos de a poco con el scroll: se re-marca cada vez.
+  function marcar(){
+    document.querySelectorAll('.celda').forEach(c => {
+      const f = porFoto[c.dataset.id];
+      if(!f || c.querySelector('.ac-estrellas')) return;
+      const s = document.createElement('span');
+      s.className = 'ac-estrellas';
+      s.textContent = f.estrellas ? '★'.repeat(f.estrellas) : '✕';
+      s.title = 'puntaje ' + (f.puntaje ?? '?') + (f.motivo ? ' · ' + f.motivo : '');
+      c.querySelector('.marco').appendChild(s);
+      c.dataset.estrellas = f.estrellas;
+    });
+  }
+
+  // al entrar, si ya hay un análisis hecho o corriendo, retomarlo solo
+  document.addEventListener('DOMContentLoaded', () => {
+    seguir();
+    const grid = document.querySelector('.rejilla');
+    if(grid) new MutationObserver(marcar).observe(grid, {childList:true});
+  });
+  return {correr};
+})();
+</script>
+{% endblock %}

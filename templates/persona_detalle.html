@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ person.name or ('Persona ' ~ person.id) }} · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+  <a href="{{ url_for('personas') }}">← Volver a Personas</a>
+  <span class="crece"></span>
+  <input type="text" id="personName" value="{{ person.name or '' }}" placeholder="Añadir nombre..." style="width:260px">
+  <button onclick="guardarNombre()">Guardar</button>
+  <span id="saveStatus" class="apagado"></span>
+</div>
+
+<div class="panel">
+  <b>{{ fotos|length }} foto(s) con esta persona</b>
+  <span class="apagado">click en una foto para ver dónde está marcada y corregir nombres</span>
+</div>
+
+<div class="tarjetas">
+  {% for pid in fotos %}
+  <a class="tarjeta" href="{{ url_for('foto_caras', pid=pid, persona=person.id) }}">
+    <img loading="lazy" src="{{ url_for('thumb', pid=pid) }}" alt="">
+  </a>
+  {% endfor %}
+</div>
+
+<div class="paginas">
+  {% if page > 1 %}<a href="?page={{ page - 1 }}">← Anterior</a>{% endif %}
+  <span class="apagado">página {{ page }}</span>
+  {% if fotos|length == limit %}<a href="?page={{ page + 1 }}">Siguiente →</a>{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const pid = {{ person.id }};
+
+function guardarNombre() {
+  const nombre = document.getElementById("personName").value;
+  fetch("/api/persona/nombrar", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id: pid, nombre: nombre})
+  }).then(r => r.json()).then(data => {
+    // Si el nombre ya existía en otra persona, esta se fusionó ahí y el id
+    // actual quedó borrado -- seguir mostrando esta página lo dejaría en un
+    // link muerto apenas se recargue. Se manda a la página fusionada.
+    if (data.person_id && data.person_id !== pid) {
+      window.location.href = `/persona/${data.person_id}`;
+      return;
+    }
+    const status = document.getElementById("saveStatus");
+    status.innerText = "¡Guardado!";
+    setTimeout(() => status.innerText = "", 2000);
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Cuarentena · Curador{% endblock %}
+{% block contenido %}
+<div class="panel">
+  <h2 style="margin-top:0">{{ '{:,}'.format(movidos) }} archivos movidos a cuarentena</h2>
+  {% if fallos %}<p class="apagado">{{ fallos }} no se pudieron mover (en uso o inaccesibles).</p>{% endif %}
+  <p>Están en <code>{{ cuarentena }}</code>, con su ruta original reproducida adentro.
+     No se borró nada: revisalos y borrá la carpeta vos cuando estés seguro.</p>
+  <p class="apagado">Salieron de sus eventos, así que el próximo export ya no los incluye.</p>
+  <a class="boton" href="{{ url_for('duplicados') }}">Volver a duplicados</a>
+</div>
+{% endblock %}

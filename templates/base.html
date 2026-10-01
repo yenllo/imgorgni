@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Curador{% endblock %}</title>
+<style>
+  :root{
+    --bg:#faf9f7; --panel:#fff; --texto:#1c1a17; --suave:#6b655c;
+    --linea:#e3ded5; --acento:#b4531f; --acento-t:#fff; --ok:#2f6b3f; --alerta:#8a5a00;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#16151a; --panel:#1e1d23; --texto:#eceaf0; --suave:#9d97a6;
+           --linea:#33313b; --acento:#e0703a; --acento-t:#1a1109; --ok:#7fc98f; --alerta:#e0b055; }
+  }
+  :root[data-theme="dark"]{ --bg:#16151a; --panel:#1e1d23; --texto:#eceaf0; --suave:#9d97a6;
+    --linea:#33313b; --acento:#e0703a; --acento-t:#1a1109; --ok:#7fc98f; --alerta:#e0b055; }
+  :root[data-theme="light"]{ --bg:#faf9f7; --panel:#fff; --texto:#1c1a17; --suave:#6b655c;
+    --linea:#e3ded5; --acento:#b4531f; --acento-t:#fff; --ok:#2f6b3f; --alerta:#8a5a00; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--texto);
+       font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+  a{color:var(--acento)}
+  header{position:sticky;top:0;z-index:20;background:var(--panel);
+         border-bottom:1px solid var(--linea);padding:.7rem 1.1rem;
+         display:flex;gap:1.2rem;align-items:center;flex-wrap:wrap}
+  header h1{font-size:1.05rem;margin:0;letter-spacing:-.01em}
+  /* sin el wrap, los 8 links miden 524px y en el celular (375) empujaban la
+     pagina entera para el costado, en todas las pantallas */
+  header nav{display:flex;gap:.9rem;font-size:.9rem;flex-wrap:wrap}
+  .crece{flex:1}
+  .apagado{color:var(--suave);font-size:.85rem}
+  main{padding:1.1rem;max-width:1500px;margin:0 auto}
+
+  input,select,textarea,button{font:inherit;color:inherit}
+  input[type=text],input[type=search],select,textarea{
+    background:var(--bg);border:1px solid var(--linea);border-radius:6px;
+    padding:.42rem .6rem;width:100%}
+  textarea{min-height:70px;resize:vertical}
+  button,.boton{background:var(--acento);color:var(--acento-t);border:0;border-radius:6px;
+    padding:.45rem .9rem;cursor:pointer;font-weight:600;text-decoration:none;display:inline-block}
+  /* .boton.gris también: los enlaces con pinta de botón (pestañas, "Limpiar")
+     usaban esta clase y quedaban con el color de acento igual que el activo. */
+  button.gris,.boton.gris{background:transparent;color:var(--texto);
+    border:1px solid var(--linea);font-weight:500}
+  button.mini{background:transparent;border:1px solid var(--linea);padding:0 .35rem;
+    font-size:.8rem;line-height:1.5;margin-left:.35rem;vertical-align:middle}
+  button.mini:hover{border-color:#a32b2b}
+  button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--acento);outline-offset:2px}
+
+  .tarjetas{display:grid;gap:.9rem;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+  .tarjeta{background:var(--panel);border:1px solid var(--linea);border-radius:10px;
+           overflow:hidden;text-decoration:none;color:inherit;display:block}
+  .tarjeta img{width:100%;height:135px;object-fit:cover;display:block;background:var(--linea)}
+  .tarjeta .cuerpo{padding:.6rem .7rem}
+  .tarjeta b{display:block;font-size:.92rem;margin-bottom:.15rem}
+  .pill{display:inline-block;font-size:.7rem;padding:.1rem .45rem;border-radius:99px;
+        border:1px solid var(--linea);color:var(--suave);margin-right:.25rem}
+  .pill.ok{color:var(--ok);border-color:var(--ok)}
+  .pill.alerta{color:var(--alerta);border-color:var(--alerta)}
+
+  .rejilla{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .celda{position:relative;border-radius:6px;overflow:hidden;
+         border:2px solid transparent;cursor:pointer;background:var(--panel)}
+  .celda .marco{position:relative;aspect-ratio:1;background:var(--linea)}
+  .celda img{width:100%;height:100%;object-fit:cover;display:block}
+  .celda .nombre{font-size:.68rem;padding:.2rem .3rem 0;color:var(--suave);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+  .celda .meta{font-size:.63rem;padding:0 .3rem .2rem;color:var(--suave);opacity:.75;
+    white-space:nowrap;overflow:hidden}
+  .celda.sel{border-color:var(--acento)}
+  .celda.sel::after{content:"✓";position:absolute;top:3px;left:5px;color:var(--acento-t);
+    background:var(--acento);border-radius:99px;width:19px;height:19px;
+    font-size:.72rem;display:grid;place-items:center;font-weight:700}
+  .celda .lupa{position:absolute;bottom:3px;right:3px;background:#000a;color:#fff;
+    border-radius:4px;padding:0 .3rem;font-size:.72rem;text-decoration:none;opacity:0}
+  .celda:hover .lupa{opacity:1}
+  .ac-estrellas{position:absolute;top:3px;right:4px;background:#000b;color:#ffd75e;
+    font-size:.72rem;padding:.05rem .3rem;border-radius:4px;letter-spacing:-.5px}
+  .celda .fecha{position:absolute;bottom:3px;left:3px;background:#000a;color:#fff;
+    border-radius:4px;padding:0 .3rem;font-size:.68rem;opacity:0}
+  .celda:hover .fecha{opacity:1}
+
+  .barra{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:40;
+    background:var(--panel);border:1px solid var(--linea);border-radius:10px;
+    box-shadow:0 6px 24px #0003;padding:.6rem .8rem;display:none;gap:.55rem;
+    align-items:center;flex-wrap:wrap;max-width:94vw}
+  .barra.visible{display:flex}
+  .barra select{width:auto;min-width:180px;max-width:44vw}
+  .barra input[type=text]{width:190px}
+
+  /* Visor: la miniatura ya cacheada se muestra al instante y de fondo se carga
+     la vista de 1600px. Sin eso, por red se queda en negro varios segundos. */
+  .visor{position:fixed;inset:0;z-index:60;background:#000d;display:none;
+         align-items:center;justify-content:center}
+  .visor.abierto{display:flex}
+  .visor .lienzo{position:relative;width:100%;height:100%;
+                 display:flex;align-items:center;justify-content:center}
+  .visor img{max-width:100vw;max-height:100vh;object-fit:contain;display:block}
+  .visor img.previa{position:absolute;filter:blur(6px);transform:scale(1.02)}
+  .visor .cargando{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:#000b;color:#fff;padding:.4rem .8rem;border-radius:20px;font-size:.8rem}
+  .visor .info{position:absolute;left:0;right:0;bottom:0;padding:.7rem 1rem;
+    background:linear-gradient(transparent,#000c);color:#fff;font-size:.85rem;
+    display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+  .visor .info .crece{flex:1}
+  .visor .info a{color:#fff}
+  .visor .nav{position:absolute;top:0;bottom:0;width:22%;border:0;cursor:pointer;
+    background:transparent;color:#fff;font-size:2.4rem;opacity:0;transition:opacity .15s}
+  .visor .nav:hover{opacity:.85;background:#0004}
+  .visor .nav.izq{left:0}  .visor .nav.der{right:0}
+  .visor .cerrar{position:absolute;top:8px;right:12px;background:#000a;color:#fff;
+    border:0;border-radius:6px;font-size:1.3rem;line-height:1;padding:.3rem .6rem;cursor:pointer}
+  @media(max-width:768px){ .visor .nav{opacity:.5;font-size:2rem} }
+
+  .campos{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+  label{display:block;font-size:.78rem;color:var(--suave);margin-bottom:.2rem;
+        text-transform:uppercase;letter-spacing:.04em}
+  .panel{background:var(--panel);border:1px solid var(--linea);border-radius:10px;
+         padding:1rem;margin-bottom:1.1rem}
+  .paginas{display:flex;gap:.4rem;flex-wrap:wrap;margin:1rem 0;align-items:center}
+  .paginas a{padding:.25rem .55rem;border:1px solid var(--linea);border-radius:5px;
+             text-decoration:none;font-size:.85rem}
+  .paginas a.act{background:var(--acento);color:var(--acento-t);border-color:var(--acento)}
+  table{width:100%;border-collapse:collapse;font-size:.87rem}
+  td,th{text-align:left;padding:.3rem .5rem;border-bottom:1px solid var(--linea)}
+  /* En el celular la tabla no entra (509px de ancho en una pantalla de 375) y
+     quedaba cortada: la columna "A descartar" caia fuera y para verla habia
+     que arrastrar la pagina entera, nav incluido. Con esto scrollea sola. */
+  .tabla-scroll{overflow-x:auto}
+  .tabla-scroll table{min-width:32rem}
+
+  /* ---------------------------------------------------------------
+     Cabecera y barra lateral
+     --------------------------------------------------------------- */
+  header h1 a{color:inherit;text-decoration:none;font-weight:700}
+  header nav a{padding:.25rem .5rem;border-radius:6px;text-decoration:none;
+    color:var(--suave);white-space:nowrap}
+  header nav a:hover{background:var(--bg);color:var(--texto)}
+  header nav a.activo{background:var(--acento);color:var(--acento-t);font-weight:600}
+  .cabecera-pagina{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .icono{background:transparent;border:1px solid var(--linea);color:var(--texto);
+    font-size:1.1rem;line-height:1;padding:.35rem .55rem}
+  .solo-angosto{display:none}
+
+  /* El contenido manda; la barra es una columna fija que no se estira. */
+  .envoltorio{display:grid;grid-template-columns:minmax(0,1fr) 264px;
+    gap:1.1rem;max-width:1600px;margin:0 auto;padding:0 1.1rem;align-items:start}
+  main{padding:1.1rem 0;min-width:0}
+
+  #lateral{position:sticky;top:4.2rem;max-height:calc(100vh - 5rem);overflow-y:auto;
+    background:var(--panel);border:1px solid var(--linea);border-radius:10px;
+    padding:.8rem;margin-top:1.1rem}
+  #lateral h2{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--suave);margin:.9rem 0 .4rem}
+  #lateral h2:first-of-type{margin-top:.7rem}
+  .temas-lat{display:flex;flex-wrap:wrap;gap:.3rem}
+  .temas-lat.plegado{display:none}
+  h2.plegable{display:flex;align-items:center;gap:.4rem}
+  .pliegue{background:transparent;border:0;color:var(--suave);cursor:pointer;
+    padding:0 .2rem;font-size:.8rem;line-height:1;transition:transform .12s}
+  .pliegue.cerrado{transform:rotate(-90deg)}
+  .chip{font-size:.78rem;padding:.15rem .55rem;border-radius:99px;text-decoration:none;
+    border:1px solid var(--linea);color:var(--texto);text-transform:capitalize}
+  .chip:hover{border-color:var(--acento);color:var(--acento)}
+  .lista-ev{list-style:none;margin:0;padding:0}
+  .lista-ev a{display:block;padding:.3rem .4rem;border-radius:6px;text-decoration:none;
+    color:var(--texto)}
+  .lista-ev a:hover{background:var(--bg)}
+  .lista-ev a.activo{background:var(--acento);color:var(--acento-t)}
+  .lista-ev a.activo .ev-d{color:inherit;opacity:.8}
+  .ev-t{display:block;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ev-d{display:block;font-size:.72rem;color:var(--suave)}
+
+  /* Angosto: la barra se corre fuera de pantalla y entra con el boton ☰.
+     Sin esto, 400 eventos empujarian el contenido abajo de todo en el celular. */
+  @media (max-width:1000px){
+    .solo-angosto{display:inline-block}
+    .envoltorio{grid-template-columns:minmax(0,1fr)}
+    header nav{order:3;width:100%;overflow-x:auto;padding-bottom:.15rem}
+    #lateral{position:fixed;top:0;right:0;bottom:0;width:min(86vw,300px);z-index:40;
+      max-height:none;border-radius:0;margin:0;transform:translateX(100%);
+      transition:transform .18s ease}
+    body.lateral-abierto #lateral{transform:none;box-shadow:-8px 0 24px #0005}
+    body.lateral-abierto::after{content:"";position:fixed;inset:0;background:#0006;z-index:30}
+  }
+</style>
+</head>
+<body>
+{% set secciones = [
+  ('index','Eventos'), ('temas','Temas'), ('etiquetas','Etiquetas'), ('sin_evento','Sin evento'),
+  ('telefono','Teléfono'), ('duplicados','Duplicados'), ('personas','Personas'),
+  ('marca_de_agua','Marca de agua'), ('danadas','Dañadas'), ('basurero','Basurero')] %}
+<header>
+  <button class="icono solo-angosto" id="btn-lateral" aria-label="Mostrar eventos">☰</button>
+  <h1><a href="{{ url_for('index') }}">Curador</a></h1>
+  <nav>
+    {% for endpoint, texto in secciones %}
+      <a href="{{ url_for(endpoint) }}"
+         {% if request.endpoint == endpoint %}class="activo" aria-current="page"{% endif %}>{{ texto }}</a>
+    {% endfor %}
+  </nav>
+  <span class="crece"></span>
+  <div class="cabecera-pagina">{% block cabecera %}{% endblock %}</div>
+</header>
+
+<div class="envoltorio">
+  <main>{% block contenido %}{% endblock %}</main>
+
+  {% if barra_eventos is defined %}
+  <aside id="lateral">
+    <input type="search" id="filtro-lateral" placeholder="Filtrar eventos…" autocomplete="off">
+
+    {# Plegable: con 300+ eventos abajo, el bloque de temas se come la pantalla.
+       El estado queda en localStorage para que no se te vuelva a abrir solo. #}
+    <h2 class="plegable" id="cab-temas">
+      <button class="pliegue" id="btn-temas" aria-expanded="true"
+              title="plegar / desplegar">▾</button>
+      <a href="{{ url_for('temas') }}">Temas</a>
+      <a href="{{ url_for('etiquetas') }}" class="apagado">todas →</a>
+    </h2>
+    <div class="temas-lat" id="temas-lat">
+      {% for t in barra_temas %}
+        <a href="{{ url_for('tema', nombre=t) }}" class="chip">{{ t }}</a>
+      {% endfor %}
+      {% if not barra_temas %}
+        <a href="{{ url_for('temas') }}" class="apagado">sin temas visibles — crear uno →</a>
+      {% endif %}
+    </div>
+
+    <h2>Eventos <span class="apagado">({{ barra_eventos|length }})</span></h2>
+    <ul class="lista-ev">
+      {% for e in barra_eventos %}
+      <li data-nombre="{{ (e.t or '')|lower }}">
+        <a href="{{ url_for('evento', eid=e.id) }}"
+           {% if request.view_args and request.view_args.get('eid') == e.id %}class="activo"{% endif %}>
+          <span class="ev-t">{{ e.t or 'Evento ' ~ e.id }}</span>
+          <span class="ev-d">{{ e.d or '' }}{% if e.hijos %} · {{ e.hijos }} adentro{% endif %}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="apagado" id="sin-resultados" hidden>Nada coincide.</p>
+  </aside>
+  {% endif %}
+</div>
+
+<script>
+// Plegar el bloque de temas de la barra. Se recuerda entre paginas.
+(function(){
+  const btn = document.querySelector('#btn-temas');
+  const caja = document.querySelector('#temas-lat');
+  if(!btn || !caja) return;
+  const guardado = localStorage.getItem('temas-plegado') === '1';
+  const pintar = plegado => {
+    caja.classList.toggle('plegado', plegado);
+    btn.classList.toggle('cerrado', plegado);
+    btn.setAttribute('aria-expanded', String(!plegado));
+  };
+  pintar(guardado);
+  btn.addEventListener('click', ev => {
+    ev.preventDefault();
+    const plegado = !caja.classList.contains('plegado');
+    localStorage.setItem('temas-plegado', plegado ? '1' : '0');
+    pintar(plegado);
+  });
+})();
+
+// Selección de fotos: click, ctrl+click, shift+click para rango.
+window.Sel = (function(){
+  let ultima = null;
+  const sel = new Set();
+  function celdas(){ return [...document.querySelectorAll('.celda')]; }
+  function pinta(){
+    document.querySelectorAll('.celda').forEach(c=>
+      c.classList.toggle('sel', sel.has(+c.dataset.id)));
+    const barra = document.querySelector('.barra');
+    if(barra) barra.classList.toggle('visible', sel.size>0);
+    const n = document.querySelector('#cuenta');
+    if(n) n.textContent = sel.size;
+  }
+  function init(){
+    const grid = document.querySelector('.rejilla');
+    if(!grid) return;
+    // Delegación: un solo listener sirve también a las celdas que trae el scroll.
+    grid.addEventListener('click', ev=>{
+      const c = ev.target.closest('.celda');
+      if(!c || ev.target.closest('.lupa')) return;
+      ev.preventDefault();
+      const todas = celdas();
+      const i = todas.indexOf(c), id = +c.dataset.id;
+      if(ev.shiftKey && ultima!==null){
+        const [a,b] = [Math.min(ultima,i), Math.max(ultima,i)];
+        todas.slice(a,b+1).forEach(x=> sel.add(+x.dataset.id));
+      } else {
+        sel.has(id) ? sel.delete(id) : sel.add(id);
+        ultima = i;
+      }
+      pinta();
+    });
+    document.addEventListener('keydown', ev=>{
+      if(ev.target && ev.target.matches && ev.target.matches('input,textarea,select')) return;
+      if(ev.key==='Escape'){ sel.clear(); ultima=null; pinta(); }
+      if(ev.key==='a' && !ev.ctrlKey){ celdas().forEach(c=>sel.add(+c.dataset.id)); pinta(); }
+    });
+    // El boton se inyecta desde aca y no en cada plantilla: la barra de
+    // seleccion aparece en seis pantallas y en todas sirve bajar lo marcado.
+    const barra = document.querySelector('.barra');
+    if(barra) barra.insertAdjacentHTML('beforeend',
+      '<button class="gris" onclick="Sel.descargar()">⬇ Descargar</button>');
+    scrollInfinito(grid);
+    pinta();
+  }
+
+  // Trae el siguiente tramo cuando el centinela entra en pantalla. Así la
+  // selección nunca se pierde: no se cambia de página.
+  function scrollInfinito(grid){
+    const fin = document.querySelector('#fin');
+    if(!fin) return;
+    const cfg = grid.dataset;
+    let offset = celdas().length, cargando = false, agotado = false;
+    const obs = new IntersectionObserver(async ent=>{
+      if(!ent[0].isIntersecting || cargando || agotado) return;
+      cargando = true;
+      fin.textContent = 'cargando…';
+      const q = new URLSearchParams({vista:cfg.vista, orden:cfg.orden||'fecha',
+                                     q:cfg.q||'', desc:cfg.desc||'0',
+                                     formato:cfg.formato||'', offset});
+      if(cfg.eid) q.set('eid', cfg.eid);
+      try{
+        const {fotos} = await (await fetch('/api/fotos?'+q)).json();
+        if(!fotos.length){ agotado = true; fin.textContent = '— fin —'; return; }
+        grid.insertAdjacentHTML('beforeend', fotos.map(celdaHTML).join(''));
+        offset += fotos.length;
+        fin.textContent = '';
+        pinta();
+      } catch(e){ fin.textContent = 'error al cargar'; }
+      finally{ cargando = false; }
+    }, {rootMargin:'900px'});
+    obs.observe(fin);
+  }
+
+  function esc(s){ return String(s).replace(/[&<>"]/g, c=>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  function celdaHTML(f){
+    return '<div class="celda" data-id="'+f.id+'" title="'+esc(f.ruta)+'">'
+      + '<div class="marco"><img loading="lazy" src="/thumb/'+f.id+'" alt="">'
+      + '<a class="lupa" href="/full/'+f.id+'" target="_blank">ver</a>'
+      + (f.hora ? '<span class="fecha">'+esc(f.hora)+'</span>' : '')
+      + '</div><div class="nombre">'+esc(f.nombre)+'</div>'
+      + (f.meta ? '<div class="meta">'+esc(f.meta)+'</div>' : '')
+      + '</div>';
+  }
+  async function mover(destino, nombre){
+    if(!sel.size) return;
+    const r = await fetch('/api/mover', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ids:[...sel], destino, nombre})
+    });
+    const j = await r.json();
+    if(!j.ok){ alert(j.error || 'Error'); return; }
+    if(destino==='nuevo' && j.evento){ location.href = '/evento/'+j.evento; return; }
+    location.reload();
+  }
+  // Navegacion con un form de verdad, no fetch: el ZIP puede pesar GB y con
+  // fetch habria que meterlo entero en memoria del navegador antes de guardarlo.
+  function descargar(){
+    if(!sel.size) return;
+    if(!confirm('Descargar ' + sel.size + ' foto(s) en un ZIP?\n\n'
+        + 'Se leen los originales del disco (el RAW si la foto lo tiene). '
+        + 'Con el disco en la Pi puede tardar bastante.')) return;
+    const grid = document.querySelector('.rejilla');
+    const f = document.createElement('form');
+    f.method = 'POST'; f.action = '/descargar/zip'; f.style.display = 'none';
+    const add = (n,v)=>{ const i=document.createElement('input'); i.name=n; i.value=v; f.appendChild(i); };
+    add('ids', [...sel].join(','));
+    if(grid && grid.dataset.eid) add('eid', grid.dataset.eid);
+    document.body.appendChild(f); f.submit(); f.remove();
+  }
+  async function basurero(restaurar){
+    if(!sel.size) return;
+    if(!restaurar && !confirm('Mandar ' + sel.size + ' foto(s) al basurero?\n\n'
+        + 'Salen de su evento y de las demás pantallas. Los archivos NO se borran.')) return;
+    const r = await fetch('/api/basurero', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ids:[...sel], restaurar: !!restaurar})});
+    if((await r.json()).ok) location.reload();
+  }
+  // Saca la marca de dañada: el barrido de integridad se equivoca (un JPEG al
+  // que solo le falta el marcador de fin abre perfecto), y sin esto la unica
+  // salida era el basurero, que no es lo mismo que decir "esta sana".
+  async function sana(){
+    if(!sel.size) return;
+    // ojo: esta API pide `photo_ids`, no `ids` como /api/basurero
+    const r = await fetch('/api/danada', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({photo_ids:[...sel], danada: 0})});
+    const j = await r.json().catch(() => ({}));
+    if(j.ok) location.reload();
+    else alert('No se pudo: ' + (j.error || r.status));
+  }
+  // celdaHTML se expone para que el filtro por estrellas pueda repintar la
+  // rejilla con las fotos que pide a la API, sin duplicar el markup.
+  return {init, mover, basurero, descargar, sana, celdaHTML,
+          size:()=>sel.size, ids:()=>[...sel]};
+})();
+document.addEventListener('DOMContentLoaded', Sel.init);
+
+// Visor tipo galería: click en "ver" abre acá mismo, flechas para moverse.
+window.Visor = (function(){
+  let caja, previa, grande, cargando, info, i = -1;
+  // Normalmente recorre las celdas de la rejilla. `lista` lo deja recorrer un
+  // conjunto dado a mano —el grupo del repaso, por ejemplo— sin que esas fotos
+  // tengan que existir como celdas en el DOM.
+  let lista = null;          // [{id, nombre, mini}] o null = usar la rejilla
+  let acciones = [];         // botones extra en la barra, con su tecla
+
+  function celdas(){ return [...document.querySelectorAll('.celda')]; }
+  function items(){
+    if(lista) return lista;
+    return celdas().map(c => ({
+      id: c.dataset.id,
+      nombre: (c.title || '').split('\\').pop(),
+      mini: (c.querySelector('img') || {}).src}));
+  }
+
+  function armar(){
+    caja = document.createElement('div');
+    caja.className = 'visor';
+    caja.innerHTML =
+      '<div class="lienzo">'+
+        '<img class="previa" alt="">'+
+        '<img class="grande" alt="">'+
+        '<div class="cargando">cargando…</div>'+
+      '</div>'+
+      '<button class="nav izq" title="Anterior (←)">‹</button>'+
+      '<button class="nav der" title="Siguiente (→)">›</button>'+
+      '<button class="cerrar" title="Cerrar (Esc)">✕</button>'+
+      '<div class="info"><span class="nombre"></span><span class="crece"></span>'+
+        '<span class="extras"></span>'+
+        '<span class="pos"></span><a class="orig" target="_blank">ver original</a>'+
+        '<a class="bajar">⬇ descargar</a></div>';
+    document.body.appendChild(caja);
+    previa   = caja.querySelector('.previa');
+    grande   = caja.querySelector('.grande');
+    cargando = caja.querySelector('.cargando');
+    info     = caja.querySelector('.info');
+    caja.querySelector('.izq').onclick = e => { e.stopPropagation(); mover(-1); };
+    caja.querySelector('.der').onclick = e => { e.stopPropagation(); mover(1); };
+    caja.querySelector('.cerrar').onclick = cerrar;
+    // click en el fondo (no en la imagen ni en la info) cierra
+    caja.querySelector('.lienzo').onclick = e => { if(e.target.tagName!=='IMG') cerrar(); };
+  }
+
+  function abrir(idx){
+    if(!caja) armar();
+    caja.classList.add('abierto');
+    document.body.style.overflow = 'hidden';
+    pintar(idx);
+  }
+
+  /** Abre un conjunto propio. `acs` son botones extra: {texto, tecla, fn}.
+   *  La fn recibe el id de la foto que estas mirando en ese momento. */
+  function abrirLista(fotos, idx, acs){
+    lista = (fotos && fotos.length) ? fotos : null;
+    acciones = acs || [];
+    if(!caja) armar();
+    pintarAcciones();
+    abrir(idx || 0);
+  }
+
+  function pintarAcciones(){
+    const cont = caja.querySelector('.extras');
+    if(!cont) return;
+    cont.innerHTML = '';
+    for(const a of acciones){
+      const b = document.createElement('button');
+      b.className = 'gris';
+      b.style.cssText = 'padding:.2rem .55rem;font-size:.82rem';
+      b.textContent = a.texto + (a.tecla ? ' (' + a.tecla.toUpperCase() + ')' : '');
+      b.onclick = ev => { ev.stopPropagation(); const it = items()[i]; a.fn(it && it.id); };
+      cont.appendChild(b);
+    }
+  }
+
+  function cerrar(){
+    caja.classList.remove('abierto');
+    document.body.style.overflow = '';
+    grande.src = previa.src = '';
+    i = -1;
+    lista = null; acciones = [];
+    const ex = caja.querySelector('.extras');
+    if(ex) ex.innerHTML = '';
+  }
+  function mover(paso){
+    const n = items().length;
+    if(!n) return;
+    pintar((i + paso + n) % n);   // se da la vuelta en los extremos
+  }
+
+  function pintar(idx){
+    const todas = items();
+    const c = todas[idx];
+    if(!c) return;
+    i = idx;
+    const id = c.id;
+    // la miniatura ya está en el navegador: se ve al instante mientras carga
+    previa.src = c.mini || ('/thumb/' + id);
+    previa.style.display = '';
+    cargando.style.display = '';
+    grande.style.visibility = 'hidden';
+    const lista = () => {
+      cargando.style.display = 'none';
+      previa.style.display = 'none';
+      grande.style.visibility = '';
+    };
+    grande.onload = lista;
+    grande.onerror = () => { cargando.textContent = 'no se pudo cargar'; };
+    cargando.textContent = 'cargando…';
+    grande.src = '/vista/' + id;
+    // si el navegador ya la tenia en cache, 'load' no vuelve a dispararse y la
+    // previa borrosa se quedaba tapando la foto nitida para siempre
+    if (grande.complete && grande.naturalWidth) lista();
+    info.querySelector('.nombre').textContent = c.nombre || '';
+    info.querySelector('.pos').textContent = (idx+1) + ' / ' + todas.length;
+    info.querySelector('.orig').href = '/full/' + id;
+    info.querySelector('.bajar').href = '/descargar/' + id;   // el RAW si lo tiene
+    // adelantar la siguiente: por red cada vista tarda, y así el ← → fluye
+    const sig = todas[(idx+1) % todas.length];
+    if(sig && sig !== c) new Image().src = '/vista/' + sig.id;
+  }
+
+  let iniciado = false;
+
+  function init(){
+    // El teclado se engancha SIEMPRE, aunque no haya rejilla: el repaso abre el
+    // visor a mano con abrirLista() y ahi las teclas tienen que andar igual.
+    // Antes esto estaba despues del `if(!grid) return` y en el repaso el visor
+    // se abria pero no respondia a ninguna tecla.
+    // La guarda es porque init() esta exportado: llamarlo dos veces enganchaba
+    // el teclado dos veces y cada flecha saltaba de a dos fotos.
+    if(iniciado) return;
+    iniciado = true;
+    const grid = document.querySelector('.rejilla');
+    if(grid) grid.addEventListener('click', ev=>{
+      const lupa = ev.target.closest('.lupa');
+      if(!lupa) return;
+      ev.preventDefault(); ev.stopPropagation();
+      abrir(celdas().indexOf(ev.target.closest('.celda')));
+    });
+    document.addEventListener('keydown', ev=>{
+      if(!caja || !caja.classList.contains('abierto')) return;
+      // ojo con .matches: el target puede ser el propio document, que no lo tiene
+      if(ev.target && ev.target.matches && ev.target.matches('input,textarea,select')) return;
+      // Las acciones extra ganan: en el repaso, S y N contestan sin salir.
+      const k = ev.key.toLowerCase();
+      const acc = acciones.find(a => a.tecla && a.tecla.toLowerCase() === k);
+      if(acc){ ev.stopImmediatePropagation(); ev.preventDefault();
+               const it = items()[i]; acc.fn(it && it.id); return; }
+      if(ev.key==='Escape'){ ev.stopImmediatePropagation(); cerrar(); }
+      else if(ev.key==='ArrowLeft')  mover(-1);
+      else if(ev.key==='ArrowRight') mover(1);
+      // V: el original, en otra pestaña. El visor muestra 1600px, que alcanza
+      // para elegir; para mirar el grano de verdad hace falta el archivo.
+      else if(k === 'v'){
+        const a = info && info.querySelector('.orig');
+        if(a && a.href) window.open(a.href, '_blank', 'noopener');
+      }
+      else return;
+      ev.preventDefault();
+    }, true);   // captura: el Esc tiene que cerrar el visor antes que limpiar la selección
+  }
+  return {init, abrir, abrirLista, cerrar,
+          get abierto(){ return !!caja && caja.classList.contains('abierto'); }};
+})();
+document.addEventListener('DOMContentLoaded', Visor.init);
+</script>
+<script>
+// Barra lateral: filtro y, en pantalla angosta, abrir/cerrar.
+(function(){
+  const caja = document.querySelector('#filtro-lateral');
+  const btn  = document.querySelector('#btn-lateral');
+  const aside = document.querySelector('#lateral');
+  if(btn && aside){
+    btn.addEventListener('click', () => {
+      const abierto = document.body.classList.toggle('lateral-abierto');
+      btn.setAttribute('aria-expanded', abierto);
+      if(abierto && caja) caja.focus();
+    });
+    // Tocar fuera cierra: el ::after del overlay no recibe clicks, asi que
+    // se escucha en el documento y se ignora lo que caiga dentro de la barra.
+    document.addEventListener('click', ev => {
+      if(!document.body.classList.contains('lateral-abierto')) return;
+      if(aside.contains(ev.target) || btn.contains(ev.target)) return;
+      document.body.classList.remove('lateral-abierto');
+    });
+  }
+  if(!caja) return;
+  const filas = [...document.querySelectorAll('.lista-ev li')];
+  const vacio = document.querySelector('#sin-resultados');
+  caja.addEventListener('input', () => {
+    const q = caja.value.trim().toLowerCase();
+    let vistos = 0;
+    for(const li of filas){
+      const ok = !q || li.dataset.nombre.includes(q);
+      li.hidden = !ok;
+      if(ok) vistos++;
+    }
+    if(vacio) vacio.hidden = vistos > 0;
+  });
+  // Escape limpia el filtro sin borrar la seleccion de fotos de la pagina.
+  caja.addEventListener('keydown', ev => {
+    if(ev.key === 'Escape' && caja.value){ ev.stopPropagation(); caja.value=''; caja.dispatchEvent(new Event('input')); }
+  });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_celda.html" import celda %}
+{% from "_barra_orden.html" import barra_orden %}
+{% block title %}Basurero · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel">
+  <b style="font-size:1.3rem">{{ '{:,}'.format(n) }}</b>
+  <span class="apagado">fotos en el basurero</span>
+  <div class="apagado" style="margin-top:.4rem">
+    Están fuera de todo evento y no aparecen en ninguna otra pantalla,
+    pero <b>los archivos siguen intactos en el disco</b>.
+    Este es el único lugar donde se pueden borrar de verdad.
+  </div>
+  {% if total %}
+  <div style="margin-top:.7rem">
+    <button onclick="borrarTodo()" style="background:#a32b2b;color:#fff">
+      🗑 Borrar TODO el basurero definitivamente ({{ '{:,}'.format(total) }})</button>
+  </div>
+  {% endif %}
+</div>
+
+{% if not fotos and not q %}
+  <p class="apagado">El basurero está vacío. Se manda acá desde «Eventos» o «Sin evento»,
+     seleccionando fotos y usando 🗑 Al basurero.</p>
+{% endif %}
+
+{{ barra_orden(vista, orden, q, desc, n, total, formato) }}
+
+<p class="apagado">
+  Click para seleccionar · Shift+click para un rango · <b>A</b> selecciona lo cargado · <b>Esc</b> limpia
+</p>
+
+<div class="rejilla" data-vista="{{ vista }}" data-orden="{{ orden }}" data-q="{{ q }}" data-desc="{{ 1 if desc else 0 }}" data-formato="{{ formato }}">
+{% for f in fotos %}{{ celda(f) }}{% endfor %}
+</div>
+<div id="fin" class="apagado" style="text-align:center;padding:1.4rem"></div>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> seleccionadas</b>
+  <button class="gris" onclick="restaurar()">↩ Restaurar</button>
+  <button onclick="borrarDefinitivo()" style="background:#a32b2b;color:#fff">
+    Borrar definitivamente</button>
+  <button class="gris" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))">Limpiar</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function restaurar(){ await Sel.basurero(true); }
+
+async function borrarDefinitivo(){
+  const n = Sel.size();
+  if(!n) return;
+  if(!confirm('¿Seguro que querés BORRAR ' + n + ' foto(s) del disco?\n\n'
+      + 'Esta acción NO se puede deshacer: los archivos se eliminan definitivamente.')) return;
+  if(!confirm('Confirmá una vez más.\n\n' + n + ' archivo(s) se van a borrar para siempre.')) return;
+  const r = await fetch('/api/basurero/borrar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids: Sel.ids()})});
+  const j = await r.json();
+  alert(j.borrados + ' borradas del disco de verdad'
+      + (j.ya_no_estaba ? '\n' + j.ya_no_estaba + ' ya no estaban en su ruta (no liberaron espacio)' : '')
+      + (j.fallos ? '\n' + j.fallos + ' no se pudieron borrar' : ''));
+  location.reload();
+}
+
+async function borrarTodo(){
+  const n = {{ total }};
+  if(!confirm('¿Seguro que querés BORRAR las ' + n + ' fotos del basurero del disco?\n\n'
+      + 'Esta acción NO se puede deshacer: TODO el basurero se elimina definitivamente.')) return;
+  if(!confirm('Última confirmación.\n\n' + n + ' archivo(s) se van a borrar para siempre.')) return;
+  const r = await fetch('/api/basurero/borrar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({todo: true})});
+  const j = await r.json();
+  alert(j.borrados + ' borradas del disco de verdad'
+      + (j.ya_no_estaba ? '\n' + j.ya_no_estaba + ' ya no estaban en su ruta (no liberaron espacio)' : '')
+      + (j.fallos ? '\n' + j.fallos + ' no se pudieron borrar' : ''));
+  location.reload();
+}
+</script>
+{% endblock %}

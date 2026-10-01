@@ -1,0 +1,10 @@
+# Cuando aparece la particion del 8TB (por UUID, no por letra de dispositivo,
+# que cambia entre sda y sdb segun el orden de enumeracion), disparar el
+# montaje y levantar Samba y la galeria.
+#
+# udev avisa en el instante en que el kernel ve el dispositivo. No hace falta
+# ningun demonio consultando cada N segundos.
+#
+# Recargar tras editar:  sudo udevadm control --reload
+
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="60D260D2D260ADCA", TAG+="systemd", ENV{SYSTEMD_WANTS}="montar-disco.service"

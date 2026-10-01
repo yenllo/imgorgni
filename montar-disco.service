@@ -1,0 +1,13 @@
+[Unit]
+Description=Montar el 8TB y levantar los servicios al conectarlo
+# Que no corra antes de que el sistema base este listo: al arrancar, udev
+# dispara esto muy temprano y smbd todavia no tiene red.
+After=local-fs.target network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/montar-disco
+# El disco recien enchufado tarda un instante en estar listo del todo.
+ExecStartPre=/bin/sleep 3
+StandardOutput=journal
+StandardError=journal

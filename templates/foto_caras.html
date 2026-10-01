@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Nombrar caras · Curador{% endblock %}
+
+{% block cabecera %}
+<style>
+  .foto-wrap{position:relative;display:inline-block;max-width:100%;line-height:0}
+  .foto-wrap img{max-width:100%;height:auto;display:block;border-radius:8px}
+  .carabox{position:absolute;border:2px solid var(--acento);border-radius:4px;cursor:pointer;box-sizing:border-box}
+  .carabox.con-nombre{border-color:var(--ok)}
+  .carabox.yo{border-color:#2f9e44;border-width:3px}
+  .carabox.otro{border-color:#e08a1e}
+  .carabox .etq{position:absolute;bottom:100%;left:-2px;background:var(--acento);color:var(--acento-t);
+    font-size:.72rem;padding:.05rem .35rem;border-radius:4px 4px 0 0;white-space:nowrap}
+  .carabox.con-nombre .etq{background:var(--ok)}
+  .carabox.yo .etq{background:#2f9e44;color:#fff}
+  .carabox.otro .etq{background:#e08a1e;color:#1a1109}
+  .carabox .form{position:absolute;top:0;left:0;background:var(--panel);border:1px solid var(--linea);
+    border-radius:6px;padding:.4rem;display:flex;gap:.3rem;z-index:10;box-shadow:0 4px 14px #0006;min-width:190px}
+  .carabox .form input{width:150px}
+</style>
+{% endblock %}
+
+{% block contenido %}
+<div class="panel" style="display:flex;gap:.6rem;align-items:center">
+  <a href="javascript:history.back()">← Volver</a>
+  <span class="crece"></span>
+  {% if persona_actual %}
+    <span class="pill" style="border-color:#2f9e44;color:#2f9e44">verde = esta persona</span>
+    <span class="pill" style="border-color:#e08a1e;color:#e08a1e">naranja = otras caras</span>
+  {% endif %}
+  <span class="apagado">{{ caras|length }} cara(s) detectada(s) · click en una cara para ponerle nombre</span>
+</div>
+
+<div class="foto-wrap" id="wrap">
+  <img id="foto" src="{{ url_for('full', pid=pid) }}" alt="">
+</div>
+
+<datalist id="nombres">
+  {% for n in nombres %}<option value="{{ n }}">{% endfor %}
+</datalist>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const caras = {{ caras|tojson }};
+const personaActual = {{ (persona_actual if persona_actual else 'null')|tojson }};
+const wrap = document.getElementById('wrap');
+const img = document.getElementById('foto');
+
+function pintar(){
+  wrap.querySelectorAll('.carabox').forEach(b=>b.remove());
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const escala = img.clientWidth / w;
+  for(const cara of caras){
+    const [x1,y1,x2,y2] = cara.bbox;
+    const box = document.createElement('div');
+    let cls = 'carabox';
+    if(personaActual !== null && cara.person_id === personaActual) cls += ' yo';
+    else if(personaActual !== null) cls += ' otro';
+    else if(cara.name) cls += ' con-nombre';
+    box.className = cls;
+    box.style.left = (x1*escala) + 'px';
+    box.style.top = (y1*escala) + 'px';
+    box.style.width = ((x2-x1)*escala) + 'px';
+    box.style.height = ((y2-y1)*escala) + 'px';
+    box.dataset.faceId = cara.face_id;
+    const etq = document.createElement('div');
+    etq.className = 'etq';
+    etq.textContent = cara.name || '¿quién es?';
+    box.appendChild(etq);
+    box.addEventListener('click', ev => { ev.stopPropagation(); abrirForm(box, cara); });
+    wrap.appendChild(box);
+  }
+}
+
+function abrirForm(box, cara){
+  wrap.querySelectorAll('.form').forEach(f=>f.remove());
+  const form = document.createElement('div');
+  form.className = 'form';
+  form.innerHTML = `<input type="text" list="nombres" placeholder="nombre..." value="${cara.name || ''}">`
+    + `<button type="button">OK</button>`;
+  box.appendChild(form);
+  const input = form.querySelector('input');
+  input.focus(); input.select();
+  const guardar = () => asignar(cara, input.value.trim());
+  form.querySelector('button').addEventListener('click', guardar);
+  input.addEventListener('keydown', ev => { if(ev.key === 'Enter') guardar(); });
+  input.addEventListener('click', ev => ev.stopPropagation());
+}
+
+async function asignar(cara, nombre){
+  const r = await fetch('/api/cara/asignar', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({face_id: cara.face_id, nombre})
+  });
+  const j = await r.json();
+  if(!j.ok){ alert('No se pudo guardar'); return; }
+  cara.name = j.nombre;
+  cara.person_id = j.person_id;
+  if(nombre && !Array.from(document.getElementById('nombres').options).some(o=>o.value===nombre)){
+    const opt = document.createElement('option'); opt.value = nombre;
+    document.getElementById('nombres').appendChild(opt);
+  }
+  pintar();
+}
+
+document.addEventListener('click', () => wrap.querySelectorAll('.form').forEach(f=>f.remove()));
+if(img.complete) pintar(); else img.addEventListener('load', pintar);
+window.addEventListener('resize', pintar);
+</script>
+{% endblock %}

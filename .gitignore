@@ -1,0 +1,33 @@
+# LISTA BLANCA. Esta carpeta tiene photos_v2.db (3,5 GB), backups, caches, logs, CSV con
+# listados de archivos personales, fotos y secretos (.secret). Se ignora TODO y solo se
+# habilita el codigo. Para sumar algo nuevo, agregale un "!" aca a proposito.
+/*
+
+!/.gitignore
+!/*.py
+!/*.md
+!/*.ps1
+!/*.bat
+!/*.sh
+!/*.service
+!/*.rules
+
+# paquetes y carpetas de codigo
+!/autocull/
+!/templates/
+!/pi_ingesta/
+!/pi_galeria/
+!/Cotizador/
+!/data/
+
+# config del pipeline (rutas y parametros, sin claves)
+!/config*.json
+
+# nunca, aunque calce con lo de arriba
+__pycache__/
+*.pyc
+*.secret
+.secret
+*.backup*
+*.antes-*
+/autocull_report*.csv

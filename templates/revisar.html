@@ -1,0 +1,745 @@
+{% extends "base.html" %}
+{% block title %}¿Es {{ tag }}? · Curador{% endblock %}
+
+{% block contenido %}
+<p class="apagado" style="margin-top:0">
+  <a href="{{ url_for('etiquetas') }}">← Etiquetas</a> ·
+  <a href="{{ url_for('etiqueta', tag=tag) }}">ver todas las de «{{ tag }}»</a>
+</p>
+
+<div class="revisor">
+  {# Columna de lo ya respondido: la ultima arriba. Tocar una la corrige. #}
+  <aside class="hechas">
+    <h2>Verificadas</h2>
+    <ul id="lista-hechas"></ul>
+    <p class="apagado" id="ayuda-hechas">Tocá una para cambiarla de opinión.</p>
+  </aside>
+
+  <div class="centro">
+    {# Contra que comparar: que quiere decir la etiqueta y ejemplos ya resueltos.
+       Se pliega, porque despues de unas cuantas fotos ya no hace falta. #}
+    <div class="referencia" id="referencia" hidden>
+      <div class="ref-cab">
+        <button class="pliegue" id="btn-ref" title="plegar / desplegar">▾</button>
+        <b id="ref-trad"></b>
+        <span class="apagado" id="ref-ojo"></span>
+      </div>
+      <div id="ref-cuerpo"></div>
+    </div>
+
+    <div class="pregunta">
+      <span id="titulo">¿Esta foto es <b>{{ tag }}</b>?</span>
+      <span class="apagado" id="progreso">{{ hechas }} revisadas</span>
+    </div>
+    {# En una etiqueta de 88.922 fotos, el orden importa mas que la velocidad:
+       por fecha contestas 200 veces lo obvio antes de la primera dificil. #}
+    <div class="orden-repaso apagado">
+      empezar por:
+      <label><input type="radio" name="ordrep" value="dudosas" checked>
+        las dudosas <span class="apagado">— las que quedaron en el borde</span></label>
+      <label><input type="radio" name="ordrep" value="fecha"> por fecha</label>
+    </div>
+
+    {# Todas las del momento al mismo tamaño. Tocar una la saca del veredicto
+       del grupo y le da el suyo. #}
+    <div class="marco">
+      <div class="mosaico" id="mosaico"></div>
+      <div id="cargando" class="apagado">Buscando fotos sin revisar…</div>
+      <div id="listo" hidden>
+        <b>No queda ninguna sin revisar.</b>
+        <div class="apagado">Terminaste «{{ tag }}».</div>
+      </div>
+    </div>
+    <p class="nota-grupo apagado" id="nota-grupo" hidden></p>
+
+    <label class="conmutador">
+      <input type="checkbox" id="ver-caras" checked> mostrar las caras detectadas
+      <span class="apagado" id="cuenta-caras"></span>
+    </label>
+
+    <div class="botones">
+      <button class="no" onclick="responder(0)">← &nbsp; No<span id="n-no"></span></button>
+      <button class="si" onclick="responder(1)">Sí<span id="n-si"></span> &nbsp; →</button>
+    </div>
+    <button class="danada" onclick="marcarDanada()">↓ &nbsp; Está dañada</button>
+    {# Solo se ve en pantallas chicas: en el escritorio estan las flechas. #}
+    <p class="apagado solo-movil" style="text-align:center;margin:.4rem 0 0">
+      o arrastrá la foto: <b>→</b> sí · <b>←</b> no · <b>↓</b> dañada
+    </p>
+    <div class="apagado solo-teclado" style="text-align:center">
+      <b>←</b> no · <b>→</b> sí · <b>↓</b> dañada · <b>Z</b> deshacer ·
+      <b>V</b> ver en grande <span id="aviso-v"></span>
+      <div style="font-size:.8rem;opacity:.8">
+        en el visor: <b>← →</b> pasar entre las del grupo ·
+        <b>S</b> sí · <b>N</b> no · <b>D</b> dañada ·
+        <b>X</b> que esa sola vaya aparte · <b>Esc</b> salir</div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Ancho fijo, no max-width: <main> tiene `margin:0 auto` y en una grilla los
+     margenes auto le sacan el estirado, asi que se encoge a lo que mida el
+     contenido. Con max-width el mosaico se achicaba solo, y encima distinto
+     segun cuantas fotos tuviera el grupo. El 100% lo devuelve a fluido cuando
+     la ventana es mas angosta que 900. */
+  .revisor{display:grid;grid-template-columns:104px minmax(0,1fr);gap:1rem;
+    width:900px;max-width:100%;margin:0 auto}
+  .hechas h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--suave);margin:.2rem 0 .5rem}
+  /* flex:0 0 auto es lo que impide que se aplasten: en una columna flex con
+     altura limitada los items se encogen para entrar, y quedaban como tiras. */
+  .hechas ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.35rem;
+    max-height:74vh;overflow-y:auto;overflow-x:hidden}
+  .hechas li{flex:0 0 auto;position:relative;cursor:pointer;border-radius:6px;
+    overflow:hidden;border:2px solid transparent;line-height:0}
+  .hechas li img{width:100%;height:auto;aspect-ratio:1;object-fit:cover;display:block}
+  .hechas li.si{border-color:var(--ok)}
+  .hechas li.no{border-color:#a32b2b;opacity:.55}
+  .hechas li.dan{border-color:var(--alerta);opacity:.7}
+  .hechas li::after{content:"✓";position:absolute;top:2px;right:2px;color:#fff;
+    background:var(--ok);border-radius:99px;width:16px;height:16px;font-size:.6rem;
+    display:grid;place-items:center;line-height:1}
+  .hechas li.no::after{content:"✕";background:#a32b2b}
+  .hechas li.dan::after{content:"!";background:var(--alerta);color:#000}
+  .pregunta{display:flex;justify-content:space-between;align-items:baseline;
+    gap:1rem;font-size:1.15rem;margin-bottom:.6rem}
+
+  /* El marco tiene altura fija: es el presupuesto de espacio que se reparten
+     las fotos del grupo. Sin altura definida, una racha de 17 empujaria los
+     botones abajo de la pantalla. */
+  .marco{background:var(--panel);border:1px solid var(--linea);border-radius:12px;
+    height:var(--alto-marco,62vh);display:flex;align-items:center;
+    justify-content:center;overflow:hidden;padding:.5rem}
+  .marco.grande{--alto-marco:78vh}
+  /* Tantas columnas como haga falta: JS calcula cuantas y cuanto puede medir
+     cada foto. Las filas se reparten la altura en partes iguales — el 0 de
+     minmax(0,1fr) es lo que las deja encogerse en vez de desbordar. */
+  .mosaico{display:grid;gap:.4rem;width:100%;height:100%;
+    grid-template-columns:repeat(var(--cols,1),minmax(0,1fr));
+    grid-auto-rows:minmax(0,1fr);place-content:center;place-items:center}
+  .mosaico:empty{display:none}
+  .celda{display:flex;align-items:center;justify-content:center;
+    max-width:100%;max-height:100%;min-width:0;min-height:0}
+  /* El recuadro se ajusta a la foto, no a la celda: es inline-block y la imagen
+     de adentro tiene el tope en px que calculo JS. Asi el borde y el sello
+     quedan pegados a la imagen aunque sea vertical y la celda sea ancha. */
+  .cuadro{position:relative;display:inline-block;line-height:0;cursor:pointer;
+    border:2px solid transparent;border-radius:6px;transition:border-color .1s}
+  .cuadro img{display:block;max-width:100%;
+    max-height:var(--alto-celda,60vh);border-radius:4px}
+  .cuadro:hover{border-color:var(--suave)}
+  .marco.grupo .cuadro{border-color:var(--linea)}
+  .cuadro.no{border-color:#a32b2b;opacity:.45}
+  .cuadro.dan{border-color:var(--alerta);opacity:.6}
+  .cuadro.si{border-color:var(--ok)}
+  .cuadro[data-estado]::after{position:absolute;top:3px;right:3px;color:#fff;
+    border-radius:99px;width:18px;height:18px;font-size:.68rem;
+    display:grid;place-items:center;line-height:1}
+  .cuadro.no::after{content:"✕";background:#a32b2b}
+  .cuadro.dan::after{content:"!";background:var(--alerta);color:#000}
+  .cuadro.si::after{content:"✓";background:var(--ok)}
+  .nota-grupo{font-size:.82rem;margin:.4rem 0 0}
+  .orden-repaso{display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;
+    margin:-.3rem 0 .5rem;font-size:.82rem}
+  .orden-repaso label{display:inline-flex;gap:.25rem;align-items:center;
+    text-transform:none;letter-spacing:0;margin:0;color:var(--texto);cursor:pointer}
+  .orden-repaso input{width:auto;margin:0}
+  .referencia{background:var(--panel);border:1px solid var(--linea);border-radius:10px;
+    padding:.6rem .8rem;margin-bottom:.7rem}
+  .ref-cab{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+  .ref-cab b{text-transform:none;font-size:1rem}
+  .referencia .pliegue{background:transparent;border:0;color:var(--suave);cursor:pointer;
+    padding:0 .2rem;font-size:.8rem;line-height:1;transition:transform .12s}
+  .referencia .pliegue.cerrado{transform:rotate(-90deg)}
+  #ref-cuerpo.plegado{display:none}
+  .ref-fila{display:flex;align-items:center;gap:.5rem;margin-top:.5rem;flex-wrap:wrap}
+  .ref-et{font-size:.75rem;white-space:nowrap;padding:.05rem .4rem;border-radius:99px;
+    border:1px solid var(--linea);color:var(--suave)}
+  .ref-et.si{color:var(--ok);border-color:var(--ok)}
+  .ref-et.no{color:#a32b2b;border-color:#a32b2b}
+  .ref-tiras{display:flex;gap:.25rem;flex-wrap:wrap}
+  .ref-tiras img{width:52px;height:52px;object-fit:cover;border-radius:5px;
+    border:2px solid transparent;display:block}
+  .ref-tiras img.si{border-color:var(--ok)}
+  .ref-tiras img.no{border-color:#a32b2b;opacity:.6}
+  .ref-tiras img.modelo{border-color:var(--linea);opacity:.85}
+  .ref-tiras img{cursor:pointer}
+  .ref-tiras img:hover{outline:2px solid var(--acento);outline-offset:1px}
+  .ref-aviso{font-size:.78rem;color:var(--suave);margin:.5rem 0 0;font-style:italic}
+  /* Mirar una de las de referencia en grande, para poder corregirla. */
+  .ref-lupa{margin-top:.6rem;padding:.6rem;border:1px solid var(--linea);
+    border-radius:8px;display:flex;gap:.8rem;align-items:flex-start;flex-wrap:wrap}
+  .ref-lupa img{max-width:320px;max-height:240px;border-radius:6px;display:block}
+  .ref-lupa .cols{flex:1;min-width:170px}
+  .ref-lupa .acciones{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap}
+
+  /* Los cuadros de las caras se posicionan en % sobre la imagen, asi valen para
+     cualquier tamaño en que se muestre sin recalcular nada al redimensionar. */
+  .cajas{position:absolute;inset:0;pointer-events:none}
+  .cajas .caja{position:absolute;border:2px solid #4ea3ff;border-radius:3px;
+    box-shadow:0 0 0 1px #0008}
+  .cajas .caja span{position:absolute;top:-1.15rem;left:-2px;background:#4ea3ff;
+    color:#000;font-size:.62rem;padding:0 .25rem;border-radius:3px;white-space:nowrap}
+  .conmutador{display:flex;gap:.4rem;align-items:center;font-size:.85rem;
+    text-transform:none;letter-spacing:0;color:var(--texto);margin:.5rem 0 0}
+  .conmutador input{width:auto}
+  .botones{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin:.8rem 0 .5rem}
+  .botones button{padding:.9rem;font-size:1.05rem}
+  .botones .no{background:transparent;border:1px solid var(--linea);color:var(--texto)}
+  .botones .si{background:var(--ok);color:#fff}
+  .danada{width:100%;background:transparent;border:1px dashed var(--alerta);
+    color:var(--alerta);padding:.5rem;font-weight:500}
+  .danada:hover{background:var(--alerta);color:#000}
+  .marco.se-va{opacity:.25;transition:opacity .09s}
+  /* En el telefono la barra lateral se comia el ancho: la foto quedaba en
+     40x71 px. Abajo de 700px se pasa a una sola columna y las verificadas
+     bajan como tira horizontal, que ademas se toca mejor con el pulgar. */
+  @media(max-width:700px){
+    .revisor{display:flex;flex-direction:column;width:100%}
+    .centro{width:100%}
+    .marco{--alto-marco:46vh;padding:.25rem}
+    .pregunta{font-size:1rem;gap:.4rem}
+    .orden-repaso{margin:.1rem 0 .5rem}
+
+    /* Las verificadas pasan a una tira horizontal debajo de los botones. */
+    .hechas{order:9;margin-top:.8rem}
+    .hechas h2{margin:.6rem 0 .3rem}
+    .hechas ul{flex-direction:row;max-height:none;overflow-x:auto;
+      overflow-y:hidden;padding-bottom:.3rem;-webkit-overflow-scrolling:touch}
+    .hechas li{width:58px;flex:0 0 58px}
+    #ayuda-hechas{display:none}
+
+    /* Botones al alcance del pulgar y con area de toque de verdad. */
+    .botones{gap:.5rem;margin:.6rem 0 .4rem}
+    .botones button{padding:1.15rem .5rem;font-size:1.15rem}
+    .danada{padding:.7rem}
+    /* Los atajos de teclado no existen en el telefono. */
+    .solo-teclado{display:none}
+    .referencia{padding:.5rem .6rem}
+    .ref-tiras img{width:44px;height:44px}
+    .cuadro img{max-height:var(--alto-celda,44vh)}
+  }
+  /* Aviso del swipe: aparece al arrastrar y dice que va a pasar al soltar. */
+  .swipe-aviso{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+    z-index:70;background:#000c;color:#fff;padding:.6rem 1.1rem;border-radius:12px;
+    font-size:1.3rem;font-weight:600;pointer-events:none;opacity:0;
+    transition:opacity .1s}
+  .swipe-aviso.visible{opacity:1}
+  .swipe-aviso.si{background:var(--ok)}
+  .swipe-aviso.no{background:#a32b2b}
+  .solo-movil{display:none}
+  @media(max-width:700px){ .solo-movil{display:block} }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TAG = {{ tag|tojson }};
+// cola es una cola de GRUPOS: cada grupo es una racha del mismo momento (misma
+// hora al segundo + phash parecido). Un grupo de una sola foto llena el marco.
+let cola = [], quedan = 0, hechas = {{ hechas }}, ocupado = false;
+// Respuesta propia de una foto del grupo actual. Sin entrada = sigue al grupo.
+let excepciones = new Map();
+let ultimaMirada = null;      // sobre cual foto esta el mouse, para la tecla V
+// Todo lo ya contestado en esta sesion. El veredicto viaja sin esperar
+// respuesta —para no frenar el repaso— asi que si la cola se vacia antes de
+// que el server lo grabe, la proxima tanda vuelve a traer las mismas fotos.
+// Con esto se filtran, en vez de encolarlas dos veces.
+const respondidas = new Set();
+
+const $marco = document.querySelector('.marco');
+const $mosaico = document.querySelector('#mosaico');
+const $prog = document.querySelector('#progreso');
+const $lista = document.querySelector('#lista-hechas');
+const $nota = document.querySelector('#nota-grupo');
+
+// La miniatura de 320px ya esta generada para las 194.316 fotos; la vista de
+// 1600px casi nunca, y generarla lee el original entero de K: por red (14-25 MB).
+// Para decidir "¿es un gato?" alcanza la miniatura: se usa esa, y la grande solo
+// si la pedis con V.
+const chico = id => '/thumb/' + id;
+const grande = id => '/vista/' + id;
+const grupo = () => cola[0] || [];
+
+function ordenElegido(){
+  const s = document.querySelector('input[name=ordrep]:checked');
+  return s ? s.value : 'dudosas';
+}
+
+async function traer(){
+  const r = await fetch(`/api/revisar/${encodeURIComponent(TAG)}?orden=${ordenElegido()}`);
+  const j = await r.json();
+  // Fuera lo ya contestado y lo que ya esta esperando en la cola. Sin esto la
+  // misma foto aparecia de nuevo (en otro grupo, o sea en otro orden) y el
+  // contador se iba a negativo porque restaba de mas.
+  const encoladas = new Set(cola.flat().map(f => f.id));
+  const nuevos = j.grupos
+    .map(g => g.filter(f => !respondidas.has(f.id) && !encoladas.has(f.id)))
+    .filter(g => g.length);
+  cola = cola.concat(nuevos);
+  quedan = j.quedan;
+  cola.flat().slice(1, 24).forEach(f => { const i = new Image(); i.src = chico(f.id); });
+  return nuevos.length;
+}
+
+// Cuantas columnas y cuanto puede medir cada foto. La raiz cuadrada da la
+// grilla mas pareja para n fotos; con eso salen las filas, y las filas se
+// reparten la altura del marco. El tope va en px, no en %, porque el recuadro
+// se ajusta a la imagen: para saber cuanto puede crecer, la imagen no puede
+// preguntarle la altura a un padre que la esta midiendo a ella.
+const HUECO = 6;         // el gap de la grilla, en px
+const RELLENO = 16;      // el padding del marco, arriba y abajo
+
+function medir(n){
+  const caja = $marco.getBoundingClientRect();
+  const cols = Math.min(n, Math.ceil(Math.sqrt(n)));
+  const filas = Math.ceil(n / cols);
+  const alto = (caja.height - RELLENO - HUECO * (filas - 1)) / filas;
+  return {cols, alto: Math.max(48, alto)};
+}
+
+function acomodar(){
+  const n = grupo().length;
+  if(!n) return;
+  const {cols, alto} = medir(n);
+  $mosaico.style.setProperty('--cols', cols);
+  $mosaico.style.setProperty('--alto-celda', alto + 'px');
+}
+
+function pinta(){
+  document.querySelector('#cargando').hidden = true;
+  $marco.classList.remove('grande');
+  document.querySelector('#aviso-v').textContent = '';
+  excepciones = new Map();
+  ultimaMirada = null;
+  $mosaico.innerHTML = '';
+  const g = grupo();
+  if(!g.length){
+    $nota.hidden = true;
+    document.querySelector('#listo').hidden = false;
+    return;
+  }
+  $marco.classList.toggle('grupo', g.length > 1);
+  document.querySelector('#titulo').innerHTML = g.length > 1
+    ? `¿Estas <b>${g.length}</b> fotos son <b>${TAG}</b>?`
+    : `¿Esta foto es <b>${TAG}</b>?`;
+  for(const f of g) $mosaico.appendChild(celda(f));
+  acomodar();
+  $nota.hidden = g.length < 2;
+  $nota.textContent = `Todas del mismo momento: los botones responden por las ${g.length}. `
+    + 'Tocá una para darle otra respuesta.';
+  $prog.textContent = `${hechas} revisadas · quedan ${quedan}`;
+  contarBotones();
+  for(const f of g) pintarCajas(f.id);
+}
+
+function celda(f){
+  const cel = document.createElement('div');
+  cel.className = 'celda';
+  const cuadro = document.createElement('div');
+  cuadro.className = 'cuadro';
+  cuadro.dataset.id = f.id;
+  cuadro.title = f.nombre + ' — tocá para darle otra respuesta';
+  cuadro.innerHTML = `<img src="${chico(f.id)}" alt=""><div class="cajas"></div>`;
+  cuadro.addEventListener('click', () => alternarEnGrupo(cuadro, f.id));
+  cuadro.addEventListener('mouseenter', () => { ultimaMirada = f; });
+  cel.appendChild(cuadro);
+  return cel;
+}
+
+// Mismo ciclo que la columna de verificadas, mas un estado neutro al principio:
+// sin marca, la foto sigue lo que diga el boton del grupo.
+const SIGUIENTE_EN_GRUPO = {undefined:'no', no:'dan', dan:'si', si:undefined};
+
+function alternarEnGrupo(cuadro, id){
+  const nuevo = SIGUIENTE_EN_GRUPO[excepciones.get(id)];
+  if(nuevo === undefined) excepciones.delete(id); else excepciones.set(id, nuevo);
+  cuadro.className = 'cuadro' + (nuevo ? ' ' + nuevo : '');
+  if(nuevo) cuadro.dataset.estado = nuevo; else delete cuadro.dataset.estado;
+  contarBotones();
+}
+
+// Cuantas se lleva cada boton, descontando las que ya tienen respuesta propia.
+function contarBotones(){
+  const g = grupo();
+  const libres = g.filter(f => !excepciones.has(f.id)).length;
+  const marca = g.length > 1 ? ` (${libres})` : '';
+  document.querySelector('#n-si').textContent = marca;
+  document.querySelector('#n-no').textContent = marca;
+}
+
+// Las caras vienen de la tabla `faces`, que ya las tiene con su recuadro: no
+// se detecta nada al vuelo, solo se dibuja lo que el analisis ya guardo.
+async function pintarCajas(id){
+  const cuadro = $mosaico.querySelector(`.cuadro[data-id="${id}"]`);
+  if(!cuadro) return;
+  const cont = cuadro.querySelector('.cajas');
+  cont.innerHTML = '';
+  if(!document.querySelector('#ver-caras').checked){ contarCaras(); return; }
+  const r = await fetch('/api/cajas/' + id);
+  if(!r.ok) return;
+  const j = await r.json();
+  if(!cuadro.isConnected) return;             // ya pasaste a otro grupo
+  cuadro.dataset.caras = j.caras.length;
+  for(const c of j.caras){
+    const [x1,y1,x2,y2] = c.caja;
+    const d = document.createElement('div');
+    d.className = 'caja';
+    d.style.left = (x1*100)+'%'; d.style.top = (y1*100)+'%';
+    d.style.width = ((x2-x1)*100)+'%'; d.style.height = ((y2-y1)*100)+'%';
+    if(c.nombre) d.innerHTML = `<span>${c.nombre}</span>`;
+    cont.appendChild(d);
+  }
+  contarCaras();
+}
+
+function contarCaras(){
+  const $c = document.querySelector('#cuenta-caras');
+  if(!document.querySelector('#ver-caras').checked){ $c.textContent = ''; return; }
+  const total = [...$mosaico.querySelectorAll('.cuadro')]
+    .reduce((s, c) => s + (+c.dataset.caras || 0), 0);
+  $c.textContent = total ? `· ${total} cara(s)` : '· sin caras detectadas';
+}
+
+function guardar(ids, ok){
+  return fetch('/api/veredicto', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({photo_ids:ids, etiqueta:TAG, ok})});
+}
+function marcarRotas(ids, danada){
+  return fetch('/api/danada', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({photo_ids:ids, danada})});
+}
+
+function agregarAlHistorial(foto, estado){   // estado: 'si' | 'no' | 'dan'
+  const li = document.createElement('li');
+  li.className = estado;
+  li.dataset.id = foto.id;
+  li.dataset.estado = estado;
+  li.title = foto.nombre + ' — tocá para cambiar';
+  li.innerHTML = `<img src="${chico(foto.id)}" alt="">`;
+  li.addEventListener('click', () => alternar(li));
+  $lista.prepend(li);           // la ultima arriba, la lista baja sola
+}
+
+// Ciclo si → no → dañada → si. Con tres estados un menu seria mas prolijo,
+// pero rotar con un toque es mas rapido y esto se usa a toda velocidad.
+const SIGUIENTE = {si:'no', no:'dan', dan:'si'};
+
+function alternar(li){
+  const id = +li.dataset.id;
+  const nuevo = SIGUIENTE[li.dataset.estado] || 'si';
+  li.dataset.estado = nuevo;
+  li.className = nuevo;
+  if(nuevo === 'dan'){
+    marcarRotas([id], 1);
+  } else {
+    // Sale de dañada y vuelve a ser un veredicto normal.
+    marcarRotas([id], 0);
+    guardar([id], nuevo === 'si' ? 1 : 0);
+  }
+  $prog.textContent = `${hechas} revisadas · corregida una`;
+}
+
+// El corazon del repaso: resuelve la respuesta de CADA foto del grupo —la del
+// boton, o la propia si la tocaste— y la manda en tres pedidos como mucho.
+function despachar(porDefecto){
+  const g = grupo();
+  if(!g.length) return;
+  const por = {si:[], no:[], dan:[]};
+  for(const f of g) por[excepciones.get(f.id) || porDefecto].push(f);
+  const ids = e => por[e].map(f => f.id);
+
+  if(por.si.length) guardar(ids('si'), 1).then(r => { if(!r.ok) alert('No se pudo guardar el sí'); });
+  if(por.no.length) guardar(ids('no'), 0).then(r => { if(!r.ok) alert('No se pudo guardar el no'); });
+  // Dañada NO deja veredicto: una foto rota no dice nada sobre si la etiqueta
+  // acierta, y meterla ensuciaria los datos para ajustar el umbral.
+  if(por.dan.length) marcarRotas(ids('dan'), 1).then(r => { if(!r.ok) alert('No se pudo marcar la dañada'); });
+
+  cola.shift();
+  for(const f of g) respondidas.add(f.id);
+  hechas += g.length;
+  quedan = Math.max(0, quedan - g.length);
+  for(const e of ['si','no','dan']) for(const f of por[e]) agregarAlHistorial(f, e);
+}
+
+async function avanzar(porDefecto){
+  if(ocupado || !cola.length) return;
+  ocupado = true;
+  $marco.classList.add('se-va');
+  despachar(porDefecto);
+  // Se pide mientras la cola este corta. Antes la condicion miraba `quedan`,
+  // que es una cuenta local que se desfasa; ahora manda lo que devuelva el
+  // server: si una tanda no trae nada nuevo, es que de verdad no queda nada.
+  if(cola.length < 3){
+    let intentos = 0;
+    while(cola.length < 3 && intentos < 3 && await traer() === 0) intentos++;
+  }
+  pinta();
+  setTimeout(()=>{ $marco.classList.remove('se-va'); ocupado = false; }, 90);
+}
+
+const responder = ok => avanzar(ok ? 'si' : 'no');
+const marcarDanada = () => avanzar('dan');
+
+function deshacer(){
+  const li = $lista.firstElementChild;
+  if(li) alternar(li);
+}
+
+// V abre el visor a pantalla completa con TODO el grupo adentro.
+//
+// Antes agrandaba el marco de 62vh a 78vh y cambiaba la imagen de una sola
+// foto: con un grupo de 6 cada una seguia midiendo lo mismo, asi que el
+// "agrandar" no agrandaba nada. A pantalla completa cada foto usa los 100vh,
+// y con las flechas se pasa entre las del mismo momento sin salir.
+function verGrande(){
+  const g = grupo();
+  if(!g.length) return;
+  // Arranca en la que tenes el mouse encima, si hay alguna.
+  const desde = Math.max(0, g.findIndex(f => ultimaMirada && f.id === ultimaMirada.id));
+  Visor.abrirLista(
+    g.map(f => ({id: f.id, nombre: f.nombre, mini: chico(f.id)})),
+    desde,
+    [
+      // Contestar sin salir: el visor se cierra y el repaso avanza solo.
+      {texto: 'Sí', tecla: 's', fn: () => { Visor.cerrar(); responder(1); }},
+      {texto: 'No', tecla: 'n', fn: () => { Visor.cerrar(); responder(0); }},
+      {texto: 'Dañada', tecla: 'd', fn: () => { Visor.cerrar(); marcarDanada(); }},
+      // Y esta, para el caso que mas costaba: mirar de cerca UNA del grupo y
+      // darle otra respuesta sin tocar las demas.
+      {texto: 'solo esta va aparte', tecla: 'x', fn: id => marcarAparte(+id)},
+    ]);
+}
+
+// Cicla la respuesta propia de UNA foto del grupo, igual que tocarla en el
+// mosaico, pero desde el visor: no hay que cerrar para corregir una sola.
+function marcarAparte(id){
+  const cuadro = $mosaico.querySelector(`.cuadro[data-id="${id}"]`);
+  if(cuadro) alternarEnGrupo(cuadro, id);
+  const estado = excepciones.get(id);
+  const info = document.querySelector('.visor .nombre');
+  if(info) info.textContent = (info.textContent.split(' — ')[0])
+    + (estado ? ' — aparte: ' + {no:'NO', dan:'dañada', si:'SÍ'}[estado] : '');
+}
+
+document.addEventListener('keydown', ev => {
+  if(ev.target.matches('input,textarea,select')) return;
+  // Con el visor abierto manda el visor: ahi las flechas pasan entre las fotos
+  // del grupo. Sin esta guarda, una flecha navegaba Y contestaba al mismo
+  // tiempo, porque el visor no corta la propagacion de ← →.
+  if(window.Visor && Visor.abierto) return;
+  const k = ev.key.toLowerCase();
+  if(ev.key === 'ArrowRight'){ ev.preventDefault(); responder(1); }
+  else if(ev.key === 'ArrowLeft'){ ev.preventDefault(); responder(0); }
+  else if(ev.key === 'ArrowDown'){ ev.preventDefault(); marcarDanada(); }
+  else if(k === 'z'){ ev.preventDefault(); deshacer(); }
+  else if(k === 'v'){ ev.preventDefault(); verGrande(); }
+});
+
+document.querySelector('#ver-caras').addEventListener('change', () => {
+  for(const f of grupo()) pintarCajas(f.id);
+});
+
+// Borrar los veredictos de esta etiqueta y arrancar de cero.
+async function reiniciarRevision(){
+  const aviso = ['¿Borrar TODAS tus respuestas de «' + TAG + '» y revisarla de nuevo?',
+                 '',
+                 'No se toca ninguna foto. Queda un respaldo en _respaldos_veredictos/',
+                 'por si te arrepentís.'].join('\n');
+  if(!confirm(aviso)) return;
+  const msg = document.querySelector('#msg-reiniciar');
+  msg.textContent = 'borrando…';
+  try{
+    const r = await fetch('/api/reiniciar-revision', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({etiqueta: TAG})});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error || 'no se pudo');
+    msg.textContent = j.borrados + ' borrados · respaldo ' + j.respaldo;
+    setTimeout(() => location.reload(), 900);
+  }catch(e){ msg.textContent = 'no se pudo: ' + e.message; }
+}
+
+// Mirar en grande una de las de referencia y, si estaba mal, corregirla en el
+// momento. A 52px no se puede decidir si algo es una cascada.
+function mirarReferencia(id, estado){
+  const caja = document.querySelector('#ref-lupa');
+  if(!caja) return;
+  const dicho = {si:'dijiste que SÍ', no:'dijiste que NO',
+                 modelo:'el modelo la marcó (vos todavía no dijiste nada)'}[estado];
+  caja.innerHTML = `<img src="${chico(id)}" alt="">
+    <div class="cols">
+      <div class="apagado">${dicho}</div>
+      <div class="acciones">
+        <button type="button" class="gris" data-ok="1">es ${TAG}</button>
+        <button type="button" class="gris" data-ok="0">no es ${TAG}</button>
+        <button type="button" class="gris" data-cerrar="1">cerrar</button>
+      </div>
+      <div class="apagado" id="ref-lupa-msg"></div>
+    </div>`;
+  const hd = new Image();                    // la vista grande, si se puede
+  hd.onload = () => { const i = caja.querySelector('img'); if(i) i.src = hd.src; };
+  hd.src = grande(id);
+  caja.addEventListener('click', async ev => {
+    const b = ev.target.closest('button');
+    if(!b) return;
+    if(b.dataset.cerrar){ caja.innerHTML = ''; return; }
+    const ok = +b.dataset.ok;
+    const r = await guardar([id], ok);
+    document.querySelector('#ref-lupa-msg').textContent =
+      r.ok ? 'corregida — se actualiza al recargar' : 'no se pudo guardar';
+  }, {once:false});
+}
+
+// La referencia: que quiere decir la etiqueta y contra que compararla. Se pide
+// una sola vez al abrir; no cambia mientras revisas.
+async function cargarReferencia(){
+  let d;
+  try { d = await (await fetch('/api/referencia/' + encodeURIComponent(TAG))).json(); }
+  catch(e){ return; }
+  const $ref = document.querySelector('#referencia');
+  document.querySelector('#ref-trad').textContent = d.traduccion || TAG;
+  document.querySelector('#ref-ojo').textContent = d.ojo || '';
+  const cuerpo = document.querySelector('#ref-cuerpo');
+  cuerpo.innerHTML = '';
+
+  const fila = (etiqueta, clase, ids, nota) => {
+    if(!ids || !ids.length) return;
+    const f = document.createElement('div');
+    f.className = 'ref-fila';
+    f.innerHTML = `<span class="ref-et ${clase}">${etiqueta}</span>`
+      + `<span class="ref-tiras">`
+      + ids.map(id => `<img src="${chico(id)}" class="${clase}" data-id="${id}"`
+                    + ` title="tocá para verla en grande y corregirla" alt="" loading="lazy">`).join('')
+      + `</span>`
+      + (nota ? `<span class="apagado">${nota}</span>` : '');
+    cuerpo.appendChild(f);
+  };
+  fila('vos: sí', 'si', d.si);
+  fila('vos: no', 'no', d.no);
+  // Sin veredictos propios no hay con que comparar, salvo lo que propuso el
+  // modelo. Va marcado como sin confirmar: es justo lo que estas auditando.
+  fila('el modelo dice', 'modelo', d.modelo, 'sin confirmar — es lo que estás revisando');
+  if(!d.si.length && !d.no.length && !d.modelo.length){
+    cuerpo.innerHTML = '<p class="apagado" style="margin:.4rem 0 0">'
+      + 'Todavía no hay ejemplos: sos el primero en revisar esta etiqueta.</p>';
+  } else {
+    // Decirlo explicito: estas tiras son TUS respuestas, no la verdad. Sirven
+    // para no contradecirte, no para saber si acertaste. Lo que define la
+    // etiqueta es la linea de arriba, que no sale de tus veredictos.
+    const av = document.createElement('p');
+    av.className = 'ref-aviso';
+    av.textContent = 'Son tus propias respuestas, no una verdad: sirven para no '
+      + 'contradecirte. Lo que define la etiqueta es la descripción de arriba. '
+      + 'Si una está mal, tocala y corregila.';
+    cuerpo.appendChild(av);
+    // Si revisaste con un criterio y despues lo cambiaste, los veredictos
+    // viejos mezclados con los nuevos son peores que ninguno: son los datos
+    // para recalibrar el umbral. Por eso se puede empezar de cero.
+    if(d.si.length || d.no.length){
+      const rz = document.createElement('div');
+      rz.className = 'ref-fila';
+      rz.innerHTML = '<button type="button" class="gris mini" id="btn-reiniciar">'
+        + 'empezar esta etiqueta de nuevo</button>'
+        + '<span class="apagado" id="msg-reiniciar">borra tus respuestas de «'
+        + TAG + '» y las vuelve a poner en la cola (queda respaldo)</span>';
+      cuerpo.appendChild(rz);
+      rz.querySelector('#btn-reiniciar').addEventListener('click', reiniciarRevision);
+    }
+    const lupa = document.createElement('div');
+    lupa.id = 'ref-lupa';
+    cuerpo.appendChild(lupa);
+    cuerpo.addEventListener('click', ev => {
+      const img = ev.target.closest('.ref-tiras img');
+      if(img) mirarReferencia(+img.dataset.id, img.classList.contains('si') ? 'si'
+                              : img.classList.contains('no') ? 'no' : 'modelo');
+    });
+  }
+  $ref.hidden = false;
+
+  const btn = document.querySelector('#btn-ref');
+  const pintar = plegado => {
+    cuerpo.classList.toggle('plegado', plegado);
+    btn.classList.toggle('cerrado', plegado);
+  };
+  pintar(localStorage.getItem('ref-plegada') === '1');
+  btn.addEventListener('click', ev => {
+    ev.preventDefault();
+    const plegado = !cuerpo.classList.contains('plegado');
+    localStorage.setItem('ref-plegada', plegado ? '1' : '0');
+    pintar(plegado);
+  });
+}
+
+// Arrastrar para contestar: es lo natural en el telefono, donde no hay
+// flechas. Izquierda = no, derecha = si, abajo = dañada. Se exige un
+// desplazamiento claro (70px) y que sea mas horizontal que vertical, para no
+// contestar sin querer mientras se hace scroll.
+(function(){
+  const marco = document.querySelector('.marco');
+  if(!marco || !window.matchMedia) return;
+  const aviso = document.createElement('div');
+  aviso.className = 'swipe-aviso';
+  document.body.appendChild(aviso);
+
+  let x0 = null, y0 = null, activo = false;
+  const MIN = 70;
+
+  marco.addEventListener('touchstart', ev => {
+    if(ev.touches.length !== 1 || (window.Visor && Visor.abierto)) return;
+    x0 = ev.touches[0].clientX; y0 = ev.touches[0].clientY; activo = true;
+  }, {passive:true});
+
+  marco.addEventListener('touchmove', ev => {
+    if(!activo) return;
+    const dx = ev.touches[0].clientX - x0;
+    const dy = ev.touches[0].clientY - y0;
+    let cual = null;
+    if(Math.abs(dx) > MIN && Math.abs(dx) > Math.abs(dy)) cual = dx > 0 ? 'si' : 'no';
+    else if(dy > MIN && dy > Math.abs(dx)) cual = 'dan';
+    if(cual){
+      aviso.className = 'swipe-aviso visible ' + (cual === 'dan' ? '' : cual);
+      aviso.textContent = {si:'SÍ ✓', no:'NO ✕', dan:'DAÑADA'}[cual];
+      marco.style.transform = 'translateX(' + Math.max(-40, Math.min(40, dx/3)) + 'px)';
+    } else {
+      aviso.className = 'swipe-aviso';
+      marco.style.transform = '';
+    }
+  }, {passive:true});
+
+  const soltar = ev => {
+    if(!activo) return;
+    activo = false;
+    marco.style.transform = '';
+    aviso.className = 'swipe-aviso';
+    const t = (ev.changedTouches && ev.changedTouches[0]) || null;
+    if(!t) return;
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    if(Math.abs(dx) > MIN && Math.abs(dx) > Math.abs(dy)) responder(dx > 0 ? 1 : 0);
+    else if(dy > MIN && dy > Math.abs(dx)) marcarDanada();
+  };
+  marco.addEventListener('touchend', soltar, {passive:true});
+  marco.addEventListener('touchcancel', () => {
+    activo = false; marco.style.transform = ''; aviso.className = 'swipe-aviso';
+  }, {passive:true});
+})();
+
+// Al cambiar el tamaño de la ventana cambia el presupuesto de altura.
+addEventListener('resize', acomodar);
+
+// Cambiar el orden vacia la cola y vuelve a pedir desde el principio.
+for(const r of document.querySelectorAll('input[name=ordrep]')){
+  r.addEventListener('change', async () => {
+    cola = [];
+    document.querySelector('#cargando').hidden = false;
+    await traer();
+    pinta();
+  });
+}
+
+traer().then(pinta);
+cargarReferencia();
+
+</script>
+{% endblock %}

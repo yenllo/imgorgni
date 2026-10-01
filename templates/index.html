@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Eventos · Curador{% endblock %}
+
+{% block cabecera %}
+{# Crear el evento primero y llenarlo despues: es la unica forma de subir fotos
+   que todavia no estan en la base. #}
+<form method="post" action="{{ url_for('evento_nuevo') }}" style="display:inline">
+  <input type="hidden" name="nombre" value="Evento nuevo">
+  <button style="margin-right:.6rem">+ Nuevo evento</button>
+</form>
+<form method="get" style="display:inline-flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+  <input type="search" name="q" value="{{ q }}" placeholder="Buscar nombre, nota, colección…"
+         style="width:260px;max-width:100%">
+  <select name="f" onchange="this.form.submit()" style="width:auto">
+    <option value="todos"       {% if filtro=='todos' %}selected{% endif %}>Todos</option>
+    <option value="sin_revisar" {% if filtro=='sin_revisar' %}selected{% endif %}>Sin revisar</option>
+    <option value="revisados"   {% if filtro=='revisados' %}selected{% endif %}>Revisados</option>
+    <option value="grandes"     {% if filtro=='grandes' %}selected{% endif %}>Con {{ minimo }}+ fotos</option>
+    <option value="colecciones" {% if filtro=='colecciones' %}selected{% endif %}>Colecciones</option>
+  </select>
+  {# Tocar el numero ya implica querer el filtro por tamaño: lo selecciona solo. #}
+  <input type="number" name="n" value="{{ minimo }}" min="0" step="20" style="width:6rem"
+         title="mínimo de fotos por evento"
+         onchange="this.form.f.value='grandes'; this.form.submit()">
+  <button>Buscar</button>
+</form>
+{% endblock %}
+
+{% block contenido %}
+<div class="panel" style="display:flex;gap:2rem;flex-wrap:wrap">
+  <div><b style="font-size:1.4rem">{{ eventos|length }}</b><div class="apagado">eventos listados</div></div>
+  <div><b style="font-size:1.4rem">{{ '{:,}'.format(fotos_listadas) }}</b>
+       <div class="apagado">fotos en lo listado{% if en_eventos %} · {{ (100*fotos_listadas/en_eventos)|round|int }}% del archivo{% endif %}</div></div>
+  <div><b style="font-size:1.4rem">{{ revisados }}</b><div class="apagado">confirmados por vos</div></div>
+  <div><b style="font-size:1.4rem">{{ '{:,}'.format(en_eventos) }}</b><div class="apagado">fotos en eventos</div></div>
+  <div><b style="font-size:1.4rem">{{ '{:,}'.format(total_fotos) }}</b><div class="apagado">fotos en la base</div></div>
+</div>
+
+{% if not eventos %}
+  <p class="apagado">No hay eventos que coincidan.</p>
+{% endif %}
+
+<p class="apagado">
+  Marcá la casilla de varios eventos para agruparlos bajo uno solo ·
+  <b>Shift</b> en la casilla marca un rango · <b>Esc</b> limpia
+</p>
+
+<div class="tarjetas">
+{% for e in eventos %}
+ <div class="conselec" data-id="{{ e.id }}">
+  <input type="checkbox" class="elegir" aria-label="elegir {{ e.titulo }}">
+  <a class="tarjeta" href="{{ url_for('evento', eid=e.id) }}">
+    {% if e.pid %}<img loading="lazy" src="{{ url_for('thumb', pid=e.pid) }}" alt="">
+    {% else %}<div style="height:135px;background:var(--linea)"></div>{% endif %}
+    <div class="cuerpo">
+      <b>{{ e.titulo }}</b>
+      <div class="apagado">
+        {{ (e.start_time or '')[:10] }}{% if e.end_time and e.end_time[:10] != (e.start_time or '')[:10] %} → {{ e.end_time[:10] }}{% endif %}
+        · {{ '{:,}'.format(e.n_total) }} fotos
+      </div>
+      <div style="margin-top:.4rem">
+        {% if e.hijos %}<span class="pill grupo">grupo · {{ e.hijos }} adentro</span>{% endif %}
+        {% if e.confirmado %}<span class="pill ok">revisado</span>{% endif %}
+        {% if e.n_total >= 800 %}<span class="pill alerta">grande</span>{% endif %}
+        {% if e.coleccion %}<span class="pill">{{ e.coleccion }}</span>{% endif %}
+      </div>
+    </div>
+  </a>
+  {# El arbol, desplegable en la propia tarjeta: antes solo decia cuantos habia
+     y para verlos tenias que entrar al evento. <details> es nativo, sin JS. #}
+  {% if e.hijos %}
+  <details class="sub">
+    <summary>ver los {{ e.hijos }} de adentro</summary>
+    <ul>
+      {% for h in subs.get(e.id, []) %}
+      <li>
+        <a href="{{ url_for('evento', eid=h.id) }}">{{ h.titulo }}</a>
+        <span class="apagado">{{ (h.start_time or '')[:10] }} · {{ '{:,}'.format(h.n) }}</span>
+        {% if h.confirmado %}<span class="pill ok">ok</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+ </div>
+{% endfor %}
+</div>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> eventos elegidos</b>
+  <select id="destino">
+    <option value="nuevo">Crear un grupo nuevo con estos</option>
+    <option value="dentro">Meter dentro de un grupo que ya existe…</option>
+    <option value="ninguno">Sacarlos del grupo donde están</option>
+  </select>
+  <input type="text" id="nombre" placeholder="nombre del grupo nuevo">
+  {# Buscador del destino: 600 opciones en un <select> no se navegan. El
+     datalist filtra mientras escribís y es nativo. #}
+  <input type="text" id="buscar" list="dl_eventos" autocomplete="off"
+         placeholder="escribí para buscar el grupo…">
+  <datalist id="dl_eventos">
+    {% for o in otros %}
+    <option value="{{ o.name or o.suggested_name or 'Evento ' ~ o.id }}{% if o.start_time %} ({{ o.start_time[:10] }}){% endif %} #{{ o.id }}"></option>
+    {% endfor %}
+  </datalist>
+  <button onclick="agrupar()">Aplicar</button>
+  <button class="gris" onclick="limpiar()">Limpiar</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+  .conselec{position:relative}
+  .conselec .elegir{position:absolute;top:8px;left:8px;z-index:2;width:20px;height:20px;
+    cursor:pointer;accent-color:var(--acento);
+    box-shadow:0 0 0 3px var(--panel);border-radius:3px}
+  .conselec.elegida .tarjeta{border-color:var(--acento);box-shadow:0 0 0 2px var(--acento)}
+  /* El arbol desplegable de cada grupo */
+  .pill.grupo{background:var(--acento);color:#fff}
+  details.sub{margin:.25rem 0 0;font-size:.85rem}
+  details.sub summary{cursor:pointer;color:var(--acento);padding:.2rem .1rem}
+  details.sub ul{list-style:none;margin:.2rem 0 .4rem;padding:0 0 0 .6rem;
+    border-left:2px solid var(--acento)}
+  details.sub li{display:flex;gap:.4rem;align-items:baseline;padding:.15rem 0}
+  details.sub li a{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+<script>
+// Seleccion propia de la portada: la de base.html trabaja sobre .celda de una
+// rejilla de fotos y sus acciones son de fotos, no de eventos.
+const sel = new Set();
+let ultima = null;
+
+function tarjetas(){ return [...document.querySelectorAll('.conselec')]; }
+
+function pinta(){
+  tarjetas().forEach(t => {
+    const on = sel.has(+t.dataset.id);
+    t.classList.toggle('elegida', on);
+    t.querySelector('.elegir').checked = on;
+  });
+  document.querySelector('.barra').classList.toggle('visible', sel.size > 0);
+  document.querySelector('#cuenta').textContent = sel.size;
+  // cada modo muestra solo el campo que usa
+  const modo = document.querySelector('#destino').value;
+  document.querySelector('#nombre').style.display = modo === 'nuevo' ? '' : 'none';
+  document.querySelector('#buscar').style.display = modo === 'dentro' ? '' : 'none';
+}
+
+// "Nombre del grupo (2025-04-26) #123" -> 123. El id va al final del texto del
+// datalist porque es lo unico que el navegador nos devuelve: el valor elegido.
+function idElegido(){
+  const m = /#(\d+)\s*$/.exec(document.querySelector('#buscar').value);
+  return m ? m[1] : null;
+}
+
+function limpiar(){ sel.clear(); ultima = null; pinta(); }
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('.tarjetas').addEventListener('click', ev => {
+    const caja = ev.target.closest('.elegir');
+    if(!caja) return;                       // click normal: sigue navegando
+    const cont = caja.closest('.conselec');
+    const todas = tarjetas(), i = todas.indexOf(cont), id = +cont.dataset.id;
+    if(ev.shiftKey && ultima !== null){
+      const [a, b] = [Math.min(ultima, i), Math.max(ultima, i)];
+      todas.slice(a, b + 1).forEach(x => sel.add(+x.dataset.id));
+    } else {
+      sel.has(id) ? sel.delete(id) : sel.add(id);
+      ultima = i;
+    }
+    pinta();
+  });
+  document.querySelector('#destino').addEventListener('change', pinta);
+  document.addEventListener('keydown', ev => {
+    if(ev.target.matches('input,textarea,select')) return;
+    if(ev.key === 'Escape') limpiar();
+  });
+  pinta();
+});
+
+async function agrupar(){
+  if(!sel.size) return;
+  const modo = document.querySelector('#destino').value;
+  const nombre = document.querySelector('#nombre').value;
+  let destino = modo;
+  if(modo === 'dentro'){
+    destino = idElegido();
+    if(!destino){ alert('Elegí un grupo de la lista que aparece al escribir.'); return; }
+  }
+  const que = modo === 'ninguno'
+    ? `¿Sacar ${sel.size} evento(s) del grupo donde están?`
+    : `¿Agrupar ${sel.size} evento(s)?`;
+  if(!confirm(que + '\n\nNo se mueve ninguna foto: solo cambia dónde queda guardado cada evento.')) return;
+  const r = await fetch('/api/eventos/agrupar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids:[...sel], destino, nombre})});
+  const j = await r.json();
+  if(!j.ok){ alert(j.error || 'No se pudo agrupar'); return; }
+  if(modo === 'nuevo' && j.padre){ location.href = '/evento/' + j.padre; return; }
+  location.reload();
+}
+</script>
+{% endblock %}

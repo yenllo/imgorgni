@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_celda.html" import celda %}
+{% block title %}Con marca de agua · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel">
+  <b style="font-size:1.3rem">{{ '{:,}'.format(total) }}</b>
+  <span class="apagado">fotos con marca de agua</span>
+  <div class="apagado" style="margin-top:.4rem">
+    Detectadas por OCR (Tesseract) sobre las carpetas de trabajo fotográfico
+    (Liga ExScuola, ConSienteMente, taller de fotografía): el criterio es
+    <b>más de 8 caracteres detectados</b>, sin distinguir texto de ruido.
+    Sobre una muestra de 200, sólo ~54% tenían texto de verdad: mirá la foto
+    antes de mandarla al basurero, no confíes en que esté en esta lista.
+  </div>
+</div>
+
+<p class="apagado">
+  Click para seleccionar · Shift+click para un rango · <b>A</b> selecciona lo cargado · <b>Esc</b> limpia
+</p>
+
+<div class="rejilla">
+{% for f in fotos %}{{ celda(f) }}{% endfor %}
+</div>
+
+<div class="paginas">
+  {% if page > 1 %}<a href="?page={{ page - 1 }}">← Anterior</a>{% endif %}
+  <span class="apagado">página {{ page }}</span>
+  {% if fotos|length == limit %}<a href="?page={{ page + 1 }}">Siguiente →</a>{% endif %}
+</div>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> seleccionadas</b>
+  <button class="gris" onclick="Sel.basurero()">🗑 Al basurero</button>
+  <button class="gris" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))">Limpiar</button>
+</div>
+{% endblock %}

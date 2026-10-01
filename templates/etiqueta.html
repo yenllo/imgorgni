@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_celda.html" import celda %}
+{% from "_barra_orden.html" import barra_orden %}
+{% block title %}{{ tag }} · Curador{% endblock %}
+
+{% block contenido %}
+<p class="apagado" style="margin-top:0"><a href="{{ url_for('etiquetas') }}">← Etiquetas</a> · <a class="boton" href="{{ url_for('revisar', tag=tag) }}">Revisar de a una</a></p>
+
+<div class="panel">
+  <b style="font-size:1.3rem">{{ '{:,}'.format(n) }}</b>
+  <span class="apagado">fotos con la etiqueta «{{ tag }}»</span>
+  <div class="apagado" style="margin-top:.4rem">
+    Lo que dijo el analisis, con tus veredictos encima: si marcaste «no» en una
+    foto, no aparece; si marcaste «si», aparece aunque el modelo no la haya etiquetado.
+  </div>
+</div>
+
+{{ barra_orden(vista, orden, q, desc, n, total, formato) }}
+
+<p class="apagado">
+  Click para seleccionar · Shift+click para un rango · <b>A</b> selecciona lo cargado · <b>Esc</b> limpia
+</p>
+
+<div class="rejilla" data-vista="{{ vista }}" data-orden="{{ orden }}" data-q="{{ q }}" data-desc="{{ 1 if desc else 0 }}" data-formato="{{ formato }}">
+{% for f in fotos %}{{ celda(f) }}{% endfor %}
+</div>
+<div id="fin" class="apagado" style="text-align:center;padding:1.4rem"></div>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> seleccionadas</b>
+  <select id="destino">
+    <option value="nuevo">→ Evento NUEVO…</option>
+    <optgroup label="Agregar a un evento existente">
+    {% for o in otros %}
+      <option value="{{ o.id }}">{{ (o.name or o.suggested_name or 'Evento ' ~ o.id) }}{% if o.start_time %} ({{ o.start_time[:10] }}){% endif %}</option>
+    {% endfor %}
+    </optgroup>
+  </select>
+  <input type="text" id="nombre" placeholder="nombre del evento nuevo">
+  <button onclick="aplicar()">Aplicar</button>
+  <button class="gris" onclick="Sel.basurero()">🗑 Al basurero</button>
+  <button class="gris" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))">Limpiar</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function aplicar(){
+  Sel.mover(document.querySelector('#destino').value,
+            document.querySelector('#nombre').value);
+}
+</script>
+{% endblock %}

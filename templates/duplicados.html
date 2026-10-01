@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}Duplicados · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel">
+  <div class="tabla-scroll">
+  <table>
+    <tr><th>Tipo</th><th>Pares</th><th>Espacio</th><th>Pendientes</th>
+        <th>A descartar</th><th></th></tr>
+    {% for t, d in porb.items() %}
+    <tr>
+      <td><b>{{ t }}</b></td>
+      <td>{{ '{:,}'.format(d.n) }}</td>
+      <td>{{ '{:,.1f}'.format(d.mb/1024) }} GB</td>
+      <td>{{ '{:,}'.format(d.pendiente) }}</td>
+      <td>{{ '{:,}'.format(d.descartar) }}</td>
+      <td>
+        {% if t == 'EXACTO' %}
+          <button class="gris" onclick="todos('{{ t }}','descartar')">marcar todos</button>
+          <span class="apagado" title="El SHA256 se calculo al indexar. Si un archivo se daño despues, el par ya no es identico aunque siga figurando como EXACTO. Para reconfirmarlo: python verificar_exactos.py">byte a byte, segun el hash del indexado ⓘ</span>
+        {% else %}
+          <a href="?tipo={{ t }}&dec=pendiente">revisar</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <div style="margin-top:.9rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+    <b>{{ '{:,}'.format(ahorro.n or 0) }} marcados</b>
+    <span class="apagado">liberarían {{ '{:,.1f}'.format((ahorro.mb or 0)/1024) }} GB</span>
+    <span class="crece"></span>
+    <a href="{{ url_for('duplicados_corruptos') }}">Ambos corruptos →</a>
+    {% if ahorro.n %}
+    <button onclick="aplicarCuarentena()">Mover los marcados a cuarentena</button>
+    {% endif %}
+  </div>
+  <div id="barraAplicar" style="display:none;margin-top:.7rem">
+    <div style="background:var(--linea);border-radius:99px;overflow:hidden;height:10px">
+      <div id="barraAplicarFill" style="background:var(--ok);height:100%;width:0%;transition:width .3s"></div>
+    </div>
+    <div id="barraAplicarTexto" class="apagado" style="margin-top:.3rem;font-size:.8rem"></div>
+  </div>
+</div>
+
+<div class="panel" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
+  <form method="get" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+    <label style="margin:0">Tipo</label>
+    <select name="tipo" onchange="this.form.submit()" style="width:auto">
+      {% for t in ['todos'] + tipos %}
+        <option value="{{ t }}" {% if tipo==t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    <label style="margin:0">Estado</label>
+    <select name="dec" onchange="this.form.submit()" style="width:auto">
+      {% for d,l in [('pendiente','Pendientes'),('descartar','Marcados'),
+                     ('conservar','Conservar ambas'),('omitido','Omitidos'),
+                     ('movido','Ya movidos'),('todas','Todos')] %}
+        <option value="{{ d }}" {% if dec==d %}selected{% endif %}>{{ l }}</option>
+      {% endfor %}
+    </select>
+    <label style="margin:0">Fiabilidad</label>
+    <select name="score_max" onchange="this.form.submit()" style="width:auto">
+      <option value="todos" {% if score_max=='todos' %}selected{% endif %}>Todos</option>
+      <option value="0" {% if score_max=='0' %}selected{% endif %}>Solo iguales (score 0)</option>
+      <option value="2" {% if score_max=='2' %}selected{% endif %}>Muy seguro (≤ 2)</option>
+      <option value="5" {% if score_max=='5' %}selected{% endif %}>Seguro (≤ 5)</option>
+      <option value="10" {% if score_max=='10' %}selected{% endif %}>Probable (≤ 10)</option>
+      <option value="sin" {% if score_max=='sin' %}selected{% endif %}>Sin verificar (hay que mirarlos)</option>
+    </select>
+  </form>
+  <span class="crece"></span>
+  {% if dec == 'pendiente' and filas %}
+    <button onclick="descartarPagina()" style="background:var(--ok)">Descartar toda esta página ({{ filas|length }})</button>
+  {% endif %}
+  {# 'sin' no lleva boton de marcado masivo: son justo los que hay que mirar de a uno #}
+  {% if dec == 'pendiente' and score_max not in ['todos', 'sin'] %}
+    <button onclick="marcarFiltrados()" style="background:var(--ok)">Marcar estos {{ '{:,}'.format(n) }} como descartar</button>
+  {% endif %}
+  <span class="apagado">{{ '{:,}'.format(n) }} pares</span>
+</div>
+
+{% if not filas %}
+  <p class="apagado">Nada que revisar con estos filtros.</p>
+{% endif %}
+
+{% for f in filas %}
+<div class="panel par" data-id="{{ f.id }}">
+  <div style="display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.6rem">
+    <span class="pill">{{ f.tipo }}</span>
+    {# En un EXACTO el pHash no aporta nada: el SHA256 idéntico ya es la prueba
+       más fuerte que existe. Mostrarle "sin verificar" hacía dudar del par mejor
+       confirmado de todos. #}
+    {% if f.tipo == 'EXACTO' %}
+      <span class="pill ok" title="mismos bytes: el SHA256 coincide">bytes idénticos ✔</span>
+    {% elif f.score is defined and f.score is not none %}
+      {% if f.score < 0 %}
+        <span class="pill" style="background:#7a6a3a;color:#fff"
+              title="no se pudo comparar el contenido de las dos: falta pHash o el que hay no es confiable">sin verificar</span>
+      {% elif f.score <= 2 %}
+        <span class="pill ok" title="distancia phash={{ f.score }}">score {{ f.score }} ✔</span>
+      {% elif f.score <= 5 %}
+        <span class="pill" style="background:#e6a817;color:#000" title="distancia phash={{ f.score }}">score {{ f.score }}</span>
+      {% elif f.score <= 10 %}
+        <span class="pill alerta" title="distancia phash={{ f.score }}">score {{ f.score }} ⚠</span>
+      {% else %}
+        <span class="pill" style="background:#d33;color:#fff" title="distancia phash={{ f.score }}">score {{ f.score }} ✖</span>
+      {% endif %}
+    {% endif %}
+    <span class="apagado">{{ f.razon }}</span>
+    <span class="crece"></span>
+    <span class="apagado">{{ '{:,.1f}'.format(f.mb) }} MB</span>
+    {% if f.decision != 'pendiente' %}<span class="pill ok">{{ f.decision }}</span>{% endif %}
+  </div>
+
+  <div style="display:grid;gap:1rem;grid-template-columns:1fr 1fr">
+    <div>
+      <label style="color:var(--ok)">Se conserva
+        {% if f.id_conservar %}
+        <button class="mini" onclick="tirar([{{ f.id_conservar }}],{{ f.id }})"
+                title="mandar esta al basurero">🗑</button>{% endif %}
+      </label>
+      {% if f.info_conservar %}
+        <div style="margin:.2rem 0">
+          <span class="pill">{{ f.info_conservar.formato }}</span>
+          {% if f.info_conservar.editado %}
+            <span class="pill alerta" title="{{ f.info_conservar.software }}">editado: {{ f.info_conservar.software }}</span>
+          {% elif f.info_conservar.software %}
+            <span class="pill" title="{{ f.info_conservar.software }}">{{ f.info_conservar.software }}</span>
+          {% else %}
+            <span class="pill ok">sin editar</span>
+          {% endif %}
+        </div>
+      {% endif %}
+      {% if f.id_conservar %}
+        <a href="{{ url_for('full', pid=f.id_conservar) }}" target="_blank">
+          <img loading="lazy" src="{{ url_for('thumb', pid=f.id_conservar) }}"
+               style="width:100%;max-height:240px;object-fit:contain;background:var(--linea);border-radius:6px">
+        </a>
+      {% else %}<div class="apagado">(sin miniatura)</div>{% endif %}
+      <div class="apagado" style="font-size:.75rem;word-break:break-all">{{ f.ruta_conservar }}</div>
+    </div>
+    <div>
+      <label style="color:var(--alerta)">Se descarta
+        {% if f.id_descartar %}
+        <button class="mini" onclick="tirar([{{ f.id_descartar }}],{{ f.id }})"
+                title="mandar esta al basurero">🗑</button>{% endif %}
+      </label>
+      {% if f.info_descartar %}
+        <div style="margin:.2rem 0">
+          <span class="pill">{{ f.info_descartar.formato }}</span>
+          {% if f.info_descartar.editado %}
+            <span class="pill alerta" title="{{ f.info_descartar.software }}">editado: {{ f.info_descartar.software }}</span>
+          {% elif f.info_descartar.software %}
+            <span class="pill" title="{{ f.info_descartar.software }}">{{ f.info_descartar.software }}</span>
+          {% else %}
+            <span class="pill ok">sin editar</span>
+          {% endif %}
+        </div>
+      {% endif %}
+      {% if f.id_descartar %}
+        <a href="{{ url_for('full', pid=f.id_descartar) }}" target="_blank">
+          <img loading="lazy" src="{{ url_for('thumb', pid=f.id_descartar) }}"
+               style="width:100%;max-height:240px;object-fit:contain;background:var(--linea);border-radius:6px">
+        </a>
+      {% else %}<div class="apagado">(sin miniatura)</div>{% endif %}
+      <div class="apagado" style="font-size:.75rem;word-break:break-all">{{ f.ruta_descartar }}</div>
+    </div>
+  </div>
+  {% if f.tipo != 'EXACTO' %}
+    <div style="margin-top:.4rem">
+      <button class="mini gris" onclick="invertir({{ f.id }})"
+              title="dar vuelta cuál se conserva y cuál se descarta">⇄ invertir cuál se conserva</button>
+    </div>
+  {% endif %}
+
+  <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+    <button onclick="decidir([{{ f.id }}],'descartar')">Confirmar descarte</button>
+    <button class="gris" onclick="decidir([{{ f.id }}],'conservar')">Conservar las dos</button>
+    <button class="gris" onclick="decidir([{{ f.id }}],'omitido')" title="No vuelve a aparecer en Pendientes">Omitir (no mostrar más)</button>
+    <span style="width:1px;height:22px;background:var(--linea)"></span>
+    {% if f.id_conservar and f.id_descartar %}
+      <button class="gris" onclick="tirar([{{ f.id_conservar }},{{ f.id_descartar }}],{{ f.id }})">
+        🗑 Las dos al basurero</button>
+    {% endif %}
+    <span class="apagado" style="font-size:.75rem">no borra: van al basurero</span>
+  </div>
+</div>
+{% endfor %}
+
+{% if paginas > 1 %}
+<div class="paginas">
+  {% for p in range(1, paginas+1) %}
+    {% if p <= 3 or p > paginas-3 or (p-pag)|abs <= 2 %}
+      <a class="{% if p==pag %}act{% endif %}"
+         href="?p={{ p }}&tipo={{ tipo }}&dec={{ dec }}&score_max={{ score_max }}">{{ p }}</a>
+    {% elif p == 4 and pag > 6 %}<span class="apagado">…</span>{% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function _post(url, body, retries=3){
+  for(let i=0; i<retries; i++){
+    try{
+      const r = await fetch(url, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)});
+      if(r.ok) return await r.json();
+      if(r.status===500 && i<retries-1){ await new Promise(r=>setTimeout(r,800)); continue; }
+      return {ok:false, error:'Error '+r.status};
+    }catch(e){ if(i<retries-1){ await new Promise(r=>setTimeout(r,800)); continue; } return {ok:false, error:e.message}; }
+  }
+}
+function quitarDelDOM(id){
+  const el = document.querySelector('.par[data-id="'+id+'"]');
+  if(el) el.remove();
+}
+async function decidir(ids, decision){
+  const r = await _post('/api/duplicado/decidir', {ids, decision});
+  if(r && r.ok) ids.forEach(quitarDelDOM); else alert('No se pudo guardar, reintentá en unos segundos.');
+}
+async function invertir(id){
+  // cambia cual se conserva/descarta: no se puede actualizar el par en el DOM
+  // sin re-pedir sus datos, así que acá sí recargamos (accion poco frecuente).
+  const r = await _post('/api/duplicado/invertir', {id});
+  if(r && r.ok) location.reload(); else alert('No se pudo invertir, reintentá en unos segundos.');
+}
+async function tirar(ids, parId){
+  const cual = ids.length > 1 ? 'las 2 fotos' : 'esta foto';
+  if(!confirm('Mandar ' + cual + ' al basurero?\n\n'
+      + 'Salen de sus eventos y de esta pantalla. Los archivos NO se borran:\n'
+      + 'quedan en el Basurero, y ahí decidís si borrarlas de verdad.')) return;
+  const r = await _post('/api/basurero', {ids});
+  if(r && r.ok) quitarDelDOM(parId);
+  else alert('No se pudo enviar al basurero, reintentá en unos segundos.');
+}
+async function todos(tipo, decision){
+  if(!confirm('Marcar TODOS los pendientes de tipo '+tipo+' como '+decision+'?')) return;
+  const r = await _post('/api/duplicado/decidir', {todos_del_tipo:tipo, decision});
+  if(r && r.ok) location.reload(); else alert('No se pudo marcar, reintentá en unos segundos.');
+}
+async function aplicarCuarentena(){
+  if(!confirm('Mover {{ ahorro.n or 0 }} archivos a cuarentena?\n\nNO se borran: van a {{ cuarentena }} y podés revertirlo.')) return;
+  const r = await _post('/duplicados/aplicar', {});
+  if(!r || !r.ok){ alert('No se pudo iniciar'); return; }
+  document.getElementById('barraAplicar').style.display = 'block';
+  const fill = document.getElementById('barraAplicarFill');
+  const texto = document.getElementById('barraAplicarTexto');
+  const poll = setInterval(async () => {
+    const e = await (await fetch('/api/duplicados/aplicar/estado')).json();
+    const pct = e.total ? Math.round(e.hechos / e.total * 100) : 0;
+    fill.style.width = pct + '%';
+    texto.textContent = `${e.hechos.toLocaleString()} / ${e.total.toLocaleString()} — ${e.movidos.toLocaleString()} movidos, ${e.fallos.toLocaleString()} fallos`;
+    if(!e.corriendo){
+      clearInterval(poll);
+      texto.textContent += ' — listo';
+      setTimeout(() => location.reload(), 1200);
+    }
+  }, 1000);
+}
+async function descartarPagina(){
+  const ids = [...document.querySelectorAll('.par')].map(el => Number(el.dataset.id));
+  if(!ids.length) return;
+  if(!confirm(`¿Marcar como DESCARTAR estos ${ids.length} pares de esta página?`)) return;
+  const r = await _post('/api/duplicado/decidir', {ids, decision:'descartar'});
+  if(r && r.ok) location.reload(); else alert('No se pudo marcar, reintentá en unos segundos.');
+}
+async function marcarFiltrados(){
+  const s = '{{ score_max }}';
+  const t = '{{ tipo }}';
+  if(!confirm(`¿Marcar como DESCARTAR todos los ${t} con score <= ${s}?`)) return;
+  const r = await _post('/api/duplicado/decidir', {decision:'descartar', todos_score_max: s, tipo: t});
+  if(r && r.ok) location.reload(); else alert('No se pudo marcar, reintentá en unos segundos.');
+}
+</script>
+{% endblock %}

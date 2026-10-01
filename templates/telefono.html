@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_celda.html" import celda %}
+{% from "_barra_orden.html" import barra_orden %}
+{% block title %}Teléfono · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel">
+  <b style="font-size:1.3rem">{{ '{:,}'.format(n) }}</b>
+  <span class="apagado">fotos de teléfono, fuera de todo evento</span>
+  <div class="apagado" style="margin-top:.4rem">
+    Identificadas por el EXIF (Xiaomi, iPhone, Samsung…) o por nombres de
+    WhatsApp y capturas. Están separadas de «Sin evento» para que ahí quede
+    solo material de cámara.
+    Si encontrás una que en realidad es de cámara, mandala a un evento igual.
+    <a href="?orden={{ 'ruta' if request.args.get('orden') != 'ruta' else 'fecha' }}">
+      ordenar por {{ 'carpeta' if request.args.get('orden') != 'ruta' else 'fecha' }}</a>
+  </div>
+</div>
+
+{{ barra_orden(vista, orden, q, desc, n, total, formato) }}
+
+<p class="apagado">
+  Click para seleccionar · Shift+click para un rango · <b>A</b> selecciona lo cargado · <b>Esc</b> limpia · la selección se mantiene al scrollear
+</p>
+
+<div class="rejilla" data-vista="{{ vista }}" data-orden="{{ orden }}" data-q="{{ q }}" data-desc="{{ 1 if desc else 0 }}" data-formato="{{ formato }}">
+{% for f in fotos %}{{ celda(f) }}{% endfor %}
+</div>
+<div id="fin" class="apagado" style="text-align:center;padding:1.4rem"></div>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> seleccionadas</b>
+  <select id="destino">
+    <option value="nuevo">→ Evento NUEVO…</option>
+    <optgroup label="Agregar a un evento existente">
+    {% for o in otros %}
+      <option value="{{ o.id }}">{{ (o.name or o.suggested_name or 'Evento ' ~ o.id) }}{% if o.start_time %} ({{ o.start_time[:10] }}){% endif %}</option>
+    {% endfor %}
+    </optgroup>
+  </select>
+  <input type="text" id="nombre" placeholder="nombre del evento nuevo">
+  <button onclick="aplicar()">Aplicar</button>
+  <button class="gris" onclick="Sel.basurero()">🗑 Al basurero</button>
+  <button class="gris" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))">Limpiar</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function aplicar(){
+  Sel.mover(document.querySelector('#destino').value,
+            document.querySelector('#nombre').value);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cotizador de Fotografía - Renzo</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Generador de Cotizaciones</h1>
+        </header>
+
+        <main>
+            <div class="layout">
+                <div class="form-section">
+                    <form id="cotizador-form">
+                        
+                        <!-- 1. Cobertura -->
+                        <fieldset>
+                            <legend>1. Cobertura</legend>
+                            <div class="form-group">
+                                <label for="horaInicio">Hora de Inicio Exacta:</label>
+                                <input type="time" id="horaInicio" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="horaFin">Hora de Fin Exacta:</label>
+                                <input type="time" id="horaFin" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="duracionBase">Horas base incluidas:</label>
+                                <input type="number" id="duracionBase" min="1" value="2" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="canchasSimultaneas">Canchas/Ubicaciones Simultáneas:</label>
+                                <input type="number" id="canchasSimultaneas" min="1" value="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="partidosIncluidos">Partidos/Momentos incluidos (opcional):</label>
+                                <input type="text" id="partidosIncluidos" placeholder="Ej. 3 partidos de fase de grupos">
+                            </div>
+                            <div class="form-group">
+                                <label for="ubicacion">Ubicación del evento:</label>
+                                <input type="text" id="ubicacion" placeholder="Ej. Club de Polo" required>
+                            </div>
+                        </fieldset>
+
+                        <!-- 3. Precio y Pagos (Inputs) -->
+                        <fieldset>
+                            <legend>2. Tarifas Base y Extras</legend>
+                            <div class="form-group">
+                                <label for="precioBase">Precio Base del Pack ($):</label>
+                                <input type="number" id="precioBase" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="costoTraslado">Costo Traslado/Estacionamiento ($):</label>
+                                <input type="number" id="costoTraslado" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="precioHoraExtra">Recargo por Hora Extra ($):</label>
+                                <input type="number" id="precioHoraExtra" value="30000">
+                            </div>
+                            <div class="form-group">
+                                <label for="precioCanchaExtra">Recargo Cancha Adicional ($):</label>
+                                <input type="number" id="precioCanchaExtra" value="20000">
+                            </div>
+                            <div class="form-group">
+                                <label for="precioFotoExtra">Precio por Foto Adicional ($):</label>
+                                <input type="number" id="precioFotoExtra" value="2500">
+                            </div>
+                            <div class="form-group">
+                                <label for="anticipoPorcentaje">% Anticipo (Reserva):</label>
+                                <input type="number" id="anticipoPorcentaje" value="30" min="0" max="100">
+                            </div>
+                            <div class="form-group">
+                                <label for="emiteBoleta">¿Emite Boleta de Honorarios?</label>
+                                <select id="emiteBoleta">
+                                    <option value="Si">Sí</option>
+                                    <option value="No">No</option>
+                                </select>
+                            </div>
+                        </fieldset>
+
+                        <!-- 2. Contenido del Pack -->
+                        <fieldset>
+                            <legend>3. Entregables y Edición</legend>
+                            <div class="form-group">
+                                <label for="fotosEntregadas">Total Fotos Entregadas (Mínimo):</label>
+                                <input type="number" id="fotosEntregadas" value="40" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="fotosGaleria">Fotos en Galería de Selección (Mínimo):</label>
+                                <input type="number" id="fotosGaleria" value="70" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="tipoEdicion">Tipo de Edición:</label>
+                                <select id="tipoEdicion">
+                                    <option value="Basica">Edición Básica (Color, exposición, recorte)</option>
+                                    <option value="Completa" selected>Edición Completa (Color, exposición, recorte, reducción de ruido)</option>
+                                    <option value="Mixta">Mixta (Especificar en notas)</option>
+                                </select>
+                            </div>
+                        </fieldset>
+
+                        <!-- 4. Entrega -->
+                        <fieldset>
+                            <legend>4. Plazos y Entrega</legend>
+                            <div class="form-group">
+                                <label for="plazoEntrega">Plazo de entrega (días hábiles):</label>
+                                <input type="number" id="plazoEntrega" value="7" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="metodoEntrega">Método de entrega:</label>
+                                <select id="metodoEntrega">
+                                    <option value="Pixieset">Galería Privada (Pixieset)</option>
+                                    <option value="Drive">Google Drive</option>
+                                    <option value="WeTransfer">WeTransfer</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="vigenciaGaleria">Vigencia para descarga (meses):</label>
+                                <input type="number" id="vigenciaGaleria" value="2" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="galeriaPublica">¿Generar Galería Pública c/ Marca de Agua?</label>
+                                <select id="galeriaPublica">
+                                    <option value="Si">Sí (con contraseña)</option>
+                                    <option value="No">No</option>
+                                </select>
+                            </div>
+                        </fieldset>
+
+                        <button type="button" id="btn-calcular">Calcular y Generar Propuesta</button>
+                    </form>
+                </div>
+
+                <div class="result-section">
+                    <h2>Resumen de Cotización</h2>
+                    
+                    <div class="price-cards">
+                        <div class="card">
+                            <h3>Total a Cobrar</h3>
+                            <p id="totalFinal" class="amount">$0</p>
+                        </div>
+                        <div class="card">
+                            <h3>Anticipo Reserva</h3>
+                            <p id="totalAnticipo" class="amount">$0</p>
+                        </div>
+                        <div class="card">
+                            <h3>Saldo (Contra Entrega)</h3>
+                            <p id="totalSaldo" class="amount">$0</p>
+                        </div>
+                    </div>
+
+                    <div class="texto-propuesta">
+                        <h3>Texto para enviar al cliente:</h3>
+                        <textarea id="textoGenerado" readonly></textarea>
+                        <button type="button" id="btn-copiar">Copiar al Portapapeles</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

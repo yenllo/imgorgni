@@ -1,0 +1,26 @@
+# Autocull — Night Sports Photo Culling
+# Core image processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# RAW file support (optional — skip if using pre-exported JPEGs)
+rawpy>=0.19.0
+
+# Person detection (YOLOv8n ONNX)
+onnxruntime>=1.17.0
+# For iGPU/NPU acceleration instead of CPU, install ONE of these instead:
+#   pip install onnxruntime-directml   (AMD/Intel iGPU via DirectML)
+# Without it, the YOLO backend always falls back to CPU.
+
+# Facial expression analysis (eyes closed / grimace) — required by analyzers/face.py
+mediapipe>=0.10.0
+
+# EXIF metadata reading
+exifread>=3.0.0
+
+# CLI experience
+rich>=13.0.0
+
+# Web review app (autocull.web) — local FastAPI backend + UI
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0

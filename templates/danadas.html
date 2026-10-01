@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_celda.html" import celda %}
+{% from "_barra_orden.html" import barra_orden %}
+{% block title %}Dañadas · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel">
+  <b style="font-size:1.3rem">{{ '{:,}'.format(cuentas.todas) }}</b>
+  <span class="apagado">archivos que perdieron datos de verdad</span>
+  <div class="apagado" style="margin-top:.4rem">
+    <b>No borres nada mirando la miniatura.</b> El daño de estos archivos no se
+    ve: los JPEG a los que solo les falta el marcador de fin abren enteros, y
+    los RAW muestran la vista previa que la cámara les incrustó aunque el sensor
+    esté corrupto. Lo que decide es el decodificado, no el ojo.
+    <br>Además, esta lista <b>es el inventario de lo que hay que buscar</b> en
+    OneDrive y Lightroom: si los borrás, perdés la lista.
+  </div>
+
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.8rem">
+    {% for k, v, etiqueta in tabs %}
+      <a class="boton {% if tipo != k %}gris{% endif %}"
+         href="{{ url_for('danadas', tipo=k, orden=orden) }}">
+        {{ etiqueta }} <span class="apagado">{{ '{:,}'.format(cuentas[k]) }}</span></a>
+    {% endfor %}
+  </div>
+</div>
+
+{% if tipo == 'raw' %}
+<div class="panel" style="border-color:var(--alerta)">
+  <b style="color:var(--alerta)">Acá la vista no alcanza para decidir.</b>
+  <div class="apagado" style="margin-top:.3rem">
+    La miniatura de un RAW sale de la vista previa JPEG que la cámara le
+    incrusta, y esa suele estar intacta aunque los datos del sensor estén
+    corruptos. O sea: <b>estos se ven bien y no se pueden revelar igual</b>.
+    Lo que falló fue el desempaquetado real (<code>verificar_raw.py</code>),
+    que sí lee el sensor. Es pérdida de verdad: son los que conviene buscar
+    en Lightroom.
+  </div>
+</div>
+{% elif tipo == 'menor' %}
+<div class="panel">
+  <b>Estos abren perfecto.</b>
+  <div class="apagado" style="margin-top:.3rem">
+    Les falta el marcador de fin de archivo (2 bytes) porque se cortaron al
+    final durante el rescate de F:, pero la imagen está completa: medido sobre
+    600, el 99,8% no perdió ni un byte de datos. <b>No hay nada que recuperar
+    ni que borrar acá.</b> Están listados solo para que, cuando haya que elegir
+    entre dos copias iguales, se prefiera la que tiene el archivo entero.
+  </div>
+</div>
+{% endif %}
+
+{{ barra_orden(vista, orden, q, desc, n, total, formato) }}
+
+<p class="apagado">
+  Click para seleccionar · Shift+click para un rango · <b>A</b> selecciona lo cargado
+  · <b>Esc</b> limpia · pasá el mouse y tocá «ver» para abrirla entera
+</p>
+
+<div class="rejilla" data-vista="{{ vista }}" data-orden="{{ orden }}"
+     data-q="{{ q }}" data-desc="{{ 1 if desc else 0 }}" data-formato="{{ formato }}">
+{% for f in fotos %}{{ celda(f) }}{% endfor %}
+</div>
+<div id="fin" class="apagado" style="text-align:center;padding:1.4rem"></div>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> seleccionadas</b>
+  <button onclick="Sel.sana()">✓ Está sana</button>
+  <button class="gris" onclick="Sel.basurero()">🗑 Al basurero</button>
+  <button class="gris" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))">Limpiar</button>
+</div>
+{% endblock %}

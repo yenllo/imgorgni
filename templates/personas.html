@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Personas · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel" style="display:flex;gap:.6rem;align-items:center">
+  <b>{{ personas|length }} personas detectadas</b>
+  <span class="apagado">agrupadas por cara, orden por cantidad</span>
+  <span class="crece"></span>
+  <a href="{{ url_for('caras_sueltas') }}">Caras sueltas →</a>
+</div>
+
+{% if not personas %}
+  <p class="apagado">Todavía no hay personas agrupadas.</p>
+{% endif %}
+
+<div class="tarjetas">
+  {% for p in personas %}
+  <a href="{{ url_for('persona_detalle', pid=p.id) }}" class="tarjeta">
+    <img loading="lazy" src="{{ url_for('face_thumb', face_id=p.face_id) }}" alt="">
+    <div class="cuerpo">
+      <b>{{ p.name or ('Persona ' ~ p.id) }}</b>
+      <span class="pill">{{ '{:,}'.format(p.face_count) }} caras</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

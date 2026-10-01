@@ -1,0 +1,6 @@
+# Cuando aparece una particion USB con sistema de archivos, puede ser una
+# tarjeta de camara. El guion decide: si no tiene DCIM, no hace nada.
+# systemd-run la desprende de udev, que mata todo lo que tarde mas de unos
+# segundos — y una fecha tarda ~40 minutos.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_TYPE}!="", \
+  RUN+="/usr/bin/systemd-run --no-block --unit=ingesta-%k /usr/local/bin/ingesta %k"

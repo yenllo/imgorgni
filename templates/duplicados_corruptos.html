@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Ambos corruptos · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+  <div>
+    <b>{{ '{:,}'.format(n) }} pares donde los dos lados dieron truncados</b>
+    <div class="apagado" style="margin-top:.3rem">
+      Ninguno de los dos se pudo confirmar sano (falta el marcador de fin de archivo JPEG en ambos).
+      Mirá cuál miniatura se ve menos rota y elegí esa, o si ninguna sirve mandá las dos al basurero.
+    </div>
+  </div>
+  <span class="crece"></span>
+  {% if filas %}
+  <button style="background:var(--ok)" onclick="borrarPagina()">Borrar ambas de toda esta página ({{ filas|length }})</button>
+  {% endif %}
+</div>
+
+{% if not filas %}
+  <p class="apagado">No hay pares para revisar con este filtro.</p>
+{% endif %}
+
+{% for f in filas %}
+<div class="panel par" data-id="{{ f.id }}" data-conservar="{{ f.id_conservar }}" data-descartar="{{ f.id_descartar }}">
+  <div style="display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.6rem">
+    <span class="pill" style="background:#d33;color:#fff">ambos corruptos</span>
+    <span class="apagado">{{ f.razon }}</span>
+    <span class="crece"></span>
+    <span class="apagado">{{ '{:,.1f}'.format(f.mb) }} MB</span>
+  </div>
+
+  <div style="display:grid;gap:1rem;grid-template-columns:1fr 1fr">
+    <div>
+      <a href="{{ url_for('full', pid=f.id_conservar) }}" target="_blank">
+        <img loading="lazy" src="{{ url_for('thumb', pid=f.id_conservar) }}"
+             style="width:100%;max-height:280px;object-fit:contain;background:var(--linea);border-radius:6px">
+      </a>
+      <div class="apagado" style="font-size:.75rem;word-break:break-all;margin:.3rem 0">{{ f.ruta_conservar }}</div>
+      <button style="width:100%" onclick="elegir({{ f.id }}, 'conservar', this)">Conservar este →</button>
+    </div>
+    <div>
+      <a href="{{ url_for('full', pid=f.id_descartar) }}" target="_blank">
+        <img loading="lazy" src="{{ url_for('thumb', pid=f.id_descartar) }}"
+             style="width:100%;max-height:280px;object-fit:contain;background:var(--linea);border-radius:6px">
+      </a>
+      <div class="apagado" style="font-size:.75rem;word-break:break-all;margin:.3rem 0">{{ f.ruta_descartar }}</div>
+      <button style="width:100%" onclick="elegir({{ f.id }}, 'descartar', this)">Conservar este →</button>
+    </div>
+  </div>
+
+  <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+    <button class="gris" onclick="borrarAmbas({{ f.id }}, [{{ f.id_conservar }}, {{ f.id_descartar }}])">🗑 Borrar ambas (al basurero)</button>
+    <button class="gris" onclick="decidir([{{ f.id }}],'conservar')">Conservar las dos igual</button>
+  </div>
+</div>
+{% endfor %}
+
+{% if paginas > 1 %}
+<div class="paginas">
+  {% for p in range(1, paginas+1) %}
+    {% if p <= 3 or p > paginas-3 or (p-pag)|abs <= 2 %}
+      <a class="{% if p==pag %}act{% endif %}" href="?p={{ p }}">{{ p }}</a>
+    {% elif p == 4 and pag > 6 %}<span class="apagado">…</span>{% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function _post(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  return r.ok ? await r.json() : {ok:false};
+}
+function quitarDelDOM(id){
+  const el = document.querySelector('.par[data-id="'+id+'"]');
+  if(el) el.remove();
+}
+async function elegir(id, lado, btn){
+  btn.disabled = true;
+  const r = await _post('/api/duplicado/elegir', {id, lado});
+  if(r.ok) quitarDelDOM(id); else { alert('No se pudo guardar'); btn.disabled = false; }
+}
+async function decidir(ids, decision){
+  const r = await _post('/api/duplicado/decidir', {ids, decision});
+  if(r.ok) ids.forEach(quitarDelDOM); else alert('No se pudo guardar');
+}
+async function borrarAmbas(parId, fotoIds){
+  if(!confirm('Mandar las 2 fotos de este par al basurero?\n\nNo se borran del disco: quedan en el Basurero, revertible.')) return;
+  const r = await _post('/api/basurero', {ids: fotoIds});
+  if(r.ok) quitarDelDOM(parId); else alert('No se pudo guardar');
+}
+async function borrarPagina(){
+  const pares = [...document.querySelectorAll('.par')];
+  const fotoIds = pares.flatMap(p => [Number(p.dataset.conservar), Number(p.dataset.descartar)]);
+  if(!fotoIds.length) return;
+  if(!confirm(`Mandar las ${fotoIds.length} fotos de estos ${pares.length} pares al basurero?\n\nNo se borran del disco: quedan en el Basurero, revertible.`)) return;
+  const r = await _post('/api/basurero', {ids: fotoIds});
+  if(r.ok) location.reload(); else alert('No se pudo guardar');
+}
+</script>
+{% endblock %}

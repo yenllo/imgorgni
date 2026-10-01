@@ -1,0 +1,41 @@
+{# Buscador + criterio de orden. Se envía por GET: el scroll infinito hereda
+   los mismos parámetros desde los data-* de la rejilla. #}
+{% macro barra_orden(vista, orden, q, desc, n, total, formato='') %}
+<div class="panel" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:end">
+  <form method="get" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:end;flex:1">
+    <div style="flex:1;min-width:210px">
+      <label for="q">Buscar archivo o carpeta</label>
+      <input type="search" id="q" name="q" value="{{ q }}"
+             placeholder="DSC01049, .ARW, LigaExScuola…">
+    </div>
+    <div>
+      <label for="orden">Ordenar por</label>
+      <select id="orden" name="orden" onchange="this.form.submit()" style="width:auto">
+        {% for v, l in [('fecha','Fecha de captura'), ('nombre','Nombre de archivo'),
+                        ('peso','Peso'), ('dimension','Dimensiones'),
+                        ('carpeta','Carpeta'), ('formato','Tipo de archivo')] %}
+          <option value="{{ v }}" {% if orden == v %}selected{% endif %}>{{ l }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="formato">Tipo</label>
+      <select id="formato" name="formato" onchange="this.form.submit()" style="width:auto">
+        {% for v, l in [('','Todos'), ('raw','Solo RAW'), ('jpeg','Solo JPEG')] %}
+          <option value="{{ v }}" {% if formato == v %}selected{% endif %}>{{ l }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="desc" value="{{ '1' if desc else '0' }}">
+    <button type="submit" class="gris"
+            onclick="this.form.desc.value='{{ '0' if desc else '1' }}'"
+            title="invertir el orden">{{ '↓ mayor a menor' if desc else '↑ menor a mayor' }}</button>
+    <button type="submit">Buscar</button>
+    {% if q or formato %}<a class="boton gris" href="?orden={{ orden }}">Limpiar</a>{% endif %}
+  </form>
+  <div class="apagado" style="padding-bottom:.45rem">
+    {% if q or formato %}{{ '{:,}'.format(n) }} de {{ '{:,}'.format(total) }}
+    {% else %}{{ '{:,}'.format(n) }} fotos{% endif %}
+  </div>
+</div>
+{% endmacro %}

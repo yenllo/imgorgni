@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Etiquetas · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel">
+  <b style="font-size:1.3rem">{{ filas|length }} etiquetas</b>
+  <span class="apagado">· {{ '{:,}'.format(revisadas) }} veredictos tuyos</span>
+  <div class="apagado" style="margin-top:.4rem">
+    Todas las etiquetas que el análisis sabe reconocer. <b>Ver</b> muestra las fotos;
+    <b>Revisar</b> abre el repaso de a una foto para decir si pertenece o no.
+    Tu respuesta manda sobre la del modelo: un «no» saca la foto de la etiqueta
+    en todas las vistas, un «sí» la mete aunque el modelo no la haya marcado.
+  </div>
+</div>
+
+<div class="tabla-scroll">
+<table>
+  <thead><tr><th>Etiqueta</th><th style="text-align:right">Fotos</th>
+             <th style="text-align:right">Revisadas</th><th></th></tr></thead>
+  <tbody>
+  {% for f in filas %}
+  <tr>
+    <td><a href="{{ url_for('etiqueta', tag=f.tag) }}">{{ f.tag }}</a></td>
+    <td style="text-align:right">{{ '{:,}'.format(f.n) }}</td>
+    <td style="text-align:right">
+      {% if f.si or f.no %}
+        <span class="pill ok">{{ f.si }} sí</span><span class="pill">{{ f.no }} no</span>
+        {% if f.si + f.no >= 10 %}
+          <span class="apagado">{{ (100 * f.si / (f.si + f.no))|round|int }}% acierto</span>
+        {% endif %}
+      {% else %}<span class="apagado">—</span>{% endif %}
+    </td>
+    <td><a class="boton gris" href="{{ url_for('revisar', tag=f.tag) }}">Revisar</a></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

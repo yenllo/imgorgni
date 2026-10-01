@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Autocull — Revisión</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --border: #2a2f3a;
+    --txt: #e6e9ef; --muted: #8a93a3; --accent: #4f8cff;
+    --pass: #2ecc71; --reject: #ff5564; --warn: #ffb648; --ball: #ffd166;
+    --shadow: 0 2px 10px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size:14px; }
+  header { position:sticky; top:0; z-index:20; background:var(--panel);
+           border-bottom:1px solid var(--border); padding:10px 16px; box-shadow:var(--shadow); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0 12px 0 0; font-weight:700; letter-spacing:.3px; }
+  h1 span { color:var(--accent); }
+  input, select, button { font-family:inherit; font-size:13px; }
+  input[type=text], input[type=number], select {
+    background:var(--panel2); color:var(--txt); border:1px solid var(--border);
+    border-radius:7px; padding:7px 9px; outline:none; }
+  input[type=text] { min-width:360px; flex:1; }
+  input[type=number] { width:64px; }
+  button { background:var(--panel2); color:var(--txt); border:1px solid var(--border);
+    border-radius:7px; padding:7px 12px; cursor:pointer; transition:.12s; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.primary:hover { filter:brightness(1.1); }
+  button.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .muted { color:var(--muted); }
+  .stats { gap:16px; margin-top:8px; font-size:13px; }
+  .stat b { font-size:16px; }
+  .stat.pass b { color:var(--pass); } .stat.reject b { color:var(--reject); }
+  /* progress */
+  #progress { margin-top:10px; display:none; }
+  .bar { height:8px; background:var(--panel2); border-radius:5px; overflow:hidden; border:1px solid var(--border); }
+  .bar > div { height:100%; background:var(--accent); width:0%; transition:width .2s; }
+  /* main */
+  main { padding:16px; }
+  .burst { margin-bottom:22px; }
+  .burst-h { color:var(--muted); font-size:12px; margin:0 0 8px 2px; text-transform:uppercase; letter-spacing:.5px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden;
+          position:relative; transition:.12s; }
+  .card.sel { outline:2px solid var(--accent); outline-offset:1px; }
+  .card.best::after { content:"★ mejor"; position:absolute; top:7px; left:7px; background:var(--ball);
+          color:#000; font-size:10px; font-weight:700; padding:2px 6px; border-radius:5px; }
+  .card.d-REJECT { opacity:.62; }
+  .thumb { width:100%; aspect-ratio:3/2; background:var(--panel2); object-fit:cover; display:block; cursor:zoom-in; }
+  .meta { padding:8px 9px; }
+  .badge-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
+  .score { font-weight:700; font-size:15px; }
+  .dec { font-size:11px; font-weight:700; padding:2px 7px; border-radius:5px; }
+  .dec.PASS { background:rgba(46,204,113,.15); color:var(--pass); }
+  .dec.REJECT { background:rgba(255,85,100,.15); color:var(--reject); }
+  .dec.ERROR { background:rgba(255,182,72,.15); color:var(--warn); }
+  .dec.NEW { background:rgba(138,147,163,.15); color:var(--muted); }
+  .ov { font-size:10px; color:var(--accent); }
+  .chips { display:flex; gap:5px; flex-wrap:wrap; font-size:11px; color:var(--muted); margin-bottom:7px; min-height:16px; }
+  .chip.warn { color:var(--warn); } .chip.ball { color:var(--ball); }
+  .reason { font-size:11px; color:var(--reject); margin-bottom:7px; min-height:14px; }
+  .acts { display:flex; gap:6px; }
+  .acts button { flex:1; padding:5px; font-size:12px; }
+  .acts .keep.on { background:var(--pass); border-color:var(--pass); color:#062; font-weight:700; }
+  .acts .rej.on { background:var(--reject); border-color:var(--reject); color:#400; font-weight:700; }
+  .name { font-size:10px; color:var(--muted); margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #empty { color:var(--muted); text-align:center; padding:60px; }
+  /* lightbox */
+  #lb { display:none; position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:50;
+        align-items:center; justify-content:center; flex-direction:column; }
+  #lb img { max-width:94vw; max-height:84vh; border-radius:6px; }
+  #lb .lbinfo { color:var(--txt); margin-top:12px; font-size:13px; }
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--panel2);
+    border:1px solid var(--border); padding:9px 16px; border-radius:8px; box-shadow:var(--shadow);
+    opacity:0; transition:.2s; pointer-events:none; z-index:60; }
+  kbd { background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:11px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>⚽ Auto<span>cull</span></h1>
+    <input type="text" id="folder" placeholder="C:\Fotos\LigaExScuola\13-06-2026\jpeg" spellcheck="false">
+    <label class="muted">corte% <input type="number" id="threshold" value="30" min="0" max="90"></label>
+    <label class="muted">min jugadores <input type="number" id="minp" value="1" min="0" max="10"></label>
+    <button class="primary" id="go">Analizar</button>
+    <button id="reload" title="Cargar resultados ya guardados de esta carpeta">Cargar</button>
+    <button id="browse" title="Ver las fotos sin analizarlas — no mueve ni copia nada">Ver fotos</button>
+  </div>
+  <div class="row stats" id="stats" style="display:none">
+    <span class="stat">Total <b id="s-total">0</b></span>
+    <span class="stat pass">PASS <b id="s-pass">0</b></span>
+    <span class="stat reject">REJECT <b id="s-rej">0</b></span>
+    <span class="stat">Ráfagas <b id="s-burst">0</b></span>
+    <span class="stat">Tuyas <b id="s-ov">0</b></span>
+    <span style="flex:1"></span>
+    <button id="f-all" class="active">Todas</button>
+    <button id="f-pass">Solo PASS</button>
+    <button id="f-rej">Solo REJECT</button>
+    <select id="sort">
+      <option value="time">Orden: cronológico</option>
+      <option value="score">Orden: por score</option>
+    </select>
+    <button id="exp-copy" title="Copia las PASS a _selected/ (no mueve originales)">Copiar selección</button>
+    <button id="exp-xmp" title="Escribe sidecars .xmp: aprobadas 5★/Verde, rechazadas 1★/Rojo">XMP para Lightroom</button>
+  </div>
+  <div id="progress">
+    <div class="bar"><div id="barfill"></div></div>
+    <div class="muted" id="progtxt" style="margin-top:5px; font-size:12px;"></div>
+  </div>
+</header>
+
+<main>
+  <div id="empty">Escribe la ruta de una carpeta y pulsa <b>Analizar</b>, o <b>Ver fotos</b> para solo mirarlas.<br>
+    <span class="muted" style="font-size:12px">Atajos: <kbd>←→↑↓</kbd> mover · <kbd>P</kbd> mantener · <kbd>X</kbd> rechazar · <kbd>A</kbd> auto · <kbd>Enter</kbd> ampliar · en la foto ampliada <kbd>←→</kbd> pasa de imagen</span>
+  </div>
+  <div id="results"></div>
+</main>
+
+<div id="lb"><img id="lbimg" src=""><div class="lbinfo" id="lbinfo"></div></div>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let S = { folder:"", records:[], overrides:{}, filter:"all", sort:"time", sel:-1, visible:[] };
+
+const api = async (url, opts) => {
+  const r = await fetch(url, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); throw new Error(e.detail||r.statusText); }
+  return r.json();
+};
+const toast = (m) => { const t=$("#toast"); t.textContent=m; t.style.opacity=1; clearTimeout(t._t); t._t=setTimeout(()=>t.style.opacity=0,1800); };
+const thumbURL = (name, size=480) => `/api/thumb?folder=${encodeURIComponent(S.folder)}&name=${encodeURIComponent(name)}&size=${size}`;
+
+// ── Analyze ──────────────────────────────────────────────
+async function analyze() {
+  const folder = $("#folder").value.trim();
+  if (!folder) { toast("Escribe una ruta de carpeta"); return; }
+  S.folder = folder; localStorage.setItem("autocull_folder", folder);
+  $("#progress").style.display="block"; $("#barfill").style.width="0%";
+  $("#progtxt").textContent="Cargando modelos de IA (~10-15s)...";
+  $("#empty").style.display="none";
+  try {
+    const { job_id } = await api("/api/analyze", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ folder, threshold:+$("#threshold").value, min_persons:+$("#minp").value })
+    });
+    await pollJob(job_id);
+  } catch (e) { $("#progtxt").textContent="❌ "+e.message; toast(e.message); }
+}
+
+async function pollJob(id) {
+  const job = await api(`/api/jobs/${id}`);
+  if (job.state === "running") {
+    if (job.total > 0) {
+      const pct = Math.round(job.completed/job.total*100);
+      $("#barfill").style.width = pct+"%";
+      $("#progtxt").textContent = `Analizando ${job.completed}/${job.total} · ${job.elapsed}s`;
+    }
+    setTimeout(()=>pollJob(id), 600); return;
+  }
+  if (job.state === "error") { $("#progtxt").textContent="❌ "+(job.error||"").split("\n")[0]; toast("Error en el análisis"); return; }
+  $("#barfill").style.width="100%"; $("#progtxt").textContent=`Listo en ${job.elapsed}s`;
+  setTimeout(()=>{ $("#progress").style.display="none"; }, 1200);
+  await loadSession();
+}
+
+// Ver fotos sin analizar: solo lista la carpeta (no mueve ni copia nada).
+async function browse() {
+  const folder = $("#folder").value.trim();
+  if (!folder) { toast("Escribe una ruta de carpeta"); return; }
+  S.folder = folder; localStorage.setItem("autocull_folder", folder);
+  try {
+    const st = await api("/api/browse", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ folder })
+    });
+    S.records = st.records; S.overrides = st.overrides || {};
+    applySummary(st.summary); render();
+  } catch (e) { toast(e.message); $("#empty").style.display="block"; $("#empty").textContent=e.message; }
+}
+
+async function loadSession() {
+  const folder = $("#folder").value.trim(); if (!folder) return;
+  S.folder = folder;
+  try {
+    const st = await api(`/api/session?folder=${encodeURIComponent(folder)}`);
+    S.records = st.records; S.overrides = st.overrides || {};
+    applySummary(st.summary); render();
+  } catch (e) { toast(e.message); $("#empty").style.display="block"; $("#empty").textContent=e.message; }
+}
+
+function applySummary(sm) {
+  $("#stats").style.display="flex";
+  $("#s-total").textContent=sm.total; $("#s-pass").textContent=sm.passed;
+  $("#s-rej").textContent=sm.rejected; $("#s-burst").textContent=sm.bursts;
+  $("#s-ov").textContent=sm.overridden;
+}
+
+// ── Render ───────────────────────────────────────────────
+function render() {
+  const res = $("#results"); res.innerHTML="";
+  let recs = S.records.slice();
+  if (S.filter==="pass") recs = recs.filter(r=>r.decision==="PASS");
+  if (S.filter==="rej")  recs = recs.filter(r=>r.decision==="REJECT");
+  if (recs.length===0) { $("#empty").style.display="block"; $("#empty").textContent="Sin fotos para este filtro."; S.visible=[]; return; }
+  $("#empty").style.display="none";
+
+  // group by burst
+  const groups = {};
+  for (const r of recs) (groups[r.burst_group] ??= []).push(r);
+  const order = Object.keys(groups).map(Number).sort((a,b)=>a-b);
+  // Mejor de cada ráfaga (se marca igual en los dos órdenes).
+  const bests = new Set(order.map(g => groups[g].reduce((a,b)=> b.score>a.score?b:a, groups[g][0]))
+                             .filter(r => r.score>0).map(r => r.name));
+
+  S.visible = [];
+  const section = (title, items) => {
+    const sec = document.createElement("div"); sec.className="burst";
+    const h = document.createElement("div"); h.className="burst-h"; h.textContent = title;
+    sec.appendChild(h);
+    const grid = document.createElement("div"); grid.className="grid";
+    for (const r of items) { const idx=S.visible.length; S.visible.push(r);
+      grid.appendChild(card(r, bests.has(r.name), idx)); }
+    sec.appendChild(grid); res.appendChild(sec);
+  };
+
+  if (S.sort==="score") {
+    // Ranking de toda la sesión: ordenar dentro de cada ráfaga de 3 fotos no ordena nada.
+    section(`${recs.length} fotos · score de mayor a menor`,
+            recs.slice().sort((a,b)=> b.score - a.score));
+    return;
+  }
+  for (const g of order)
+    section(`Ráfaga ${g+1} · ${groups[g].length} foto${groups[g].length>1?"s":""}`, groups[g]);
+}
+
+function card(r, isBest, idx) {
+  const c = document.createElement("div");
+  c.className = `card d-${r.decision}` + (isBest?" best":"") + (idx===S.sel?" sel":"");
+  c.dataset.idx = idx;
+  const scoreTxt = r.score > 0 ? Math.round(r.score) : "—";
+  const chips = [];
+  if (r.persons) chips.push(`<span class="chip">👤${r.persons}</span>`);
+  if (r.has_ball) chips.push(`<span class="chip ball">⚽</span>`);
+  if (r.subj_snr) chips.push(`<span class="chip">SNR ${Math.round(r.subj_snr)}</span>`);
+  if (r.eyes_closed) chips.push(`<span class="chip warn">ojos cerrados</span>`);
+  if (r.grimace) chips.push(`<span class="chip warn">mueca</span>`);
+  const ov = S.overrides[r.name];
+  c.innerHTML = `
+    <img class="thumb" loading="lazy" src="${thumbURL(r.name)}" onerror="this.style.opacity=.25">
+    <div class="meta">
+      <div class="badge-row">
+        <span class="score">${scoreTxt}</span>
+        <span class="dec ${r.decision}">${r.decision}${ov?` <span class="ov">✎</span>`:""}</span>
+      </div>
+      <div class="chips">${chips.join("")}</div>
+      <div class="reason">${r.decision==="REJECT"&&r.reject_reason?reasonES(r.reject_reason):""}</div>
+      <div class="acts">
+        <button class="keep ${ov==="keep"?"on":""}" data-act="keep">Mantener</button>
+        <button class="rej ${ov==="reject"?"on":""}" data-act="reject">Rechazar</button>
+      </div>
+      <div class="name" title="${r.name}">${r.name}</div>
+    </div>`;
+  c.querySelector(".thumb").addEventListener("click", ()=>openLightbox(r));
+  c.querySelectorAll(".acts button").forEach(b=>b.addEventListener("click", ev=>{
+    ev.stopPropagation();
+    const act = b.dataset.act;
+    decide(r, S.overrides[r.name]===act ? "auto" : act);
+  }));
+  c.addEventListener("click", ()=>{ S.sel=idx; highlightSel(); });
+  return c;
+}
+
+const REASONS = {
+  no_subject:"sin jugador", subject_out_of_focus:"jugador fuera de foco",
+  subject_too_dark:"jugador muy oscuro", global_blur_snr:"poco nítida",
+  motion_blur_fft:"movida / trepidación", severely_underexposed:"subexpuesta",
+  blown_highlights:"quemada", burst_duplicate:"duplicado de ráfaga",
+  below_final_percentile:"bajo el corte"
+};
+const reasonES = k => REASONS[k] || k;
+
+// ── Decisions ────────────────────────────────────────────
+async function decide(r, decision) {
+  try {
+    const res = await api("/api/decision", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ folder:S.folder, name:r.name, decision })
+    });
+    r.decision = res.decision;
+    if (res.overridden) S.overrides[r.name] = decision==="auto"?undefined:decision;
+    if (!res.overridden) delete S.overrides[r.name];
+    applySummary(res.summary);
+    render();
+    if (lbOpen()) showLightbox(S.sel);  // refresca el pie de la foto ampliada
+  } catch(e){ toast(e.message); }
+}
+
+// ── Lightbox ─────────────────────────────────────────────
+const lbOpen = () => $("#lb").style.display==="flex";
+function openLightbox(r) { showLightbox(S.visible.indexOf(r)); }
+
+// Muestra la foto *idx* de S.visible; mantiene la selección de la grilla en sync.
+function showLightbox(idx) {
+  if (!S.visible.length) return;
+  S.sel = Math.max(0, Math.min(S.visible.length-1, idx));
+  const r = S.visible[S.sel];
+  $("#lbimg").src = thumbURL(r.name, 1500);
+  $("#lbinfo").textContent = `${S.sel+1}/${S.visible.length} · ${r.name}` +
+     (r.score>0?` · score ${Math.round(r.score)}`:"") +
+     ` · ${r.decision}` + (r.reject_reason?` (${reasonES(r.reject_reason)})`:"") +
+     (r.subj_snr?` · SNR ${Math.round(r.subj_snr)}`:"");
+  $("#lb").style.display="flex";
+  highlightSel();
+}
+function closeLightbox() { $("#lb").style.display="none"; }
+// Los tercios laterales pasan de foto; el centro cierra.
+$("#lb").addEventListener("click", e => {
+  const x = e.clientX / window.innerWidth;
+  if (x < 0.25) showLightbox(S.sel-1);
+  else if (x > 0.75) showLightbox(S.sel+1);
+  else closeLightbox();
+});
+
+// ── Export ───────────────────────────────────────────────
+async function doExport(mode) {
+  try {
+    const res = await api("/api/export", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ folder:S.folder, mode }) });
+    toast(mode==="copy" ? `Copiadas ${res.count} fotos a _selected/`
+                       : `XMP: ${res.picks} aprobadas (5★/Verde) · ${res.rejects} rechazadas (1★/Rojo)`);
+  } catch(e){ toast(e.message); }
+}
+
+// ── Keyboard nav ─────────────────────────────────────────
+function highlightSel(){
+  document.querySelectorAll(".card").forEach(c=>c.classList.toggle("sel", +c.dataset.idx===S.sel));
+  const el = document.querySelector(".card.sel"); if (el) el.scrollIntoView({block:"nearest", behavior:"smooth"});
+}
+document.addEventListener("keydown", e=>{
+  if (lbOpen()) {
+    if (e.key==="Escape" || e.key==="Enter") { closeLightbox(); return; }
+    if (e.key==="ArrowRight" || e.key==="ArrowDown") { showLightbox(S.sel+1); e.preventDefault(); return; }
+    if (e.key==="ArrowLeft" || e.key==="ArrowUp") { showLightbox(S.sel-1); e.preventDefault(); return; }
+    const r = S.visible[S.sel];
+    if ("pP".includes(e.key)) { decide(r, S.overrides[r.name]==="keep"?"auto":"keep"); return; }
+    if ("xX".includes(e.key)) { decide(r, S.overrides[r.name]==="reject"?"auto":"reject"); return; }
+    if ("aA".includes(e.key)) { decide(r, "auto"); return; }
+    return;
+  }
+  if (["INPUT","SELECT"].includes(document.activeElement.tagName)) return;
+  if (!S.visible.length) return;
+  const cols = Math.max(1, Math.floor(($("#results").querySelector(".grid")?.clientWidth||800)/202));
+  if (e.key==="ArrowRight") { S.sel=Math.min(S.visible.length-1,S.sel+1); }
+  else if (e.key==="ArrowLeft") { S.sel=Math.max(0,S.sel-1); }
+  else if (e.key==="ArrowDown") { S.sel=Math.min(S.visible.length-1,S.sel+cols); }
+  else if (e.key==="ArrowUp") { S.sel=Math.max(0,S.sel-cols); }
+  else if (e.key==="Enter" && S.sel>=0) { openLightbox(S.visible[S.sel]); return; }
+  else if ("pP".includes(e.key) && S.sel>=0) { const r=S.visible[S.sel]; decide(r, S.overrides[r.name]==="keep"?"auto":"keep"); return; }
+  else if ("xX".includes(e.key) && S.sel>=0) { const r=S.visible[S.sel]; decide(r, S.overrides[r.name]==="reject"?"auto":"reject"); return; }
+  else if ("aA".includes(e.key) && S.sel>=0) { decide(S.visible[S.sel], "auto"); return; }
+  else return;
+  if (S.sel<0) S.sel=0;
+  e.preventDefault(); highlightSel();
+});
+
+// ── Wire up ──────────────────────────────────────────────
+$("#go").addEventListener("click", analyze);
+$("#reload").addEventListener("click", loadSession);
+$("#browse").addEventListener("click", browse);
+$("#folder").addEventListener("keydown", e=>{ if(e.key==="Enter") analyze(); });
+$("#f-all").addEventListener("click", ()=>setFilter("all"));
+$("#f-pass").addEventListener("click", ()=>setFilter("pass"));
+$("#f-rej").addEventListener("click", ()=>setFilter("rej"));
+$("#sort").addEventListener("change", e=>{ S.sort=e.target.value; render(); });
+$("#exp-copy").addEventListener("click", ()=>doExport("copy"));
+$("#exp-xmp").addEventListener("click", ()=>doExport("xmp"));
+function setFilter(f){ S.filter=f; S.sel=-1;
+  ["all","pass","rej"].forEach(x=>$("#f-"+x).classList.toggle("active",x===f)); render(); }
+
+const saved = localStorage.getItem("autocull_folder"); if (saved) $("#folder").value = saved;
+</script>
+</body>
+</html>

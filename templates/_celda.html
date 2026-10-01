@@ -1,0 +1,16 @@
+{# Una celda de la rejilla: miniatura + nombre de archivo real + hora al pasar el mouse #}
+{% macro celda(f) %}
+<div class="celda" data-id="{{ f.id }}" title="{{ f.file_path }}">
+  <div class="marco">
+    <img loading="lazy" src="{{ url_for('thumb', pid=f.id) }}" alt="">
+    <a class="lupa" href="{{ url_for('full', pid=f.id) }}" target="_blank">ver</a>
+    {% if f.capture_date %}<span class="fecha">{{ f.capture_date[11:16] }}</span>{% endif %}
+  </div>
+  <div class="nombre">{{ f.file_path.split('\\')[-1] }}</div>
+  {% set meta = [] %}
+  {% if f.bytes and f.bytes > 0 %}{% set _ = meta.append(
+      '%.1f MB' % (f.bytes/1048576) if f.bytes >= 1048576 else '%d KB' % (f.bytes//1024)) %}{% endif %}
+  {% if (f.ancho or 0) > 0 and (f.alto or 0) > 0 %}{% set _ = meta.append('%d×%d' % (f.ancho, f.alto)) %}{% endif %}
+  {% if meta %}<div class="meta">{{ meta|join(' · ') }}</div>{% endif %}
+</div>
+{% endmacro %}

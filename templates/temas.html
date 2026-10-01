@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Temas · Curador{% endblock %}
+
+{% block contenido %}
+<div class="panel">
+  <b style="font-size:1.3rem">Temas</b>
+  <div class="apagado" style="margin-top:.4rem">
+    Cortes que cruzan fechas y eventos: «todas las de naturaleza» toma fotos de
+    muchos días distintos. No son eventos y no mueven nada — se calculan al
+    vuelo con las etiquetas que el análisis ya dejó en cada foto, así que una
+    misma foto puede estar en su evento y en varios temas a la vez.
+    <br><br>
+    Dentro de cada tema podés <b>filtrar por etiqueta suelta</b>, y al lado de cada
+    una hay un <b>revisar</b>: te muestra las fotos de a una y respondés con las
+    flechas si pertenece o no. Eso corrige la etiqueta en todas las vistas y sirve
+    para que el análisis aprenda dónde se equivoca.
+    <a href="{{ url_for('etiquetas') }}">Ver las {{ todas_etiquetas|length }} etiquetas →</a>
+    <br><br>
+    Los temas los armás vos: <b>editar</b> cambia el nombre y qué etiquetas entran,
+    y <b>ocultar</b> lo saca de la barra lateral sin perder nada. Borrar un tema
+    no toca ninguna foto — un tema es solo una forma de agrupar.
+  </div>
+  <div style="margin-top:.8rem">
+    <button onclick="Temas.nuevo()">+ Tema nuevo</button>
+  </div>
+</div>
+
+<div class="tarjetas">
+{% for t in temas if not t.oculto %}
+  <div class="tarjeta tema-card">
+    <a class="cuerpo" href="{{ url_for('tema', nombre=t.nombre) }}">
+      <b style="text-transform:capitalize">{{ t.nombre }}</b>
+      <div class="apagado">{{ '{:,}'.format(t.n) }} fotos ·
+        {{ t.etiquetas|length }} etiqueta{{ '' if t.etiquetas|length == 1 else 's' }}</div>
+    </a>
+    <div class="tema-acciones">
+      <button class="mini" onclick="Temas.editar({{ t.nombre|tojson }})">editar</button>
+      <button class="mini" onclick="Temas.ocultar({{ t.nombre|tojson }}, true)">ocultar</button>
+    </div>
+  </div>
+{% endfor %}
+</div>
+
+{% set escondidos = temas | rejectattr('oculto', 'equalto', false) | list %}
+{% if escondidos %}
+<div class="panel" style="margin-top:1.1rem">
+  <b>Ocultos ({{ escondidos|length }})</b>
+  <div class="apagado">No aparecen en la barra lateral. Siguen existiendo con sus etiquetas.</div>
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">
+    {% for t in escondidos %}
+      <span class="chip" style="display:inline-flex;gap:.35rem;align-items:center">
+        {{ t.nombre }} <span class="apagado">{{ t.etiquetas|length }}</span>
+        <button class="mini" onclick="Temas.ocultar({{ t.nombre|tojson }}, false)">mostrar</button>
+      </span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# Las que no entran en ningun tema. Sin esto quedan invisibles: solo se llega
+   a ellas por la lista completa de etiquetas. #}
+{% if sueltas %}
+<div class="panel" style="margin-top:1.1rem">
+  <b>Sin tema ({{ sueltas|length }})</b>
+  <div class="apagado">
+    Etiquetas que el análisis reconoce pero que no están en ningún tema.
+    Elegí una y mandala a uno.
+  </div>
+  <div class="sueltas">
+    {% for tag, n in sueltas %}
+      <span class="chip suelta">
+        <a href="{{ url_for('etiqueta', tag=tag) }}">{{ tag }}</a>
+        <span class="apagado">{{ '{:,}'.format(n) }}</span>
+        <select onchange="Temas.asignar({{ tag|tojson }}, this)">
+          <option value="">→ tema…</option>
+          {% for t in temas %}<option value="{{ t.nombre }}">{{ t.nombre }}</option>{% endfor %}
+        </select>
+      </span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# Editor. Se llena por JS con el tema que toques. #}
+<dialog id="dlg-tema">
+  <form method="dialog" id="form-tema">
+    <h3 id="dlg-titulo" style="margin:.2rem 0 .8rem">Tema</h3>
+    <label for="dlg-nombre">Nombre</label>
+    <input type="text" id="dlg-nombre" maxlength="40" autocomplete="off">
+    <label style="margin-top:.8rem">Etiquetas que entran</label>
+    <div class="apagado" style="margin-bottom:.4rem">
+      Tocá para agregar o sacar. Un tema sin etiquetas no muestra fotos.
+    </div>
+    <input type="search" id="dlg-buscar" placeholder="filtrar etiquetas…" autocomplete="off">
+    <div id="dlg-etiquetas" class="picker"></div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap">
+      <button type="button" onclick="Temas.guardar()">Guardar</button>
+      <button type="button" class="gris" onclick="document.querySelector('#dlg-tema').close()">Cancelar</button>
+      <span style="flex:1"></span>
+      <button type="button" class="gris" id="dlg-borrar" onclick="Temas.borrar()">Borrar tema</button>
+    </div>
+    <p class="apagado" id="dlg-error" style="color:#c0392b"></p>
+  </form>
+</dialog>
+
+<style>
+  .tema-card{display:flex;flex-direction:column}
+  .tema-card .cuerpo{flex:1;text-decoration:none;color:inherit}
+  .tema-acciones{display:flex;gap:.35rem;padding:0 .7rem .6rem}
+  .chip{display:inline-block;font-size:.8rem;padding:.15rem .5rem;border-radius:99px;
+        border:1px solid var(--linea);text-decoration:none;color:var(--texto)}
+  .sueltas{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem;
+           max-height:44vh;overflow-y:auto}
+  .sueltas .suelta{display:inline-flex;gap:.35rem;align-items:center}
+  .sueltas select{width:auto;font-size:.75rem;padding:.05rem .2rem}
+  dialog{border:1px solid var(--linea);border-radius:12px;background:var(--panel);
+         color:var(--texto);max-width:620px;width:92vw;padding:1.1rem}
+  dialog::backdrop{background:#0009}
+  .picker{display:flex;flex-wrap:wrap;gap:.3rem;max-height:38vh;overflow-y:auto;
+          border:1px solid var(--linea);border-radius:8px;padding:.5rem;margin-top:.4rem}
+  .picker .op{font-size:.78rem;padding:.15rem .5rem;border-radius:99px;cursor:pointer;
+              border:1px solid var(--linea);user-select:none}
+  .picker .op.puesta{background:var(--acento);color:var(--acento-t);border-color:var(--acento)}
+  .picker .op.oculta{display:none}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TODAS_ETIQUETAS = {{ todas_etiquetas|tojson }};
+const TEMAS_ETIQUETAS = {{ temas|map(attribute='nombre')|list|tojson }};
+const TEMAS_TAGS = {{ (temas | map(attribute='etiquetas') | list)|tojson }};
+
+window.Temas = (function(){
+  const $ = s => document.querySelector(s);
+  const dlg = $('#dlg-tema');
+  let editando = null;        // nombre original, o null si es nuevo
+  let puestas = new Set();
+
+  async function pedir(cuerpo){
+    const r = await fetch('/api/tema', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(cuerpo)});
+    const j = await r.json().catch(() => ({ok:false, error:'respuesta ilegible'}));
+    if(!j.ok) throw new Error(j.error || 'no se pudo');
+    return j;
+  }
+
+  function pintarPicker(){
+    const cont = $('#dlg-etiquetas');
+    cont.innerHTML = '';
+    for(const t of TODAS_ETIQUETAS){
+      const d = document.createElement('div');
+      d.className = 'op' + (puestas.has(t) ? ' puesta' : '');
+      d.textContent = t;
+      d.dataset.tag = t;
+      d.addEventListener('click', () => {
+        if(puestas.has(t)) puestas.delete(t); else puestas.add(t);
+        d.classList.toggle('puesta');
+      });
+      cont.appendChild(d);
+    }
+    filtrar();
+  }
+
+  function filtrar(){
+    const q = ($('#dlg-buscar').value || '').toLowerCase();
+    for(const d of document.querySelectorAll('#dlg-etiquetas .op'))
+      d.classList.toggle('oculta', q && !d.dataset.tag.includes(q));
+  }
+
+  function abrir(nombre, tags){
+    editando = nombre;
+    puestas = new Set(tags || []);
+    $('#dlg-titulo').textContent = nombre ? 'Editar «' + nombre + '»' : 'Tema nuevo';
+    $('#dlg-nombre').value = nombre || '';
+    $('#dlg-buscar').value = '';
+    $('#dlg-error').textContent = '';
+    $('#dlg-borrar').style.display = nombre ? '' : 'none';
+    pintarPicker();
+    dlg.showModal();
+  }
+
+  return {
+    nuevo(){ abrir(null, []); },
+    editar(nombre){
+      const i = TEMAS_ETIQUETAS.indexOf(nombre);
+      abrir(nombre, i >= 0 ? TEMAS_TAGS[i] : []);
+    },
+    async guardar(){
+      const nombre = $('#dlg-nombre').value.trim();
+      if(!nombre){ $('#dlg-error').textContent = 'Ponele un nombre.'; return; }
+      try{
+        if(editando) await pedir({accion:'guardar', nombre:editando,
+                                  nuevo_nombre:nombre, etiquetas:[...puestas]});
+        else         await pedir({accion:'crear', nombre, etiquetas:[...puestas]});
+        location.reload();
+      }catch(e){ $('#dlg-error').textContent = e.message; }
+    },
+    async borrar(){
+      if(!editando) return;
+      if(!confirm('¿Borrar el tema «' + editando + '»?\n\nNo se borra ninguna foto '
+                  + 'ni etiqueta: solo deja de existir esta agrupación.')) return;
+      try{ await pedir({accion:'borrar', nombre:editando}); location.reload(); }
+      catch(e){ $('#dlg-error').textContent = e.message; }
+    },
+    async ocultar(nombre, oculto){
+      try{ await pedir({accion:'ocultar', nombre, oculto}); location.reload(); }
+      catch(e){ alert(e.message); }
+    },
+    async asignar(tag, sel){
+      const tema = sel.value;
+      if(!tema) return;
+      try{ await pedir({accion:'agregar_etiqueta', nombre:tema, etiqueta:tag});
+           location.reload(); }
+      catch(e){ alert(e.message); sel.value = ''; }
+    },
+  };
+})();
+
+document.querySelector('#dlg-buscar').addEventListener('input', () => {
+  const q = (document.querySelector('#dlg-buscar').value || '').toLowerCase();
+  for(const d of document.querySelectorAll('#dlg-etiquetas .op'))
+    d.classList.toggle('oculta', q && !d.dataset.tag.includes(q));
+});
+</script>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "_celda.html" import celda %}
+{% from "_barra_orden.html" import barra_orden %}
+{% block title %}{{ tema|capitalize }} · Curador{% endblock %}
+
+{% block contenido %}
+<p class="apagado" style="margin-top:0"><a href="{{ url_for('temas') }}">← Temas</a></p>
+
+<div class="panel">
+  <b style="font-size:1.3rem">{{ '{:,}'.format(n) }}</b>
+  <span class="apagado">fotos de {{ tema }}, de todas las fechas</span>
+  <div class="apagado" style="margin-top:.4rem">
+    Es una vista, no un evento: cada foto sigue viviendo donde ya estaba.
+  </div>
+
+  {# Cada etiqueta es un filtro que se prende y apaga, y trae su propio repaso.
+     Sin ?tag entran todas; con uno o varios, solo esos. #}
+  <div class="filtros">
+    <span class="apagado">Filtrar:</span>
+    {% set todas_puestas = elegidas|length == etiquetas|length %}
+    <a class="etq {% if todas_puestas %}on{% endif %}"
+       href="{{ url_for('tema', nombre=tema) }}">todas</a>
+    {% for e in etiquetas %}
+      {% set activa = (e in elegidas) and not todas_puestas %}
+      {% set resto = (elegidas | reject('equalto', e) | list) if activa
+                     else (([] if todas_puestas else elegidas|list) + [e]) %}
+      <span class="etq-par">
+        <a class="etq {% if activa %}on{% endif %}"
+           href="{{ url_for('tema', nombre=tema, tag=resto) if resto else url_for('tema', nombre=tema) }}">
+          {{ e }} <span class="cuenta">{{ '{:,}'.format(cuenta.get(e, 0)) }}</span></a>
+        <a class="repaso" title="Revisar «{{ e }}» de a una foto"
+           href="{{ url_for('revisar', tag=e) }}">revisar</a>
+      </span>
+    {% endfor %}
+  </div>
+</div>
+
+<style>
+  .filtros{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.6rem}
+  .etq-par{display:inline-flex;border:1px solid var(--linea);border-radius:99px;overflow:hidden}
+  .etq{display:inline-block;padding:.2rem .6rem;font-size:.82rem;text-decoration:none;
+    color:var(--texto);border:1px solid var(--linea);border-radius:99px}
+  .etq-par .etq{border:0;border-radius:0}
+  .etq.on{background:var(--acento);color:var(--acento-t);border-color:var(--acento)}
+  .etq .cuenta{opacity:.6;font-size:.75rem}
+  .repaso{padding:.2rem .55rem;font-size:.75rem;text-decoration:none;
+    background:var(--bg);color:var(--suave);border-left:1px solid var(--linea)}
+  .repaso:hover{background:var(--acento);color:var(--acento-t)}
+</style>
+
+{{ barra_orden(vista, orden, q, desc, n, total, formato) }}
+
+<p class="apagado">
+  Click para seleccionar · Shift+click para un rango · <b>A</b> selecciona lo cargado · <b>Esc</b> limpia
+</p>
+
+<div class="rejilla" data-vista="{{ vista }}" data-orden="{{ orden }}" data-q="{{ q }}" data-desc="{{ 1 if desc else 0 }}" data-formato="{{ formato }}">
+{% for f in fotos %}{{ celda(f) }}{% endfor %}
+</div>
+<div id="fin" class="apagado" style="text-align:center;padding:1.4rem"></div>
+
+<div class="barra">
+  <b><span id="cuenta">0</span> seleccionadas</b>
+  <select id="destino">
+    <option value="nuevo">→ Evento NUEVO…</option>
+    <optgroup label="Agregar a un evento existente">
+    {% for o in otros %}
+      <option value="{{ o.id }}">{{ (o.name or o.suggested_name or 'Evento ' ~ o.id) }}{% if o.start_time %} ({{ o.start_time[:10] }}){% endif %}</option>
+    {% endfor %}
+    </optgroup>
+  </select>
+  <input type="text" id="nombre" placeholder="nombre del evento nuevo">
+  <button onclick="aplicar()">Aplicar</button>
+  <button class="gris" onclick="Sel.basurero()">🗑 Al basurero</button>
+  <button class="gris" onclick="document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))">Limpiar</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function aplicar(){
+  Sel.mover(document.querySelector('#destino').value,
+            document.querySelector('#nombre').value);
+}
+</script>
+{% endblock %}

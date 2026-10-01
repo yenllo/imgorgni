@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Caras sueltas · Curador{% endblock %}
+
+{% block cabecera %}
+<style>
+  .carasgrid{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
+  .caracard{border:1px solid var(--linea);border-radius:6px;overflow:hidden;background:var(--panel);
+    text-decoration:none;color:inherit;display:block}
+  .caracard .marco{aspect-ratio:1;background:var(--linea)}
+  .caracard img{width:100%;height:100%;object-fit:cover;display:block}
+</style>
+{% endblock %}
+
+{% block contenido %}
+<div class="panel" style="display:flex;gap:.6rem;align-items:center">
+  <a href="{{ url_for('personas') }}">← Volver a Personas</a>
+  <span class="crece"></span>
+  <span class="apagado">{{ '{:,}'.format(total) }} caras sin agrupar (apariciones únicas o de baja calidad)</span>
+</div>
+
+<div class="carasgrid">
+  {% for f in faces %}
+  <a class="caracard" href="{{ url_for('foto_caras', pid=f.photo_id) }}">
+    <div class="marco">
+      <img loading="lazy" src="{{ url_for('face_thumb', face_id=f.face_id) }}" alt="">
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="paginas">
+  {% if page > 1 %}<a href="?page={{ page - 1 }}">← Anterior</a>{% endif %}
+  <span class="apagado">página {{ page }}</span>
+  {% if faces|length == limit %}<a href="?page={{ page + 1 }}">Siguiente →</a>{% endif %}
+</div>
+{% endblock %}

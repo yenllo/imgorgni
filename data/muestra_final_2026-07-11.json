@@ -1,0 +1,705 @@
+{
+ "descripcion": "Final Liga ExScuola 11/7/2026 (2905 fotos, 291 PASS de Autocull sobre RAW). Muestra: 16 del tope de final_score + 4 del fondo de las PASS, juzgadas a ciegas (sin ver el puntaje) por 5 jueces con el mismo criterio editorial de Instagram. \"claude\" es la referencia; agy-gemini-3.1-pro describio fotos equivocadas, tomarlo con pinzas.",
+ "fotos": [
+  {
+   "archivo": "DSC09526.JPG",
+   "carpeta_sd": "116MSDCF",
+   "autocull_final_score": 90.99,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:02:23",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Sujeto principal de espalda y fondo caótico."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 2,
+     "motivo": "Movida y fuera de foco: el sujeto no está nítido"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Momento de juego genérico, sujeto principal de perfil con cara poco legible y fondo distractor."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Sujeto desenfocado y fondo publicitario que distrae demasiado."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Falta de nitidez en el jugador principal y fondo publicitario caótico."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00281.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 90.59,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:36:04",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Gran control aéreo, sujeto nítido y balón claro."
+    },
+    "claude": {
+     "veredicto": "si",
+     "nota": 7,
+     "motivo": "Pelota en el aire en el área con varias jugadoras disputando y arquera atenta: mucha tensión"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "si",
+     "nota": 7,
+     "motivo": "Momento de disparo/ataque con varios jugadores implicados y tensión en el área, buena lectura de la jugada."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Caos controlado en el área con el balón en el aire y múltiples reacciones."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "si",
+     "nota": 9,
+     "motivo": "Caos dramático en el área con jugadoras disputando un balón aéreo."
+    }
+   },
+   "votos_si": 5
+  },
+  {
+   "archivo": "DSC08997.JPG",
+   "carpeta_sd": "100MSDCF",
+   "autocull_final_score": 89.87,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 19:41:40",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Salto muy confuso y amontonado, balón no claro."
+    },
+    "claude": {
+     "veredicto": "si",
+     "nota": 7,
+     "motivo": "Cabezazo en el área, jugador en el aire en el punto más alto: peak aéreo"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Duelo aéreo por el balón en un área clave, con gran tensión y buena visibilidad de la acción del cabezazo."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "si",
+     "nota": 9,
+     "motivo": "Duelo aéreo espectacular, momento peak con gran esfuerzo físico visible."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "si",
+     "nota": 9,
+     "motivo": "Excelente duelo aéreo en el área con gran salto y tensión de gol."
+    }
+   },
+   "votos_si": 4
+  },
+  {
+   "archivo": "DSC08922.JPG",
+   "carpeta_sd": "100MSDCF",
+   "autocull_final_score": 89.33,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 19:33:57",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Arquera estática, sin acción evidente."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Arquera caminando con la pelota: sin acción"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Momento sin acción de juego y sujeto principal caminando, no aporta al feed."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Foto estática de la portera con el balón, sin ninguna tensión competitiva."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Arquera estática sosteniendo el balón, sin drama ni acción."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00310.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 89.03,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:37:28",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Sujeto principal de espalda y la acción ya pasó."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Arquera sentada con la pelota tras atajar, linda historia pero chica y lejos"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Momento sin acción ni tensión evidente, con sujetos estáticos y sin un relato claro."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Portera sentada con el balón, sin acción ni dinamismo."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 6,
+     "motivo": "Muestra el fin de la jugada, pero carece de la potencia visual de una acción peak."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00467.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 88.62,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:49:47",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "si",
+     "nota": 9,
+     "motivo": "Excelente momento peak del impacto con el balón."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Otro penal pero lejano y chico; F11 cuenta mejor lo mismo"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Momento de juego correcto pero sin el impacto o la tensión de un 'peak moment' para el feed."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Sujeto muy pequeño en el encuadre y mucha zona muerta."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Plano muy abierto con la jugadora lejana y la arquera estática."
+    }
+   },
+   "votos_si": 1
+  },
+  {
+   "archivo": "DSC00431.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 88.3,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:48:13",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 2,
+     "motivo": "Jugadoras caminando, sin tensión competitiva."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Atajada ya resuelta, la arquera queda chica y tapada; llegó tarde al momento"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Sujeto principal de espalda y la acción no se entiende completamente; falta el 'peak moment' del gol o la atajada."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Acción ya terminada, la portera en el suelo no transmite tensión."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Composición confusa con jugadoras de espalda tapando la atajada."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00347.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 87.93,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:40:40",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Buena atajada pero la pelota no es visible."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Jugada lejana, todas de espalda o perfil, pelota perdida en el fondo"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Falta de un sujeto principal claro, la acción está lejana y sin verdadera tensión o impacto visual."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Composición caótica con jugadoras cortadas y falta de foco claro."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Jugadora desenfocada en primer plano y de espaldas arruina la toma."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00887.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 87.61,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 21:09:52",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Composición caótica sin una acción clara."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Jugadoras alejándose de espalda y pelota desenfocada adelante"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Acción genérica y lejana, con jugador de espalda en primer plano que no aporta nada."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Celebración o desorden sin un punto focal claro ni emoción legible."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Composición caótica con jugadoras dispersas de espaldas y pelota perdida."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00678.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 87.55,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 21:00:32",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Buen gesto técnico con la cara y el balón visibles."
+    },
+    "claude": {
+     "veredicto": "si",
+     "nota": 7,
+     "motivo": "Penal en el instante del remate, brazo arriba, arquera y público atrás: tensión clara"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "si",
+     "nota": 7,
+     "motivo": "Disparo a puerta claro con buena dinámica y arquera en atención, capturando la tensión del momento."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "si",
+     "nota": 9,
+     "motivo": "Gran gesto técnico de remate con la portera esperando, composición limpia."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 6,
+     "motivo": "Disparo libre de marca, técnicamente correcto pero sin tensión de juego."
+    }
+   },
+   "votos_si": 4
+  },
+  {
+   "archivo": "DSC00711.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 87.49,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 21:02:47",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Duelo muy confuso con las jugadoras de espalda."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Enredo frente al arco de espalda, no se lee la acción"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Acción algo confusa en el área, sin un peak moment claro de gol o atajada, y jugador de espalda en primer plano."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "si",
+     "nota": 7,
+     "motivo": "Buen forcejeo por el balón cerca de la portería, muestra la garra del juego."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Disputa confusa de espaldas donde no se aprecian los rostros ni la emoción."
+    }
+   },
+   "votos_si": 1
+  },
+  {
+   "archivo": "DSC00645.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 87.39,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:59:17",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Sujeto principal pateando de espalda a la cámara."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 6,
+     "motivo": "Mano a mano con la arquera atrapando, pero chico en cuadro y el toldo de sponsor compite"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Acción clara de disparo a puerta con buena tensión del momento y arquera enfocada en su intento de atajada."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Momento peak de remate a puerta con la portera achicando la jugada."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "La atacante está de espaldas y el fondo con el toldo distrae demasiado."
+    }
+   },
+   "votos_si": 2
+  },
+  {
+   "archivo": "DSC00675.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 87.36,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 21:00:01",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Momento exacto del impacto en el aire, sujeto nítido."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 6,
+     "motivo": "Remate con cara visible y público atrás, pero una jugadora de espalda tapa el primer plano"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Momento de juego sin tensión y fondo muy distractor con gente y publicidad. No destaca."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Jugadora pateando hacia afuera del cuadro y composición desconectada."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Gran gesto técnico de control y dinamismo de la jugadora de blanco."
+    }
+   },
+   "votos_si": 2
+  },
+  {
+   "archivo": "DSC09410.JPG",
+   "carpeta_sd": "116MSDCF",
+   "autocull_final_score": 86.78,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:01:05",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Sujeto principal de espalda a la cámara."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Ataque con el 00 de espalda; se entiende la jugada pero no hay cara ni peak"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Acción confusa sin un momento peak claro (gol, atajada) y sujeto en primer plano de espalda."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Jugador en primer plano de espalda tapa la acción y ensucia la toma."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Jugador de espaldas en primer plano interrumpe y arruina la visual."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00434.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 86.71,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:48:22",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Acción estática y sin tensión competitiva."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Despeje de la arquera chico en cuadro, resto mirando"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Ángulo poco dinámico y sujeto parcialmente obstruido por el poste. Falta impacto y tensión."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Jugadoras de espalda y portera en posición poco estética."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Momento de baja intensidad con jugadoras paradas mirando la pelota."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00052.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 86.68,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:27:07",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Jugadora en el suelo, sin momento peak."
+    },
+    "claude": {
+     "veredicto": "si",
+     "nota": 7,
+     "motivo": "Barrida para bloquear el remate con la pelota en el aire y la arquera esperando: acción legible"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Falta de nitidez en el gesto del sujeto principal y composición poco impactante. Correcta, pero aburrida."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "si",
+     "nota": 9,
+     "motivo": "Excelente duelo por el balón con la jugadora en el suelo y tensión clara."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Tensión real en la lucha por el balón con la arquera de espectadora."
+    }
+   },
+   "votos_si": 3
+  },
+  {
+   "archivo": "DSC00778.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 55.85,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 21:05:05",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Jugadoras corriendo pero sin la pelota en la acción."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 2,
+     "motivo": "Todas de espalda, primer plano desenfocado, la acción al fondo"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Acción lejana, sujetos de espalda y fondo muy distractor con las gradas, no cumple requisitos."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Exceso de jugadoras de espalda bloqueando la visión de la acción principal."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 2,
+     "motivo": "Demasiadas jugadoras de espalda en primer plano bloqueando la acción."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC08451.JPG",
+   "carpeta_sd": "100MSDCF",
+   "autocull_final_score": 55.84,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 19:07:51",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Jugadores de espalda sin acción."
+    },
+    "claude": {
+     "veredicto": "si",
+     "nota": 6,
+     "motivo": "Arenga del equipo antes de la final: momento de historia, ideal portada de carrusel aunque estén de espalda"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Momento sin tensión y sujetos de espalda, no apta para revivir el feed."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Jugadores de espalda en un momento estático sin interés visual."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Jugadores de espalda en círculo, sin rostros ni emoción visible."
+    }
+   },
+   "votos_si": 1
+  },
+  {
+   "archivo": "DSC00113.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 55.83,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 20:29:11",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Jugadora de espalda a la cámara."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Remate de espalda, sin cara ni tensión"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Sujeto principal de espalda y momento sin tensión de juego, muy genérica."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Sujeto principal de espalda y demasiados elementos distractores en el fondo."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 4,
+     "motivo": "Jugadora principal de espaldas al patear y acción estática."
+    }
+   },
+   "votos_si": 0
+  },
+  {
+   "archivo": "DSC00968.JPG",
+   "carpeta_sd": "119MSDCF",
+   "autocull_final_score": 55.59,
+   "autocull_decision": "PASS",
+   "captura": "2026:07:11 21:12:04",
+   "jueces": {
+    "agy-gemini-3.1-pro": {
+     "veredicto": "no",
+     "nota": 3,
+     "motivo": "Arquera estática con el balón, sin acción."
+    },
+    "claude": {
+     "veredicto": "no",
+     "nota": 6,
+     "motivo": "Duelo con pelota y caras visibles, pero muy chico en cuadro y sin peak"
+    },
+    "gemini-2.5-flash": {
+     "veredicto": "no",
+     "nota": 5,
+     "motivo": "Momento de juego genérico sin tensión ni emoción clara, y los rostros no son legibles."
+    },
+    "gemini-3-flash-preview": {
+     "veredicto": "si",
+     "nota": 8,
+     "motivo": "Duelo 1 contra 1 muy nítido con el balón en juego y caras visibles."
+    },
+    "gemini-3.5-flash": {
+     "veredicto": "no",
+     "nota": 6,
+     "motivo": "Disputa de balón correcta, pero le falta intensidad y rostros legibles."
+    }
+   },
+   "votos_si": 1
+  }
+ ]
+}
