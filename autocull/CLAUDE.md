@@ -150,12 +150,13 @@ jueces con el criterio de Instagram). Se mide con:
 
 ## Ranker aprendido de selecciones pasadas (`autocull/aprender.py`)
 ```powershell
-& $AC -m autocull aprender --par <carrete> <carpeta_seleccion> [--par ...] [--etiquetas x.csv] -o ranker.json
+& $AC -m autocull aprender --par <carrete> <seleccion> [--par ...] -o ranker.json
 & $AC -m autocull <carpeta> --dry-run --ranker ranker.json     # o run_pipeline(..., ranker="ranker.json")
 ```
 - Positivos = fotos del carrete que están en la selección (cruce por nombre sin extensión ni " (2)";
   si el nombre se repite en el carrete, desempata la fecha EXIF). Negativos = el resto que pasó los filtros
-  duros. `--etiquetas` (CSV `archivo,elegida`) manda sobre la carpeta: para lo que eligen los clientes.
+  duros. `<seleccion>` puede ser una carpeta o un CSV `archivo,tomada,elegida` (lo que eligió un cliente en
+  la galería de la Pi, p. ej. `data/selecciones_renato/`). Es por carrete: los DSC se repiten entre fechas.
 - Del carrete se excluyen las subcarpetas derivadas (`Seleccion*`, `Export*`, `Edicion*`, `Compras`,
   `Marca de agua`, `Entrega*`): son copias de las elegidas, no el carrete crudo.
 - Regresión logística en numpy (sin dependencias nuevas), features en z-score DENTRO de cada carrete, peso

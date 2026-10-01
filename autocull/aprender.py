@@ -1,18 +1,19 @@
 r"""Aprende un ranker personal a partir de selecciones pasadas de Renzo.
 
     $AC = "C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe"
-    & $AC -m autocull aprender --par <carrete> <carpeta_seleccion> [--par ...] [--etiquetas x.csv] -o ranker.json
+    & $AC -m autocull aprender --par <carrete> <seleccion> [--par ...] -o ranker.json
     & $AC -m autocull <carpeta> --dry-run --ranker ranker.json      # usarlo
     & $AC -m autocull.aprender --prueba                             # self-check con datos sinteticos
 
-- Positivos: fotos del carrete que estan en la carpeta de seleccion (las que Renzo exporto a
-  `seleccion\edicion_basica`, `edicion_completa`...). Se cruzan por nombre sin extension y sin
-  sufijo " (2)"/"(2)"; si el nombre se repite en el carrete (las tarjetas reinician la numeracion
-  DSC), desempata la fecha EXIF.
+- <seleccion> es una CARPETA con las elegidas (lo exportado a `EdicionBasica`, `RAW\Seleccionadas`...)
+  o un CSV `archivo,tomada,elegida` (p. ej. lo que eligio un cliente en la galeria de la Pi; ver
+  `data/selecciones_renato/`). Va por carrete a proposito: los DSC se repiten entre fechas, asi que
+  una etiqueta "global" por nombre marcaria fotos de otros carretes.
+- Positivos: las fotos del carrete que estan en la seleccion. Se cruzan por nombre sin extension y
+  sin sufijo " (2)"/"(2)"; si el nombre se repite en el carrete (las tarjetas reinician la
+  numeracion DSC), desempata la fecha de captura (EXIF de la carpeta, `tomada` del CSV).
 - Negativos: el resto del carrete que paso los filtros duros. Lo rechazado por movida, ojos
   cerrados, etc. NO entra: el ranker solo ordena lo que ya sobrevivio, igual que el percentil.
-- `--etiquetas`: CSV `archivo,elegida` (0/1) para otras fuentes, p. ej. lo que eligen los clientes
-  en la galeria. Manda sobre la carpeta de seleccion para esos archivos.
 
 Features: las que Autocull ya calcula por foto, normalizadas como z-score DENTRO de cada carrete
 (el puntaje de Autocull tambien es relativo a la sesion: la nitidez absoluta depende del ISO y la
@@ -20,7 +21,7 @@ luz de esa noche). Modelo: regresion logistica con L2 y peso por clase (las eleg
 Se guarda como JSON legible, un peso por feature, para poder auditar que aprendio.
 
 Las features de cada carrete se miden una vez con el codigo actual y se guardan en `--cache`
-se analiza el carrete una vez y se guarda en `--cache` (por defecto `_autocull_aprender\`).
+(por defecto `_autocull_aprender\`). Si cambia el analisis, borra el cache.
 """
 from __future__ import annotations
 
@@ -85,15 +86,25 @@ def _fecha(r_o_exif) -> str:
     return str(dt)[:19] if dt else ""
 
 
-def etiquetar(resultados: list[dict], seleccion: str | None, extra: dict[str, int]) -> list[int]:
-    """1/0 por resultado. *extra* = {clave: 0/1} del CSV, manda sobre la carpeta."""
+def leer_seleccion(seleccion: str) -> dict[str, set[str]]:
+    """{clave: {fechas de captura}} de las elegidas, desde una carpeta o un CSV archivo,tomada,elegida."""
     elegidas: dict[str, set[str]] = {}
-    if seleccion:
-        from autocull.extractors.metadata import read_exif
-        from autocull.extractors.preview import find_images
-        archivos, _fmt = find_images(seleccion)
-        for p in archivos:
-            elegidas.setdefault(clave(p), set()).add(_fecha(read_exif(p)))
+    if seleccion.lower().endswith(".csv"):
+        with open(seleccion, encoding="utf-8") as fh:
+            for f in csv.DictReader(fh):
+                if str(f.get("elegida", "1")).strip() == "1":
+                    elegidas.setdefault(clave(f["archivo"]), set()).add((f.get("tomada") or "")[:19])
+        return elegidas
+    from autocull.extractors.metadata import read_exif
+    from autocull.extractors.preview import find_images
+    archivos, _fmt = find_images(seleccion)
+    for p in archivos:
+        elegidas.setdefault(clave(p), set()).add(_fecha(read_exif(p)))
+    return elegidas
+
+
+def etiquetar(resultados: list[dict], elegidas: dict[str, set[str]]) -> list[int]:
+    """1/0 por resultado, segun *elegidas* = {clave: {fechas}} de leer_seleccion()."""
     repetidas = {}
     for r in resultados:
         k = clave(r["filepath"])
@@ -101,9 +112,7 @@ def etiquetar(resultados: list[dict], seleccion: str | None, extra: dict[str, in
     y = []
     for r in resultados:
         k = clave(r["filepath"])
-        if k in extra:
-            y.append(int(extra[k]))
-        elif k not in elegidas:
+        if k not in elegidas:
             y.append(0)
         elif repetidas[k] > 1 and "" not in elegidas[k]:
             y.append(int(_fecha(r.get("exif")) in elegidas[k]))  # mismo nombre en otra tarjeta
@@ -213,28 +222,31 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m autocull aprender")
     ap.add_argument("--par", nargs=2, action="append", metavar=("CARRETE", "SELECCION"), default=[],
                     help="carrete completo y la carpeta con las que elegiste de el")
-    ap.add_argument("--etiquetas", help="CSV archivo,elegida (0/1) para otras fuentes")
     ap.add_argument("--cache", default="_autocull_aprender")
     ap.add_argument("-o", "--salida", default="ranker.json")
     a = ap.parse_args(argv)
     if not a.par:
         ap.error("hace falta al menos un --par CARRETE SELECCION")
 
-    extra = {}
-    if a.etiquetas:
-        with open(a.etiquetas, encoding="utf-8") as fh:
-            extra = {clave(f["archivo"]): int(f["elegida"]) for f in csv.DictReader(fh)}
-
     conjuntos = []
     for carrete, seleccion in a.par:
-        res = [r for r in cargar_carrete(carrete, a.cache, seleccion) if elegible(r)]
-        y = np.array(etiquetar(res, seleccion, extra))
+        # Una corrida son horas: un par malo se salta con aviso, no tumba a los demas.
+        try:
+            res = [r for r in cargar_carrete(carrete, a.cache, seleccion) if elegible(r)]
+            y = np.array(etiquetar(res, leer_seleccion(seleccion)))
+        except Exception as e:
+            print(f"SALTO {carrete}: {e}", file=sys.stderr, flush=True)
+            continue
+        print(f"{carrete}: {len(res)} fotos elegibles, {int(y.sum())} elegidas", flush=True)
+        if y.sum() == 0:
+            # Todo un carrete como "no elegida" seria mentira: casi seguro los nombres no calzan.
+            print("  SALTO: ninguna elegida calzo por nombre; revisa la seleccion", file=sys.stderr, flush=True)
+            continue
         Xz = zscore(np.array([vector(r) for r in res], dtype=float))
         base = np.array([float(r.get("final_score") or 0.0) for r in res])
-        print(f"{carrete}: {len(res)} fotos elegibles, {int(y.sum())} elegidas")
-        if y.sum() == 0:
-            print("  ojo: ninguna elegida calzo por nombre; revisa la carpeta de seleccion", file=sys.stderr)
         conjuntos.append((carrete, Xz, y, base))
+    if not conjuntos:
+        sys.exit("ningun carrete sirvio: no hay nada que aprender")
 
     X = np.vstack([c[1] for c in conjuntos])
     y = np.concatenate([c[2] for c in conjuntos])
@@ -289,8 +301,16 @@ def _prueba():
         assert _DERIVADAS.match(c), c
     for c in ("RAW", "Jpeg", "103MSDCF", "2026-07-11 F9 (Final)"):
         assert not _DERIVADAS.match(c), c
-    # etiquetas del CSV mandan sobre la carpeta
-    assert etiquetar([{"filepath": "DSC1.JPG"}, {"filepath": "DSC2 (2).JPG"}], None, {"dsc2": 1}) == [0, 1]
+    # seleccion desde CSV (galeria): nombre repetido en el carrete -> desempata la hora de captura
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as fh:
+        fh.write("archivo,tomada,elegida\nDSC2.JPG,2026-09-12 19:00:01,1\nDSC3.JPG,,0\n")
+    sel = leer_seleccion(fh.name)
+    os.unlink(fh.name)
+    assert sel == {"dsc2": {"2026-09-12 19:00:01"}}, sel
+    carr = [{"filepath": "a/DSC1.JPG"}, {"filepath": "a/DSC2.JPG", "exif": {"datetime_obj": "2026-09-12 18:00:00"}},
+            {"filepath": "b/DSC2 (2).JPG", "exif": {"datetime_obj": "2026-09-12 19:00:01"}}, {"filepath": "DSC3.JPG"}]
+    assert etiquetar(carr, sel) == [0, 0, 1, 0], etiquetar(carr, sel)
     print("ok", {k: round(float(x), 2) for k, x in pesos.items() if abs(x) > 0.05}, v["c0"])
 
 
