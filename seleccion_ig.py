@@ -162,11 +162,18 @@ def achicar(rutas, carpeta):
 # ---------------------------------------------------------------- Claude por linea de comando
 
 def extraer_json(texto):
-    return json.loads(texto[texto.index("{"):texto.rindex("}") + 1])
+    # strict=False: acepta saltos de linea crudos dentro de los strings (el modelo los mete a veces).
+    return json.loads(texto[texto.index("{"):texto.rindex("}") + 1], strict=False)
 
 
 def claude_json(prompt, carpeta, modelo):
-    """`claude -p` en *carpeta* (solo puede leer ahi), devuelve (JSON de la respuesta, uso de tokens).
+    """`claude -p` en *carpeta*, devuelve (JSON de la respuesta, uso de tokens)."""
+    texto, uso = claude_texto(prompt, carpeta, modelo)
+    return extraer_json(texto), uso
+
+
+def claude_texto(prompt, carpeta, modelo):
+    """`claude -p` en *carpeta* (solo puede leer ahi), devuelve (texto de la respuesta, uso de tokens).
     Usa la suscripcion: en la tarea programada, por CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)."""
     exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
     # Sin esto cada llamada cargaba ~50 mil tokens antes de la primera foto (prompt de Claude Code,
@@ -179,7 +186,7 @@ def claude_json(prompt, carpeta, modelo):
     if r.returncode:
         raise RuntimeError(f"claude -p salio con {r.returncode}: {r.stdout[-400:]} {r.stderr[-400:]}")
     salida = json.loads(r.stdout)
-    return extraer_json(salida["result"]), salida.get("usage")
+    return salida["result"], salida.get("usage")
 
 
 def apuntes():
@@ -285,8 +292,10 @@ Para cada id:
 - vista: una frase con lo que se ve en ESA imagen (sirve para verificar que no la confundiste).
 - recorte vertical 4:5 sobre la foto completa: centro_x y centro_y (0 a 1) y alto (fraccion del alto
   de la foto, entre 0.35 y 1; mas chico = mas zoom). Centra la accion (jugador con la pelota, el
-  arquero, la celebracion) y no cortes cabezas, pies en el remate ni la pelota. Los jugadores salen
-  chicos en cuadro: casi siempre conviene zoom.
+  arquero, la celebracion). Los jugadores salen chicos en cuadro: casi siempre conviene zoom, PERO
+  antes de responder verifica que dentro del recorte quepan COMPLETOS la cabeza del protagonista y la
+  pelota (y los pies si esta rematando). Si no caben, sube alto o mueve el centro: una cabeza cortada
+  arruina la foto (paso en la primera noche, 2 de 10).
 - caption: una linea en español de Chile (tuteo chileno, nunca voseo), sin hashtags.
 
 Responde SOLO este JSON:
@@ -396,8 +405,17 @@ def main():
     for trabajo in dict.fromkeys(todo):
         try:
             if not trabajo.is_dir():
+                # 1/10 05:55: un corte de red de segundos tumbo los 4 trabajos que quedaban en el mismo
+                # instante. raiz_trabajo() espera hasta 3 min a que vuelva el share antes de rendirse.
+                raiz_trabajo()
+            if not trabajo.is_dir():
                 raise RuntimeError(f"no existe {trabajo}")
-            procesar(base, trabajo)
+            try:
+                procesar(base, trabajo)
+            except OSError as e:  # el share se cayo a mitad de camino: procesar retoma lo ya guardado
+                log(f"{trabajo}: {e}; espero al NAS y reintento una vez")
+                raiz_trabajo()
+                procesar(base, trabajo)
             rel = str(trabajo.relative_to(base))
             if rel in cola:  # sale de la cola recien cuando termino bien
                 cola.remove(rel)

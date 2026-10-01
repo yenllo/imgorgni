@@ -1,0 +1,261 @@
+{
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-04-25 F1 - 25-04-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-04-25 F1 - 25-04-2026",
+  "hallazgo": "Primera fecha: Renato prioriza duelos 1v1 cercanos y nitidos con la pelota en cuadro, mas festejos/arengas y retratos con nombre o numero legible; descarta tomas abiertas, jugadores de espaldas sin gesto y momentos sin accion clara.",
+  "uso": {
+   "input_tokens": 6,
+   "cache_creation_input_tokens": 29517,
+   "cache_read_input_tokens": 135279,
+   "output_tokens": 3074,
+   "output_tokens_details": {
+    "thinking_tokens": 1252
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 29517,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 1393,
+     "cache_read_input_tokens": 57681,
+     "cache_creation_input_tokens": 1190,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 1190
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-05-09 F2 - 09-05-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-05-09 F2 - 09-05-2026",
+  "hallazgo": "Aparece un motivo nuevo y fuerte: foto de equipo posada con trofeos/auspiciador (premiacion), distinta de la celebracion de gol que sigue sin verse. Tambien se afina la regla del arquero (puede entrar si esta en una jugada de remate cercana, no solo parado) y se nota que los duelos aereos/de cabeza parecen entrar menos que los duelos con la pelota al pie.",
+  "uso": {
+   "input_tokens": 6,
+   "cache_creation_input_tokens": 34995,
+   "cache_read_input_tokens": 137736,
+   "output_tokens": 7839,
+   "output_tokens_details": {
+    "thinking_tokens": 5520
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 34995,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 1913,
+     "cache_read_input_tokens": 58915,
+     "cache_creation_input_tokens": 5434,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 5434
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-05-30 F4 - 30-05-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-05-30 F4 - 30-05-2026",
+  "hallazgo": "Nuevo matiz clave: un retrato individual cercano y nitido puede ser rechazado si el gesto es estatico/pasivo — hace falta dinamismo, no solo cercania. Ademas aparecio por primera vez una elegida de staff/arbitro dirigiendo una jugada (tentativo, 1 fecha).",
+  "uso": {
+   "input_tokens": 6,
+   "cache_creation_input_tokens": 33972,
+   "cache_read_input_tokens": 138593,
+   "output_tokens": 6380,
+   "output_tokens_details": {
+    "thinking_tokens": 4040
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 33972,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 1903,
+     "cache_read_input_tokens": 59337,
+     "cache_creation_input_tokens": 3989,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 3989
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-06-13 F6 - 13-06-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-06-13 F6 - 13-06-2026",
+  "hallazgo": "El patron de \"foto de equipo posada con auspiciador/premiacion\" (firme en 2 fechas) se cayo: esta fecha un podio con trofeos fue rechazado con claridad, asi que baja a tentativo con la duda sin resolver. Ademas el patron de estatico-sin-gesto se amplio: ahora tambien aplica a parejas quietas sin pelota, no solo al retrato individual solo.",
+  "uso": {
+   "input_tokens": 6,
+   "cache_creation_input_tokens": 34998,
+   "cache_read_input_tokens": 138697,
+   "output_tokens": 7435,
+   "output_tokens_details": {
+    "thinking_tokens": 5039
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 34998,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 1995,
+     "cache_read_input_tokens": 59378,
+     "cache_creation_input_tokens": 4974,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 4974
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-06-20 F7 - 20-06-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-06-20 F7 - 20-06-2026",
+  "hallazgo": "La correccion de 'equipo posado con sponsor' se afina: lo que rechaza es la iconografia de premiacion (trofeos/podio), no el fondo de auspiciador — una foto de equipo simple sin trofeos si fue elegida esta fecha. Ademas se refuerza la celebracion grupal dinamica (abrazo + huddle/arenga) y aparece un patron nuevo de saludo deportivo entre jugadores.",
+  "uso": {
+   "input_tokens": 6,
+   "cache_creation_input_tokens": 35771,
+   "cache_read_input_tokens": 138816,
+   "output_tokens": 8146,
+   "output_tokens_details": {
+    "thinking_tokens": 5687
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 35771,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 1969,
+     "cache_read_input_tokens": 59462,
+     "cache_creation_input_tokens": 5663,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 5663
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-1\\2026-07-04 F8 - 04-07-2026": {
+  "fecha": "Liga ExScuola 2026-1 - 2026-07-04 F8 - 04-07-2026",
+  "hallazgo": "El gesto de buena onda cercano ya no es solo entre rivales: tambien aparece entre companeros (choque de manos), y por primera vez se eligio una toma abierta de arco vacio, unico caso que rompe la regla firme de cercania.",
+  "uso": {
+   "input_tokens": 4,
+   "cache_creation_input_tokens": 30082,
+   "cache_read_input_tokens": 79372,
+   "output_tokens": 7357,
+   "output_tokens_details": {
+    "thinking_tokens": 5290
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 30082,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 6840,
+     "cache_read_input_tokens": 50018,
+     "cache_creation_input_tokens": 9418,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 9418
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ },
+ "\\\\192.168.1.62\\Fotos\\Fotos\\Galeria\\Trabajo\\Liga ExScuola\\Liga ExScuola 2026-2\\F1 - 13-09-2026\\jpeg": {
+  "fecha": "F1 - 13-09-2026 - jpeg",
+  "hallazgo": "Primera vez que aparece una celebracion de gol con arquero vencido: Renato la rechazo, confirma la exclusion (antes solo faltaba el caso). Tambien eligio por primera vez una accion individual aislada sin rival, pero con fuerte contraluz de atardecer — parece ser la luz la que la salva, no el contenido.",
+  "uso": {
+   "input_tokens": 6,
+   "cache_creation_input_tokens": 35763,
+   "cache_read_input_tokens": 138282,
+   "output_tokens": 8511,
+   "output_tokens_details": {
+    "thinking_tokens": 6050
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 35763,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "not_available",
+   "iterations": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 2105,
+     "cache_read_input_tokens": 59164,
+     "cache_creation_input_tokens": 5953,
+     "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 5953
+     },
+     "type": "message"
+    }
+   ],
+   "speed": "standard"
+  }
+ }
+}

@@ -132,14 +132,18 @@ def archivos_carrete(carrete: str, seleccion: str | None) -> list[str]:
     from autocull.extractors.preview import find_images
     archivos, _fmt = find_images(carrete)
     sel = os.path.abspath(seleccion).lower() if seleccion else None
-    salida = []
+    salida, de_seleccion = [], []
     for p in archivos:
         if sel and os.path.abspath(p).lower().startswith(sel + os.sep):
+            de_seleccion.append(p)
             continue
         carpetas = os.path.relpath(os.path.dirname(p), carrete).split(os.sep)
         if not any(_DERIVADAS.match(c.strip()) for c in carpetas):
             salida.append(p)
-    return salida
+    # Si las elegidas se MOVIERON a la seleccion (2025: RAW\Seleccionadas, 0 de 435 quedaron en RAW\),
+    # son parte del carrete: sin ellas no hay positivos. Si se copiaron, ya estan y no se duplican.
+    ya = {clave(p) for p in salida}
+    return salida + [p for p in de_seleccion if clave(p) not in ya]
 
 
 def cargar_carrete(carrete: str, cache_dir: str, seleccion: str | None = None) -> list[dict]:

@@ -88,10 +88,29 @@ Confirma, corrige o elimina lo anterior segun lo que veas aca, y anota entre par
 fechas respaldan cada patron, p. ej. "(4 fechas)". Separa lo firme de lo tentativo. Concreto y breve:
 maximo ~60 lineas de markdown, en español de Chile (tuteo, nunca voseo).
 
-Responde SOLO este JSON, sin texto antes ni despues:
-{{"apuntes": "<markdown completo actualizado>", "hallazgo": "1 o 2 lineas: lo nuevo o lo corregido con esta fecha"}}"""
-    datos, uso = s.claude_json(prompt, carpeta, s.MODELO_CLAUDE)
-    return nombre, datos["apuntes"].strip(), datos.get("hallazgo", ""), uso
+Responde con este formato exacto (texto plano, NO JSON):
+HALLAZGO: <1 o 2 lineas: lo nuevo o lo corregido con esta fecha>
+{SEPARADOR}
+<los apuntes completos actualizados, en markdown>"""
+    texto, uso = s.claude_texto(prompt, carpeta, s.MODELO_CLAUDE)
+    hallazgo, apuntes = partir(texto)
+    return nombre, apuntes, hallazgo, uso
+
+
+# Texto plano y no JSON: markdown de 60 lineas dentro de un string JSON trae saltos de linea y
+# comillas sin escapar, y 3 de 10 fechas fallaron asi la primera noche (1/10/2026).
+SEPARADOR = "===APUNTES==="
+
+
+def partir(texto):
+    """'HALLAZGO: ...\\n===APUNTES===\\n<md>' -> (hallazgo, md). Sin separador no hay apuntes: error."""
+    if SEPARADOR not in texto:
+        raise ValueError(f"respuesta sin {SEPARADOR}: {texto[:200]}")
+    cabeza, apuntes = texto.split(SEPARADOR, 1)
+    hallazgo = cabeza.strip().removeprefix("HALLAZGO:").strip()
+    if len(apuntes.strip()) < 50:
+        raise ValueError("apuntes vacios")
+    return hallazgo, apuntes.strip()
 
 
 def main():
