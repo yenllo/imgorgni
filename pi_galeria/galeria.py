@@ -264,6 +264,12 @@ CREATE TABLE IF NOT EXISTS texto (
     clave TEXT PRIMARY KEY,
     valor TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS seleccion_lista (
+    galeria_id INTEGER NOT NULL REFERENCES galeria(id) ON DELETE CASCADE,
+    cliente_id INTEGER NOT NULL REFERENCES cliente(id) ON DELETE CASCADE,
+    cuando     TEXT NOT NULL,
+    PRIMARY KEY (galeria_id, cliente_id)
+);
 """
 
 
@@ -1976,7 +1982,9 @@ def galeria(slug):
         tapa=tiene_tapa(gal), tarifas=tramos(gal), pesos=pesos, T=textos(),
         entrega=indicaciones(gal),
         vende=vende, por=por, dire=dire, ordenes=ORDENES, repetidas=repetidas,
-        bajadas=bajadas,
+        bajadas=bajadas, terminada=db().execute(
+            "SELECT 1 FROM seleccion_lista WHERE galeria_id = ? AND cliente_id = ?",
+            (gal["id"], cid)).fetchone() is not None,
         rango=rango, largo=largo, vdesde=vdesde, vhasta=vhasta,
         grupos=grupos, grupo=grupo,
         t0=(rango[0].hour * 60 + rango[0].minute) if rango else 0, ncarro=db().execute(
@@ -2596,6 +2604,52 @@ def _cliente_de(slug):
     if cid is None:
         abort(403)
     return cid
+
+
+NTFY_TEMA = BASE / "ntfy_tema.txt"  # el mismo tema privado de seleccion_ig.py; sin el archivo no avisa
+SITIO = "https://rbfotos.studio"
+
+
+def avisar_renzo(titulo, mensaje, link=None):
+    """Notificacion al telefono de Renzo por ntfy.sh. Sin tema configurado no hace nada."""
+    if not NTFY_TEMA.exists():
+        return False
+    datos = {"topic": NTFY_TEMA.read_text(encoding="utf-8").strip(), "title": titulo,
+             "message": mensaje, "tags": ["white_check_mark"]}
+    if link:
+        datos["click"] = link
+    req = urllib.request.Request("https://ntfy.sh/", data=json.dumps(datos).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=15).read()
+        return True
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+@app.post("/api/terminar/<slug>")
+def terminar_seleccion(slug):
+    """El cliente avisa que termino de elegir (galerias de seleccion, 1/10/2026). Queda en
+    seleccion_lista, que es lo que mira la edicion nocturna, y le llega un aviso a Renzo."""
+    cid = _cliente_de(slug)
+    cx = db()
+    gal = cx.execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    if gal["tipo"] != "seleccion":
+        abort(404)
+    cx.execute("INSERT OR REPLACE INTO seleccion_lista (galeria_id, cliente_id, cuando) VALUES (?, ?, ?)",
+               (gal["id"], cid, ahora_iso()))
+    cx.commit()
+    cli = cx.execute("SELECT nombre, email FROM cliente WHERE id = ?", (cid,)).fetchone()
+    quien = cli["nombre"] or cli["email"].split("@")[0]
+    cuentas = cx.execute(
+        "SELECT lista.nombre, COUNT(lista_foto.foto_id) n FROM lista "
+        "LEFT JOIN lista_foto ON lista_foto.lista_id = lista.id "
+        "WHERE lista.cliente_id = ? AND lista.nombre <> ? GROUP BY lista.id HAVING n > 0 "
+        "ORDER BY lista.orden", (cid, CARRITO)).fetchall()
+    detalle = " · ".join(f"{r['nombre']}: {r['n']}" for r in cuentas) or "sin fotos en listas"
+    avisar_renzo(f"{quien} terminó su selección", f"{gal['nombre']} — {detalle}",
+                 f"{SITIO}/panel/{slug}/cliente/{cid}")
+    return jsonify(ok=True)
 
 
 @app.get("/api/listas/<slug>")
@@ -5853,9 +5907,21 @@ GRILLA = PIXIE + """<header>
 &middot; marcaste <b id="cuenta">{{ marcadas }}</b>{% endif %}</span></span>
 {% if lista %}<b id="cuenta" hidden>{{ marcadas }}</b>{% endif %}
 <button id="blistas">Listas &#9662;</button>
-<div id="plistas" hidden><p class="ayuda">Tocá el nombre para verla como
+<div id="plistas" hidden><p class="ayuda">Toca el nombre para verla como
 galería. El interruptor dice a cuáles van tus me gusta.</p><div id="listas"></div>
 <button id="bnueva">+ Crear lista</button></div>
+{% if gal['tipo'] == 'seleccion' and not lista %}<button id="bterminar"
+  {{ 'disabled' if terminada }} data-ya="{{ 1 if terminada else '' }}"
+  style="font-size:.8rem;padding:.25rem .7rem">{{ 'Selección enviada ✓' if terminada else 'Terminé mi selección' }}</button>
+<script>
+document.getElementById('bterminar').onclick = async function () {
+  if (!confirm('¿Terminaste tu selección? Le avisamos a Renzo para que parta con la edición.')) return;
+  this.disabled = true;
+  const r = await fetch('/api/terminar/{{ gal["slug"] }}', {method: 'POST'});
+  if (r.ok) { this.textContent = 'Selección enviada ✓'; }
+  else { this.disabled = false; alert('No se pudo avisar, intenta de nuevo en un rato.'); }
+};
+</script>{% endif %}
 {% if gal['comentarios'] %}<a class="btn" href="/g/{{ gal['slug'] }}/comentarios"
   style="font-size:.8rem;padding:.25rem .7rem">Comentarios</a>{% endif %}
 {% if vende %}<a class="bcomprar" href="/g/{{ gal['slug'] }}/comprar">Comprar
