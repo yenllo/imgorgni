@@ -1,27 +1,41 @@
-# Registra la tarea nocturna de seleccion_ig.py (3:30, despierta la notebook, solo enchufada).
-# Con -Prueba ademas lanza YA una corrida sobre la final del 11/7 como tarea (fuera de cualquier sandbox).
-param([switch]$Prueba)
+# Registra las tareas de seleccion_ig.py --noche, que analiza solo las FECHAS NUEVAS de
+# Fotos\Galeria\Trabajo (ver fechas_nuevas en seleccion_ig.py). Renzo saca fotos sabados y a veces
+# jueves/domingos, asi que (1/10/2026):
+#   - "IMGorgni seleccion IG":           despierta la notebook vie/dom/lun 3:30 (la noche despues de
+#                                        cada dia de fotos). Solo enchufada.
+#   - "IMGorgni seleccion IG cada hora": revisa cada hora mientras la notebook esta prendida, SIN
+#                                        despertarla. Sin fecha nueva termina en segundos.
+# Las dos pueden coincidir: el candado de seleccion_ig.py deja trabajar a una sola.
+#   powershell -ExecutionPolicy Bypass -File .\registrar_tarea_ig.ps1
 $dir = $PSScriptRoot
 if (-not [Environment]::GetEnvironmentVariable("CLAUDE_CODE_OAUTH_TOKEN", "User")) {
     Write-Warning "sin CLAUDE_CODE_OAUTH_TOKEN de usuario: la etapa de Claude va a fallar (claude setup-token + setx)"
 }
 $py = (Get-Command python).Source
 New-Item -ItemType Directory -Force (Join-Path $dir '_para_publicar') | Out-Null
-$set = New-ScheduledTaskSettingsSet -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 5) -DontStopOnIdleEnd
 
-function Accion($argsPy, $log) {
-    New-ScheduledTaskAction -Execute 'cmd.exe' -WorkingDirectory $dir `
-        -Argument ('/c set PYTHONIOENCODING=utf-8&& "{0}" seleccion_ig.py {1} >> _para_publicar\{2} 2>&1' -f $py, $argsPy, $log)
+$accion = New-ScheduledTaskAction -Execute 'cmd.exe' -WorkingDirectory $dir `
+    -Argument ('/c set PYTHONIOENCODING=utf-8&& "{0}" seleccion_ig.py --noche >> _para_publicar\noche.log 2>&1' -f $py)
+# IgnoreNew: si la anterior sigue (un carrete tarda ~1 h), no se apila otra de la misma tarea.
+$despertar = New-ScheduledTaskSettingsSet -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 5) `
+    -DontStopOnIdleEnd -MultipleInstances IgnoreNew
+$sinDespertar = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 5) `
+    -DontStopOnIdleEnd -MultipleInstances IgnoreNew
+
+Register-ScheduledTask -TaskName 'IMGorgni seleccion IG' -Action $accion -Settings $despertar -Force `
+    -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Friday, Sunday, Monday -At 3:30) `
+    -Description 'Fechas nuevas de Trabajo -> seleccion para Instagram. Despierta la notebook vie/dom/lun 3:30.' | Out-Null
+
+$cadaHora = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours((Get-Date).Hour + 1) `
+    -RepetitionInterval (New-TimeSpan -Hours 1)
+Register-ScheduledTask -TaskName 'IMGorgni seleccion IG cada hora' -Action $accion -Settings $sinDespertar -Force `
+    -Trigger $cadaHora `
+    -Description 'Fechas nuevas de Trabajo -> seleccion para Instagram. Cada hora con la notebook prendida, sin despertarla.' | Out-Null
+
+# La tarea de prueba del 1/10 ya no hace falta
+Unregister-ScheduledTask -TaskName 'IMGorgni seleccion IG prueba' -Confirm:$false -ErrorAction SilentlyContinue
+
+Get-ScheduledTask -TaskName 'IMGorgni seleccion IG*' | ForEach-Object {
+    $i = $_ | Get-ScheduledTaskInfo
+    [pscustomobject]@{ Tarea = $_.TaskName; Estado = $_.State; Proxima = $i.NextRunTime }
 }
-
-Register-ScheduledTask -TaskName 'IMGorgni seleccion IG' -Action (Accion '--noche' 'noche.log') `
-    -Trigger (New-ScheduledTaskTrigger -Daily -At 3:30) -Settings $set -Force `
-    -Description 'Elige las mejores fotos de los trabajos nuevos para Instagram (seleccion_ig.py --noche)' | Out-Null
-
-if ($Prueba) {
-    Register-ScheduledTask -TaskName 'IMGorgni seleccion IG prueba' `
-        -Action (Accion '"Liga ExScuola\Liga ExScuola 2026-1\2026-07-11 F9 (Final)"' 'prueba.log') `
-        -Trigger (New-ScheduledTaskTrigger -Once -At (Get-Date).AddYears(5)) -Settings $set -Force | Out-Null
-    Start-ScheduledTask -TaskName 'IMGorgni seleccion IG prueba'
-}
-Get-ScheduledTask -TaskName 'IMGorgni seleccion IG*' | Select TaskName, State

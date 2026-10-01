@@ -9,8 +9,12 @@ eventos de photos_v2.db: al 30/9/2026 la base todavia apunta a K:\galeria\..., d
 los trabajos se movieran a Fotos\Galeria\Trabajo, y los trabajos nuevos (LigaBabbo, LigaUandes)
 ni estan en la base. Un "trabajo" es cualquier carpeta que tiene una subcarpeta RAW.
 
---noche procesa: los trabajos tocados en los ultimos DIAS_NUEVO dias que no tengan seleccion,
-mas lo que haya en `_para_publicar\cola.txt` (una ruta relativa por linea; sale al terminar bien).
+--noche procesa las FECHAS NUEVAS: carpetas de trabajo que no estan en `_para_publicar\vistos.json`
+y que ya terminaron de copiarse (ninguna carpeta del trabajo cambio en ESTABLE_HORAS), mas lo que
+haya en `_para_publicar\cola.txt` (una ruta relativa por linea; sale al terminar bien). Renzo saca
+fotos sabados y a veces jueves/domingos: sin fecha nueva no se analiza nada (1/10/2026). Lo corren
+dos tareas (registrar_tarea_ig.ps1): cada hora con la notebook prendida, y despertandola vie/dom/lun
+3:30. Un candado evita que dos corridas procesen lo mismo a la vez.
 
 Embudo, del mas barato al mas caro. Todo Claude, sin agy ni Gemini (pedido de Renzo, 1/10/2026):
   1. Autocull (local, gratis): bota lo movido/desenfocado/rafagas (~25 min por 4.000 fotos).
@@ -56,7 +60,8 @@ SISTEMA = ("Eres editor de fotografia deportiva. Miras imagenes con la herramien
 VER = "ver_id"             # fotos a 1280 px CON su id escrito encima (ver achicar); "ver" eran las sin id
 MODELO_FILTRO = "haiku"    # nota gruesa sobre hojas de contacto: barato
 MODELO_CLAUDE = "sonnet"   # ponytail: sonnet cuida la cuota semanal; "opus" si el gusto no alcanza
-DIAS_NUEVO = 14
+VISTOS = SALIDA / "vistos.json"   # trabajos ya conocidos: lo que no esta aca es una fecha nueva
+ESTABLE_HORAS = 2                  # una fecha se analiza recien cuando termino de copiarse
 ELEGIR = 10
 MAX_A_CLAUDE = 60
 POR_HOJA = 9               # 3x3
@@ -396,6 +401,72 @@ def prueba():
     print("ok")
 
 
+def ultima_modificacion(trabajo):
+    """mtime mas reciente entre las CARPETAS del trabajo: copiar un archivo cambia el de su carpeta,
+    asi que no hace falta hacer stat a miles de fotos por la red."""
+    return max(os.stat(r).st_mtime for r, _, _ in os.walk(trabajo))
+
+
+def fechas_nuevas(base):
+    """Trabajos que no estan en vistos.json y ya terminaron de copiarse. -> (listos, vistos)."""
+    todos = {str(t.relative_to(base)): t for t in trabajos(base)}
+    if VISTOS.exists():
+        vistos = set(json.loads(VISTOS.read_text(encoding="utf-8")))
+    else:
+        # Primera vez: el historial no se analiza. Se respeta la regla anterior (lo tocado en las
+        # ultimas 2 semanas sin seleccion sigue pendiente) para no perder lo que ya esperaba.
+        limite = time.time() - 14 * 86400
+        vistos = {r for r, t in todos.items()
+                  if t.stat().st_mtime < limite or (SALIDA / nombre_salida(base, t) / "seleccion.json").exists()}
+        VISTOS.write_text(json.dumps(sorted(vistos), ensure_ascii=False, indent=1), encoding="utf-8")
+        log(f"vistos.json creado: {len(vistos)} trabajos conocidos, {len(todos) - len(vistos)} pendientes")
+    listos = []
+    for r, t in todos.items():
+        if r in vistos:
+            continue
+        horas = (time.time() - ultima_modificacion(t)) / 3600
+        if horas < ESTABLE_HORAS:
+            log(f"{r}: cambio hace {horas:.1f} h, espero a que termine de copiarse")
+        else:
+            listos.append(t)
+    return listos, vistos
+
+
+def marcar_visto(base, trabajo, vistos):
+    vistos.add(str(trabajo.relative_to(base)))
+    VISTOS.write_text(json.dumps(sorted(vistos), ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+MAX_FALLOS = 3
+
+
+def anotar_fallo(base, trabajo, vistos):
+    """Cuenta fallos por trabajo. Al tercero lo da por visto (con chequeo cada hora, un trabajo que
+    falla despues de llamar a Claude gastaria cuota cada hora para siempre). -> True si sigue intentando."""
+    archivo = SALIDA / "fallos.json"
+    fallos = json.loads(archivo.read_text(encoding="utf-8")) if archivo.exists() else {}
+    rel = str(trabajo.relative_to(base))
+    fallos[rel] = fallos.get(rel, 0) + 1
+    archivo.write_text(json.dumps(fallos, ensure_ascii=False, indent=1), encoding="utf-8")
+    if fallos[rel] >= MAX_FALLOS:
+        marcar_visto(base, trabajo, vistos)
+        log(f"{rel}: {MAX_FALLOS} fallos, lo dejo (para reintentar: sacalo de vistos.json y fallos.json)")
+        return False
+    return True
+
+
+def candado():
+    """Lock de archivo: si otra corrida esta trabajando, None. Se suelta solo si el proceso muere."""
+    import msvcrt
+    fh = open(SALIDA / ".corriendo", "a+")
+    try:
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
 def main():
     args = sys.argv[1:]
     if args == ["--prueba"]:
@@ -407,10 +478,16 @@ def main():
     if not base:
         return log("no llego a Fotos\\Galeria\\Trabajo (fuera de casa o la Pi apagada), no hago nada")
     SALIDA.mkdir(exist_ok=True)
+    lock = candado()  # noqa: F841 (se mantiene abierto hasta que termina el proceso)
+    if lock is None:
+        return log("otra corrida sigue trabajando, salgo")
     cola = [l.strip() for l in COLA.read_text(encoding="utf-8").splitlines() if l.strip()] if COLA.exists() else []
+    vistos = None
     if args == ["--noche"]:
-        limite = time.time() - DIAS_NUEVO * 86400
-        todo = [t for t in trabajos(base) if t.stat().st_mtime > limite] + [base / c for c in cola]
+        nuevos, vistos = fechas_nuevas(base)
+        todo = nuevos + [base / c for c in cola]
+        if not todo:
+            return  # lo normal casi todas las horas: nada nuevo, nada que anotar
     else:
         todo = [base / a for a in args]
     for trabajo in dict.fromkeys(todo):
@@ -428,11 +505,15 @@ def main():
                 raiz_trabajo()
                 procesar(base, trabajo)
             rel = str(trabajo.relative_to(base))
+            if vistos is not None:  # recien cuando termino bien: si fallo, la proxima corrida lo reintenta
+                marcar_visto(base, trabajo, vistos)
             if rel in cola:  # sale de la cola recien cuando termino bien
                 cola.remove(rel)
                 COLA.write_text("".join(c + "\n" for c in cola), encoding="utf-8")
         except Exception as e:
             log(f"{trabajo} fallo: {e}")
+            if vistos is not None and not anotar_fallo(base, trabajo, vistos):
+                avisar("Una seleccion fallo 3 veces", f"{trabajo.name}: {str(e)[:200]}. Revisa noche.log")
 
 
 if __name__ == "__main__":
