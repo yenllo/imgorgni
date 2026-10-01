@@ -45,6 +45,9 @@ AUTOCULL_DIR = AQUI  # el paquete autocull/ vive en este proyecto
 AUTOCULL_PY = Path(r"C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe")  # el venv no se mueve
 APUNTES = AQUI / "data" / "apuntes_renato.md"
 BITACORA = SALIDA / "bitacora.md"
+SISTEMA = ("Eres editor de fotografia deportiva. Miras imagenes con la herramienta Read y respondes "
+           "solo con JSON valido, sin texto antes ni despues.")
+VER = "ver_id"             # fotos a 1280 px CON su id escrito encima (ver achicar); "ver" eran las sin id
 MODELO_FILTRO = "haiku"    # nota gruesa sobre hojas de contacto: barato
 MODELO_CLAUDE = "sonnet"   # ponytail: sonnet cuida la cuota semanal; "opus" si el gusto no alcanza
 DIAS_NUEVO = 14
@@ -121,8 +124,26 @@ def autocull(trabajo, carpeta):
     return pasan
 
 
+def rotular(im, texto, tam=40):
+    """Escribe el id ENCIMA de la foto (esquina superior izquierda, amarillo sobre negro).
+
+    Por que: en la prueba del 1/10 Claude leyo 60 fotos por nombre de archivo y en ~6 de las 10
+    elegidas el motivo y el recorte eran de OTRA foto (el mismo error de agy en la muestra). Con
+    el id en los pixeles no tiene que recordar que archivo era cual: lo lee.
+    """
+    from PIL import ImageDraw, ImageFont
+    try:
+        fuente = ImageFont.truetype("arialbd.ttf", tam)
+    except OSError:
+        fuente = ImageFont.load_default()
+    d = ImageDraw.Draw(im)
+    d.rectangle((0, 0, int(tam * 3.2), int(tam * 1.4)), fill="black")
+    d.text((8, 4), texto, fill="yellow", font=fuente)
+    return im
+
+
 def achicar(rutas, carpeta):
-    """C001.jpg... a 1280 px para los jueces. Devuelve {id: ruta original}."""
+    """C001.jpg... a 1280 px para los jueces, con el id escrito encima. Devuelve {id: ruta original}."""
     carpeta.mkdir(parents=True, exist_ok=True)
     mapa = {}
     for i, ruta in enumerate(rutas, 1):
@@ -133,7 +154,7 @@ def achicar(rutas, carpeta):
             im.draft("RGB", (PX_VER, PX_VER))  # decodifica el JPEG ya reducido: 42 MP pesan
             im = ImageOps.exif_transpose(im).convert("RGB")
             im.thumbnail((PX_VER, PX_VER))
-            im.save(destino, quality=88)
+            rotular(im, fid).save(destino, quality=88)
         mapa[fid] = ruta
     return mapa
 
@@ -148,8 +169,12 @@ def claude_json(prompt, carpeta, modelo):
     """`claude -p` en *carpeta* (solo puede leer ahi), devuelve (JSON de la respuesta, uso de tokens).
     Usa la suscripcion: en la tarea programada, por CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)."""
     exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
-    r = subprocess.run([exe, "-p", prompt, "--allowedTools", "Read", "--output-format", "json",
-                        "--model", modelo], cwd=str(carpeta), capture_output=True,
+    # Sin esto cada llamada cargaba ~50 mil tokens antes de la primera foto (prompt de Claude Code,
+    # todas las herramientas, MCP, skills): medido en la prueba del 1/10. Solo hace falta Read.
+    r = subprocess.run([exe, "-p", prompt, "--model", modelo, "--output-format", "json",
+                        "--tools", "Read", "--allowedTools", "Read", "--strict-mcp-config",
+                        "--disable-slash-commands", "--system-prompt", SISTEMA],
+                       cwd=str(carpeta), capture_output=True,
                        stdin=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=3600)
     if r.returncode:
         raise RuntimeError(f"claude -p salio con {r.returncode}: {r.stdout[-400:]} {r.stderr[-400:]}")
@@ -202,7 +227,7 @@ def filtro(carpeta, ids, evento):
     for g in grupos:
         nombre = f"H_{g[0]}.jpg"
         if not (hojas_dir / nombre).exists():
-            hoja([carpeta / "ver" / f"{i}.jpg" for i in g], hojas_dir / nombre, g)
+            hoja([carpeta / VER / f"{i}.jpg" for i in g], hojas_dir / nombre, g)
         nombres.append((nombre, g))
     veredictos = {}
     for k in range(0, len(nombres), HOJAS_POR_LLAMADA):
@@ -224,33 +249,58 @@ Para CADA id ({', '.join(ids_tanda)}) responde SOLO un JSON
 
 # ---------------------------------------------------------------- 3. Eleccion final
 
+_ID_EN_IMAGEN = ("Cada imagen tiene su id escrito en amarillo en la esquina superior izquierda: ese es su "
+                 "id. Usa SIEMPRE el id que lees en la imagen, no el que recuerdes del nombre de archivo.")
+
+
 def claude(carpeta, ids, evento):
+    """Paso A: elige y ordena. Solo ids y por que; el recorte lo decide detallar() mirando solo a esas."""
     prompt = f"""{CRITERIO}{apuntes()}
 Trabajo: {evento}.
 En esta carpeta hay {len(ids)} fotos candidatas: {', '.join(i + '.jpg' for i in ids)}.
 Lee TODAS con la herramienta Read, varias en paralelo por turno para no gastar turnos.
+{_ID_EN_IMAGEN}
 
 Elige hasta {ELEGIR} para publicar (menos si no hay {ELEGIR} buenas de verdad), con estas reglas:
 - Nunca dos fotos de la misma jugada o del mismo momento: quedate con la mejor.
 - Variedad: distintos jugadores/equipos y tipos de momento (accion, arquero, celebracion, historia).
 - Ordenalas en el orden en que conviene publicarlas (la mas fuerte primero).
-- Para cada una define un recorte vertical 4:5: centro_x y centro_y (0 a 1, sobre la foto completa)
-  y alto (fraccion del alto de la foto que ocupa el recorte, entre 0.35 y 1; mas chico = mas zoom).
-  Los jugadores salen chicos en cuadro: casi siempre conviene zoom.
-- caption: una linea en español de Chile (tuteo chileno, nunca voseo), sin hashtags.
+- motivo: una frase de por que esa foto, describiendo lo que SE VE en ella.
 - apunte: 2 a 4 lineas para tu bitacora: que hizo fuerte (o flojo) este trabajo, que patron viste,
   que harias distinto la proxima vez. Queda anotado para las siguientes selecciones.
 
-Responde SOLO este JSON, sin texto antes ni despues:
-{{"apunte": "...", "elegidas": [{{"id": "C001", "motivo": "...", "centro_x": 0.5, "centro_y": 0.5, "alto": 0.6, "caption": "..."}}]}}"""
+Responde SOLO este JSON:
+{{"apunte": "...", "elegidas": [{{"id": "C001", "motivo": "..."}}]}}"""
     datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE)
     return [e for e in datos["elegidas"] if e.get("id") in ids], datos.get("apunte", ""), uso
+
+
+def detallar(carpeta, elegidas, evento):
+    """Paso B: mira SOLO las elegidas (pocas, sin confundirse) y decide recorte y caption de cada una."""
+    ids = [e["id"] for e in elegidas]
+    prompt = f"""Trabajo: {evento}. Estas {len(ids)} fotos ya fueron elegidas para Instagram:
+{', '.join(i + '.jpg' for i in ids)}. Lee cada una con Read. {_ID_EN_IMAGEN}
+
+Para cada id:
+- vista: una frase con lo que se ve en ESA imagen (sirve para verificar que no la confundiste).
+- recorte vertical 4:5 sobre la foto completa: centro_x y centro_y (0 a 1) y alto (fraccion del alto
+  de la foto, entre 0.35 y 1; mas chico = mas zoom). Centra la accion (jugador con la pelota, el
+  arquero, la celebracion) y no cortes cabezas, pies en el remate ni la pelota. Los jugadores salen
+  chicos en cuadro: casi siempre conviene zoom.
+- caption: una linea en español de Chile (tuteo chileno, nunca voseo), sin hashtags.
+
+Responde SOLO este JSON:
+{{"<id>": {{"vista": "...", "centro_x": 0.5, "centro_y": 0.5, "alto": 0.6, "caption": "..."}}}}"""
+    datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE)
+    for e in elegidas:
+        e.update(datos.get(e["id"], {}))
+    return [e for e in elegidas if "centro_x" in e], uso
 
 
 def anotar(evento, elegidas, apunte):
     """Bitacora legible de cada seleccion: que se eligio y por que."""
     lineas = [f"\n## {time.strftime('%Y-%m-%d %H:%M')} — {evento}\n", (apunte or "").strip(), ""]
-    lineas += [f"{n}. `{e['archivo']}` — {e.get('motivo', '')}" for n, e in enumerate(elegidas, 1)]
+    lineas += [f"{n}. `{e['archivo']}` — {e.get('vista') or e.get('motivo', '')}" for n, e in enumerate(elegidas, 1)]
     with open(BITACORA, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lineas) + "\n")
 
@@ -285,7 +335,7 @@ def procesar(base, trabajo):
         return
     log(f"=== {evento}")
     carpeta.mkdir(parents=True, exist_ok=True)
-    mapa = achicar(autocull(trabajo, carpeta), carpeta / "ver")
+    mapa = achicar(autocull(trabajo, carpeta), carpeta / VER)
     (carpeta / "mapa.json").write_text(json.dumps(mapa, ensure_ascii=False, indent=1), encoding="utf-8")
 
     archivo_f = carpeta / "filtro.json"
@@ -299,8 +349,11 @@ def procesar(base, trabajo):
     a_claude = orden[:min(MAX_A_CLAUDE, max(si, 30))]  # si el filtro fue tacaño, igual le paso 30
     log(f"filtro: {si} si de {len(vf)}; a la eleccion final van {len(a_claude)}")
 
-    elegidas, apunte, uso = claude(carpeta / "ver", a_claude, evento)
-    log(f"Claude eligio {len(elegidas)}; uso: {uso}")
+    elegidas, apunte, uso = claude(carpeta / VER, a_claude, evento)
+    log(f"Claude eligio {len(elegidas)}")
+    elegidas, uso_b = detallar(carpeta / VER, elegidas, evento)
+    uso = {"eleccion": uso, "recortes": uso_b}
+    log(f"recortes para {len(elegidas)}; uso: {json.dumps(uso)[:300]}")
     for n, e in enumerate(elegidas, 1):
         e["original"] = mapa[e["id"]]
         e["archivo"] = f"{n:02d}_{Path(e['original']).stem}.jpg"
