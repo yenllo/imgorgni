@@ -1,7 +1,10 @@
-# Entrena el ranker de Autocull con lo que Renato (Liga ExScuola) eligio a lo largo de las fechas.
+# Aprende de lo que Renato (Liga ExScuola) eligio a lo largo de las fechas, en dos partes:
+#   1. apuntes escritos por Claude (data\apuntes_renato.md), que lee el juez final de seleccion_ig.py
+#   2. ranker numerico de Autocull (ranker_renato.json)
 #   powershell -ExecutionPolicy Bypass -File .\entrenar_ranker_renato.ps1
-# Toma horas la primera vez (analiza ~15 carretes); cada carrete queda en _autocull_aprender\ y si se
-# corta, volver a correrlo sigue desde donde quedo. Resultado: ranker_renato.json + entrenar.log.
+# Correlo en una terminal NUEVA (abierta despues del setx CLAUDE_CODE_OAUTH_TOKEN): claude -p lo necesita.
+# Toma horas la primera vez (analiza ~15 carretes); todo queda cacheado y si se corta, volver a
+# correrlo sigue desde donde quedo. Logs: _autocull_aprender\apuntes.log y entrenar.log.
 # Espera a que termine la prueba de seleccion_ig si esta corriendo, para no pelear por la CPU.
 
 $dir = $PSScriptRoot
@@ -34,10 +37,15 @@ $pares = @(
     "$L\Liga ExScuola 2025-2\2025-11-07 F7 - 08-11-2025\RAW", "$L\Liga ExScuola 2025-2\2025-11-07 F7 - 08-11-2025\RAW\Seleccionadas",
     "$L\Liga ExScuola 2025-2\2025-11-22 F8 - 22-11-2025 (Final)\RAW", "$L\Liga ExScuola 2025-2\2025-11-22 F8 - 22-11-2025 (Final)\RAW\Seleccionadas"
 )
-$args_py = @("-m", "autocull", "aprender", "-o", "ranker_renato.json")
-for ($i = 0; $i -lt $pares.Count; $i += 2) { $args_py += @("--par", $pares[$i], $pares[$i + 1]) }
+$par_args = @()
+for ($i = 0; $i -lt $pares.Count; $i += 2) { $par_args += @("--par", $pares[$i], $pares[$i + 1]) }
 
 Set-Location $dir
 New-Item -ItemType Directory -Force _autocull_aprender | Out-Null
 $env:PYTHONIOENCODING = "utf-8"
-& $AC @args_py 2>&1 | Where-Object { $_ -notmatch "W0000|INFO:|feedback tensors" } | Tee-Object -FilePath "_autocull_aprender\entrenar.log"
+$ruido = "W0000|INFO:|feedback tensors"
+
+# 1) Apuntes: Claude compara elegidas vs no elegidas de cada fecha -> data\apuntes_renato.md (rapido, ~1 min por fecha)
+& $AC aprender_apuntes.py @par_args 2>&1 | Where-Object { $_ -notmatch $ruido } | Tee-Object -FilePath "_autocull_aprender\apuntes.log"
+# 2) Ranker numerico sobre las features de Autocull (lento: analiza cada carrete entero) -> ranker_renato.json
+& $AC -m autocull aprender -o ranker_renato.json @par_args 2>&1 | Where-Object { $_ -notmatch $ruido } | Tee-Object -FilePath "_autocull_aprender\entrenar.log"

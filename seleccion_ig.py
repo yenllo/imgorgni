@@ -12,17 +12,18 @@ ni estan en la base. Un "trabajo" es cualquier carpeta que tiene una subcarpeta 
 --noche procesa: los trabajos tocados en los ultimos DIAS_NUEVO dias que no tengan seleccion,
 mas lo que haya en `_para_publicar\cola.txt` (una ruta relativa por linea; sale al terminar bien).
 
-Embudo, del mas barato al mas caro:
-  1. Autocull (local, gratis): bota lo movido/desenfocado/rafagas (~33 min por 3.000 fotos).
-     OJO: su puntaje NO es editorial (su top 1 de la final del 11/7 estaba movido), por eso
-     pasan TODAS las PASS al paso 2 y no solo su top.
-  2. Gemini 2.5 Flash por la API gratuita: juzga las PASS de a 20 (259 tokens por foto).
-  3. Claude (`claude -p`, cuota de la suscripcion): ve las <=60 mejores de Gemini y elige 10
-     sin repetir jugada, con orden de publicacion, caption y recorte.
+Embudo, del mas barato al mas caro. Todo Claude, sin agy ni Gemini (pedido de Renzo, 1/10/2026):
+  1. Autocull (local, gratis): bota lo movido/desenfocado/rafagas (~25 min por 4.000 fotos).
+     OJO: su puntaje NO es editorial, por eso pasan TODAS las PASS al paso 2 y no solo su top.
+  2. Filtro Claude Haiku sobre HOJAS DE CONTACTO de 9 fotos (~240 tokens por foto en vez de
+     ~1.500 foto por foto): nota gruesa a todas las PASS.
+  3. Claude Sonnet ve las <=60 mejores a 1280 px y elige 10 sin repetir jugada, con orden de
+     publicacion, caption y recorte. Lee `data/apuntes_renato.md` (lo que aprendio de lo que elige
+     Renato, ver aprender_apuntes.py) y deja un apunte de esta seleccion en `_para_publicar\bitacora.md`.
   4. Recortes 4:5 desde el JPEG original a full resolucion.
 
 Salida en `_para_publicar\<trabajo>\`: los recortes `01_DSC....jpg`, `seleccion.json` y los
-intermedios (autocull.json, gemini.json, ver\). Para rehacer un trabajo, borra su carpeta.
+intermedios (autocull.json, filtro.json, ver\, hojas\). Para rehacer un trabajo, borra su carpeta.
 No escribe en photos_v2.db ni en la carpeta de fotos: solo lee de ahi.
 """
 import ctypes
@@ -42,14 +43,16 @@ COLA = SALIDA / "cola.txt"
 CRITERIO = (AQUI / "criterio_ig.md").read_text(encoding="utf-8")
 AUTOCULL_DIR = AQUI  # el paquete autocull/ vive en este proyecto
 AUTOCULL_PY = Path(r"C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe")  # el venv no se mueve
-ENV_GEMINI = Path(r"C:\Renzo\Estudio\.env")
-MODELOS_GEMINI = ["gemini-2.5-flash", "gemini-3.5-flash"]  # el 2o si el 1o esta saturado
+APUNTES = AQUI / "data" / "apuntes_renato.md"
+BITACORA = SALIDA / "bitacora.md"
+MODELO_FILTRO = "haiku"    # nota gruesa sobre hojas de contacto: barato
 MODELO_CLAUDE = "sonnet"   # ponytail: sonnet cuida la cuota semanal; "opus" si el gusto no alcanza
 DIAS_NUEVO = 14
 ELEGIR = 10
 MAX_A_CLAUDE = 60
-LOTE_GEMINI = 20
-PX_VER = 1280              # lo que ven los jueces
+POR_HOJA = 9               # 3x3
+HOJAS_POR_LLAMADA = 6      # ~54 fotos por claude -p: reparte el costo fijo de cada llamada
+PX_VER = 1280              # lo que ve el juez final
 PX_RECORTE = (2160, 2700)  # 4:5, el doble de lo que muestra Instagram
 
 
@@ -135,49 +138,94 @@ def achicar(rutas, carpeta):
     return mapa
 
 
-# ---------------------------------------------------------------- 2. Gemini
-
-def gemini(carpeta, ids, evento):
-    from google import genai
-    from google.genai import types
-    key = next(l.split("=", 1)[1].strip().strip('"') for l in ENV_GEMINI.read_text().splitlines()
-               if l.startswith("GEMINI_API_KEY"))
-    cliente = genai.Client(api_key=key)  # en variable: si es temporal se cierra antes de la llamada
-    veredictos = {}
-    for i in range(0, len(ids), LOTE_GEMINI):
-        lote = ids[i:i + LOTE_GEMINI]
-        partes = [CRITERIO, f"Trabajo: {evento}. Para CADA foto responde SOLO un objeto JSON "
-                  '{"<id>": {"veredicto": "si"|"no", "nota": 1-10, "motivo": "frase corta"}} '
-                  f"con estas claves: {', '.join(lote)}."]
-        for fid in lote:
-            partes += [f"Foto {fid}:", types.Part.from_bytes(data=(carpeta / f"{fid}.jpg").read_bytes(),
-                                                             mime_type="image/jpeg")]
-        for intento in range(8):
-            modelo = MODELOS_GEMINI[intento % len(MODELOS_GEMINI)]
-            try:
-                r = cliente.models.generate_content(
-                    model=modelo, contents=partes,
-                    config=types.GenerateContentConfig(response_mime_type="application/json"))
-                veredictos.update({k: v for k, v in json.loads(r.text).items() if k in lote})
-                break
-            except Exception as e:  # 429 cuota por minuto / 503 saturado: esperar y rotar modelo
-                log(f"  Gemini {modelo} fallo ({str(e)[:80]}), reintento")
-                time.sleep(30)
-        else:
-            log(f"  lote {lote[0]}..{lote[-1]} sin veredicto, sigue sin el")
-        log(f"Gemini {min(i + LOTE_GEMINI, len(ids))}/{len(ids)}")
-        time.sleep(7)  # la capa gratuita corta por pedidos por minuto
-    return veredictos
-
-
-# ---------------------------------------------------------------- 3. Claude
+# ---------------------------------------------------------------- Claude por linea de comando
 
 def extraer_json(texto):
     return json.loads(texto[texto.index("{"):texto.rindex("}") + 1])
 
 
+def claude_json(prompt, carpeta, modelo):
+    """`claude -p` en *carpeta* (solo puede leer ahi), devuelve (JSON de la respuesta, uso de tokens).
+    Usa la suscripcion: en la tarea programada, por CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)."""
+    exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
+    r = subprocess.run([exe, "-p", prompt, "--allowedTools", "Read", "--output-format", "json",
+                        "--model", modelo], cwd=str(carpeta), capture_output=True,
+                       stdin=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=3600)
+    if r.returncode:
+        raise RuntimeError(f"claude -p salio con {r.returncode}: {r.stdout[-400:]} {r.stderr[-400:]}")
+    salida = json.loads(r.stdout)
+    return extraer_json(salida["result"]), salida.get("usage")
+
+
+def apuntes():
+    """Lo que Claude aprendio de las selecciones de Renato (aprender_apuntes.py), si ya existe."""
+    if APUNTES.exists():
+        return "\nApuntes de lo que elige Renato (cliente de la Liga ExScuola), aprendidos de sus selecciones " \
+               "pasadas. Usalos como referencia de gusto, no como regla ciega:\n" + APUNTES.read_text(encoding="utf-8")
+    return ""
+
+
+# ---------------------------------------------------------------- 2. Filtro sobre hojas de contacto
+
+def hoja(rutas, destino, etiquetas, titulo="", celda=(520, 347)):
+    """Hoja de contacto 3x3 (1560x~1040, ~2.200 tokens de imagen) con la etiqueta de cada foto."""
+    from PIL import ImageDraw, ImageFont
+    cw, ch = celda
+    filas = (len(rutas) + 2) // 3
+    alto_tit = 40 if titulo else 0
+    lienzo = Image.new("RGB", (cw * 3, ch * filas + alto_tit), "black")
+    dib = ImageDraw.Draw(lienzo)
+    try:
+        fuente = ImageFont.truetype("arialbd.ttf", 30)
+    except OSError:
+        fuente = ImageFont.load_default()
+    if titulo:
+        dib.text((10, 4), titulo, fill="yellow", font=fuente)
+    for i, (ruta, et) in enumerate(zip(rutas, etiquetas)):
+        im = Image.open(ruta)
+        im.draft("RGB", (cw * 2, ch * 2))
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        im.thumbnail((cw - 4, ch - 4))
+        x, y = (i % 3) * cw, alto_tit + (i // 3) * ch
+        lienzo.paste(im, (x + (cw - im.width) // 2, y + (ch - im.height) // 2))
+        dib.rectangle((x + 2, y + 2, x + 92, y + 40), fill="black")
+        dib.text((x + 6, y + 4), et, fill="yellow", font=fuente)
+    lienzo.save(destino, quality=85)
+
+
+def filtro(carpeta, ids, evento):
+    """Nota gruesa de Claude Haiku a TODAS las candidatas, mirando hojas de 9."""
+    hojas_dir = carpeta / "hojas"
+    hojas_dir.mkdir(exist_ok=True)
+    grupos = [ids[i:i + POR_HOJA] for i in range(0, len(ids), POR_HOJA)]
+    nombres = []
+    for g in grupos:
+        nombre = f"H_{g[0]}.jpg"
+        if not (hojas_dir / nombre).exists():
+            hoja([carpeta / "ver" / f"{i}.jpg" for i in g], hojas_dir / nombre, g)
+        nombres.append((nombre, g))
+    veredictos = {}
+    for k in range(0, len(nombres), HOJAS_POR_LLAMADA):
+        tanda = nombres[k:k + HOJAS_POR_LLAMADA]
+        ids_tanda = [i for _, g in tanda for i in g]
+        prompt = f"""{CRITERIO}{apuntes()}
+Trabajo: {evento}. Esto es un FILTRO grueso: despues otro juez mira las mejores en grande.
+Lee con Read estas hojas de contacto (cada celda tiene su id en amarillo): {', '.join(n for n, _ in tanda)}.
+Para CADA id ({', '.join(ids_tanda)}) responde SOLO un JSON
+{{"<id>": {{"veredicto": "si"|"no", "nota": 1-10, "motivo": "frase corta"}}}} sin texto antes ni despues."""
+        try:
+            datos, _uso = claude_json(prompt, hojas_dir, MODELO_FILTRO)
+            veredictos.update({i: v for i, v in datos.items() if i in ids_tanda})
+        except Exception as e:  # una tanda mala no tumba el trabajo: esas fotos quedan sin nota
+            log(f"  filtro: tanda {ids_tanda[0]}.. fallo: {str(e)[:150]}")
+        log(f"filtro {min(k + HOJAS_POR_LLAMADA, len(nombres)) * POR_HOJA}/{len(ids)}")
+    return veredictos
+
+
+# ---------------------------------------------------------------- 3. Eleccion final
+
 def claude(carpeta, ids, evento):
-    prompt = f"""{CRITERIO}
+    prompt = f"""{CRITERIO}{apuntes()}
 Trabajo: {evento}.
 En esta carpeta hay {len(ids)} fotos candidatas: {', '.join(i + '.jpg' for i in ids)}.
 Lee TODAS con la herramienta Read, varias en paralelo por turno para no gastar turnos.
@@ -190,18 +238,21 @@ Elige hasta {ELEGIR} para publicar (menos si no hay {ELEGIR} buenas de verdad), 
   y alto (fraccion del alto de la foto que ocupa el recorte, entre 0.35 y 1; mas chico = mas zoom).
   Los jugadores salen chicos en cuadro: casi siempre conviene zoom.
 - caption: una linea en español de Chile (tuteo chileno, nunca voseo), sin hashtags.
+- apunte: 2 a 4 lineas para tu bitacora: que hizo fuerte (o flojo) este trabajo, que patron viste,
+  que harias distinto la proxima vez. Queda anotado para las siguientes selecciones.
 
 Responde SOLO este JSON, sin texto antes ni despues:
-{{"elegidas": [{{"id": "C001", "motivo": "...", "centro_x": 0.5, "centro_y": 0.5, "alto": 0.6, "caption": "..."}}]}}"""
-    exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
-    r = subprocess.run([exe, "-p", prompt, "--allowedTools", "Read", "--output-format", "json",
-                        "--model", MODELO_CLAUDE], cwd=str(carpeta), capture_output=True,
-                       stdin=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=3600)
-    if r.returncode:
-        raise RuntimeError(f"claude -p salio con {r.returncode}: {r.stdout[-400:]} {r.stderr[-400:]}")
-    salida = json.loads(r.stdout)
-    elegidas = extraer_json(salida["result"])["elegidas"]
-    return [e for e in elegidas if e.get("id") in ids], salida.get("usage")
+{{"apunte": "...", "elegidas": [{{"id": "C001", "motivo": "...", "centro_x": 0.5, "centro_y": 0.5, "alto": 0.6, "caption": "..."}}]}}"""
+    datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE)
+    return [e for e in datos["elegidas"] if e.get("id") in ids], datos.get("apunte", ""), uso
+
+
+def anotar(evento, elegidas, apunte):
+    """Bitacora legible de cada seleccion: que se eligio y por que."""
+    lineas = [f"\n## {time.strftime('%Y-%m-%d %H:%M')} — {evento}\n", (apunte or "").strip(), ""]
+    lineas += [f"{n}. `{e['archivo']}` — {e.get('motivo', '')}" for n, e in enumerate(elegidas, 1)]
+    with open(BITACORA, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lineas) + "\n")
 
 
 # ---------------------------------------------------------------- 4. Recortes
@@ -237,26 +288,27 @@ def procesar(base, trabajo):
     mapa = achicar(autocull(trabajo, carpeta), carpeta / "ver")
     (carpeta / "mapa.json").write_text(json.dumps(mapa, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    archivo_g = carpeta / "gemini.json"
-    vg = json.loads(archivo_g.read_text(encoding="utf-8")) if archivo_g.exists() else {}
-    faltan = [i for i in mapa if i not in vg]
+    archivo_f = carpeta / "filtro.json"
+    vf = json.loads(archivo_f.read_text(encoding="utf-8")) if archivo_f.exists() else {}
+    faltan = [i for i in mapa if i not in vf]
     if faltan:
-        vg.update(gemini(carpeta / "ver", faltan, evento))
-        archivo_g.write_text(json.dumps(vg, ensure_ascii=False, indent=1), encoding="utf-8")
-    orden = sorted(vg, key=lambda i: (vg[i].get("veredicto") != "si", -int(vg[i].get("nota", 0))))
-    si = sum(vg[i].get("veredicto") == "si" for i in vg)
-    a_claude = orden[:min(MAX_A_CLAUDE, max(si, 30))]  # si Gemini fue tacaño, igual le paso 30
-    log(f"Gemini: {si} si de {len(vg)}; a Claude van {len(a_claude)}")
+        vf.update(filtro(carpeta, faltan, evento))
+        archivo_f.write_text(json.dumps(vf, ensure_ascii=False, indent=1), encoding="utf-8")
+    orden = sorted(vf, key=lambda i: (vf[i].get("veredicto") != "si", -int(vf[i].get("nota", 0))))
+    si = sum(vf[i].get("veredicto") == "si" for i in vf)
+    a_claude = orden[:min(MAX_A_CLAUDE, max(si, 30))]  # si el filtro fue tacaño, igual le paso 30
+    log(f"filtro: {si} si de {len(vf)}; a la eleccion final van {len(a_claude)}")
 
-    elegidas, uso = claude(carpeta / "ver", a_claude, evento)
+    elegidas, apunte, uso = claude(carpeta / "ver", a_claude, evento)
     log(f"Claude eligio {len(elegidas)}; uso: {uso}")
     for n, e in enumerate(elegidas, 1):
         e["original"] = mapa[e["id"]]
         e["archivo"] = f"{n:02d}_{Path(e['original']).stem}.jpg"
         recortar(e["original"], e, carpeta / e["archivo"])
     (carpeta / "seleccion.json").write_text(json.dumps(
-        {"trabajo": evento, "elegidas": elegidas, "uso_claude": uso, "gemini_si": si,
+        {"trabajo": evento, "apunte": apunte, "elegidas": elegidas, "uso_claude": uso, "filtro_si": si,
          "autocull_pass": len(mapa)}, ensure_ascii=False, indent=1), encoding="utf-8")
+    anotar(evento, elegidas, apunte)
     log(f"listo: {carpeta}")
 
 

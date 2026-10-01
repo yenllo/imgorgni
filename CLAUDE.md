@@ -1,5 +1,13 @@
 cdc# CLAUDE.md — IMGorgni
 
+## Selección para Instagram y Autocull: todo Claude, sin agy
+
+Pedido de Renzo el 1/10/2026: en `seleccion_ig.py`, `aprender_apuntes.py` y Autocull **no se usa agy
+ni Gemini**; juzga Claude (`claude -p`: Haiku filtra hojas de contacto, Sonnet elige). Motivo medido:
+agy describió fotos equivocadas y en headless no puede escribir archivos. El gusto aprendido de Renato
+(cliente de la Liga ExScuola) vive en `data/apuntes_renato.md`; cada selección nocturna deja su
+apunte en `_para_publicar/bitacora.md`. La regla general de delegar a agy sigue valiendo para el resto.
+
 ## Delegar trabajo a Antigravity (agy)
 
 El protocolo general está en `~/.claude/CLAUDE.md` y vale para todos los proyectos.
