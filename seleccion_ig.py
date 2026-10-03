@@ -88,10 +88,12 @@ def log(*a):
 
 
 def raiz_trabajo():
-    """K: si el 8TB esta por dock (o mapeado); si no, el share de la Pi por LAN.
-    Recien despertada el wifi tarda en volver, por eso reintenta un rato."""
+    """K: si el 8TB esta por dock (o mapeado); si no, el share de la Pi por LAN; si la notebook no esta
+    en la red de la casa, por Tailscale (~4-5 MB/s: un carrete de JPEG tarda ~40 min en leerse, pero
+    anda; 3/10/2026, Renzo fuera de casa con la notebook prendida). Recien despertada el wifi tarda en
+    volver, por eso reintenta un rato."""
     for _ in range(36):
-        for base in ("K:\\", r"\\192.168.1.62\Fotos"):
+        for base in ("K:\\", r"\\192.168.1.62\Fotos", r"\\100.78.164.81\Fotos"):
             p = Path(base) / "Fotos" / "Galeria" / "Trabajo"
             if p.is_dir():
                 return p
