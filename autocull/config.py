@@ -143,6 +143,8 @@ class AnalysisConfig:
     # same burst. Used by both the culler's dedup (scorer) and the review UI
     # grouping (web/state) so they agree.
     burst_window_seconds: float = 1.5
+    # How many frames of each burst survive the dedup. 1 = the classic culler (curador stars).
+    burst_keep: int = 1
 
     # ── Performance ─────────────────────────────────────────────────────
     # Number of workers for CPU-bound analysis (multiprocessing)

@@ -5,7 +5,7 @@ Lo lanza `web_curador.py` como subproceso **con el python del venv de Autocull**
 propias dependencias pesadas (onnxruntime, ultralytics, mediapipe) que no estan
 en el entorno del curador. Por eso esto es un script suelto y no un import.
 
-    <venv-autocull>\python.exe autocull_runner.py <lista.txt> <salida.json>
+    <venv-autocull>\python.exe autocull_runner.py <lista.txt> <salida.json> [ajustes.json]
 
 `lista.txt`: una ruta por linea (las fotos del evento, que viven desparramadas
 en varias carpetas de K:, no en una sola).
@@ -63,6 +63,15 @@ def main():
         from autocull.pipeline import run_pipeline
 
         cfg = AnalysisConfig()
+        # 3er argumento opcional: JSON con ajustes de AnalysisConfig. seleccion_ig.py lo usa para un
+        # Autocull que solo bota basura (sin cuotas fijas, 3 por rafaga, orden del ranker); el
+        # curador no lo pasa y sigue con los valores de siempre.
+        if len(sys.argv) > 3:
+            with open(sys.argv[3], encoding="utf-8") as fh:
+                for k, v in json.load(fh).items():
+                    if not hasattr(cfg, k):
+                        raise ValueError(f"ajuste desconocido de Autocull: {k}")
+                    setattr(cfg, k, v)
         cfg.__post_init__()
 
         ultimo = [0.0]

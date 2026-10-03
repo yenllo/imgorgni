@@ -2,7 +2,7 @@
 
 Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, campos separados por TAB:
 
-	id	origen	preset_revelado	preset_exportacion	destino	marca_de_agua
+	id	origen	preset_revelado	preset_exportacion	destino	marca_de_agua	coleccion	nivelar
 
 - origen: una carpeta (se importan todas sus fotos, recursivo) o un .txt con una ruta por linea.
 - preset_revelado: nombre del preset de Revelar a aplicar ("IMGorgni Basica"...). Vacio = no tocar
@@ -11,6 +11,10 @@ Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, camp
   TODOS sus ajustes salvo la carpeta, que pasa a ser `destino`. Vacio = solo revelar, no exportar
   (las completas: Renzo recorta y borra distractores, y exporta despues).
 - marca_de_agua: title de una marca de agua de Lightroom ("EdicionCompletaExScuolaMarca"). Opcional.
+- coleccion: nombre de una coleccion donde dejar las fotos para revisarlas en la manana. Opcional.
+- nivelar: "si" = nivelado 2D rapido del Encuadrador (Python, sin mouse): pone CropAngle y una
+  calificacion de confianza (3 seguro, 2 probable, 1 revisala). Lo que no se pudo medir queda
+  sin tocar y con 0 estrellas: ese es el filtro para pasarle despues la macro del boton "Automatico".
 
 Lo terminado queda en hechos.tsv (id, ok|error, detalle, cuando): un trabajo "ok" no se repite; uno
 con error se reintenta en la proxima corrida. Detalle en plugin.log. Al terminar escribe fin.txt, que
@@ -40,6 +44,9 @@ local function carpeta_appdata()
 	return "C:\\Users\\renzo\\AppData\\Roaming"
 end
 local PRESETS = carpeta_appdata() .. "\\Adobe\\Lightroom"
+-- nivelado rapido del proyecto Encuadrador (su README explica la calibracion contra Adobe)
+local ENC_PY = "C:\\Renzo\\Proyectos\\Encuadrador\\.venv\\Scripts\\python.exe"
+local ENC_SCRIPT = "C:\\Renzo\\Proyectos\\Encuadrador\\python_ia\\nivelar.py"
 local EXT = { arw = 1, cr2 = 1, cr3 = 1, nef = 1, dng = 1, raf = 1, orf = 1, rw2 = 1,
 	jpg = 1, jpeg = 1, tif = 1, tiff = 1 }
 
@@ -117,8 +124,46 @@ local function plantilla(subcarpeta, titulo)
 	end
 end
 
+-- Mismo criterio que Nivelar.lua del Encuadrador: no pisa un angulo que ya exista (lo que Renzo
+-- enderezo a mano o paso por la macro vale mas) y mezcla con el revelado en vez de reemplazarlo.
+local function nivelar(catalogo, fotos, id)
+	local lista, salida = BASE .. "\\nivelar_lista.txt", BASE .. "\\nivelar_angulos.tsv"
+	local por_ruta = {}
+	local f = io.open(lista, "w")
+	for _, p in ipairs(fotos) do
+		local r = p:getRawMetadata("path")
+		por_ruta[r] = p
+		f:write(r, "\n")
+	end
+	f:close()
+	if LrFileUtils.exists(salida) then LrFileUtils.delete(salida) end
+	-- cmd.exe se come las comillas externas: por eso todo el comando va entrecomillado
+	local code = LrTasks.execute(string.format('""%s" "%s" "%s" "%s""', ENC_PY, ENC_SCRIPT, lista, salida))
+	if code ~= 0 or not LrFileUtils.exists(salida) then error("nivelar.py fallo (codigo " .. tostring(code) .. ")") end
+	local n = 0
+	catalogo:withWriteAccessDo("IMGorgni: nivelar " .. id, function()
+		for linea in io.lines(salida) do
+			local ruta, ang, l, t, r, b, conf =
+				linea:match("^(.-)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
+			local p = ruta and por_ruta[ruta]
+			if p then
+				local s = p:getDevelopSettings()
+				if (s.CropAngle or 0) == 0 then
+					s.CropAngle = tonumber(ang)
+					s.CropLeft, s.CropTop, s.CropRight, s.CropBottom = tonumber(l), tonumber(t), tonumber(r), tonumber(b)
+					p:applyDevelopSettings(s, "Nivelar")
+					p:setRawMetadata("rating", tonumber(conf) or 1)
+					n = n + 1
+				end
+			end
+		end
+	end, { timeout = 600 })
+	return n
+end
+
 local function trabajo(catalogo, c)
 	local id, origen, nombre_rev, nombre_exp, destino, marca = c[1], c[2] or "", c[3] or "", c[4] or "", c[5] or "", c[6] or ""
+	local coleccion, con_nivelado = c[7] or "", (c[8] or "") == "si"
 	local rutas = fotos_de(origen)
 	if #rutas == 0 then error("no hay fotos en " .. origen) end
 	local preset
@@ -144,7 +189,15 @@ local function trabajo(catalogo, c)
 			for _, p in ipairs(fotos) do p:applyDevelopPreset(preset, _PLUGIN) end
 		end, { timeout = 600 })
 	end
-	if not exp then return #fotos .. " fotos reveladas (sin exportar)" end
+	local detalle = #fotos .. " fotos reveladas"
+	if con_nivelado then detalle = detalle .. ", " .. nivelar(catalogo, fotos, id) .. " niveladas" end
+	if coleccion ~= "" then
+		catalogo:withWriteAccessDo("IMGorgni: coleccion " .. coleccion, function()
+			catalogo:createCollection(coleccion, nil, true):addPhotos(fotos) -- true: reusa si ya existe
+		end, { timeout = 60 })
+		detalle = detalle .. " en '" .. coleccion .. "'"
+	end
+	if not exp then return detalle .. " (sin exportar)" end
 
 	local ajustes = {}
 	for k, v in pairs(exp.value) do ajustes["LR_" .. k] = v end
@@ -161,7 +214,7 @@ local function trabajo(catalogo, c)
 	end
 	LrFileUtils.createAllDirectories(destino)
 	LrExportSession({ photosToExport = fotos, exportSettings = ajustes }):doExportOnCurrentTask()
-	return #fotos .. " fotos exportadas a " .. destino
+	return detalle .. "; exportadas a " .. destino
 end
 
 function M.procesar()

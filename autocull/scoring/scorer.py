@@ -565,13 +565,14 @@ def compute_final_scores(
         if current_group:
             burst_groups.append(current_group)
             
-        # Keep only the highest scorer per burst group
+        # Keep the best `burst_keep` per burst group (1 = classic culler). For editorial selection
+        # it's 3: Renato's picks were the "loser" frame of a burst in 48 of 101 cases (F1 13/9).
+        keep = max(1, int(getattr(config, "burst_keep", 1)))
         for group in burst_groups:
-            if len(group) > 1:
+            if len(group) > keep:
                 # Sort descending by final score
                 group.sort(key=lambda x: x["final_score"], reverse=True)
-                # Keep the best 1
-                for loser in group[1:]:
+                for loser in group[keep:]:
                     loser["decision"] = "REJECT"
                     loser["reject_reason"] = "burst_duplicate"
                     loser["reject_tier"] = 5

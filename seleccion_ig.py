@@ -65,6 +65,19 @@ ESTABLE_HORAS = 2                  # una fecha se analiza recien cuando termino 
 ELEGIR = 20  # Renzo aprueba en /panel/revision entre 2 y 10 de cada 10: con 20 le quedan ~10 publicables.
              # Ajustar con la tasa real de aprobacion de revision.json cuando haya varios trabajos.
 MAX_A_CLAUDE = 60
+# Autocull solo bota basura (3/10/2026). Con sus valores de siempre (cuotas fijas por percentil y 1 foto
+# por rafaga) pasaba el 6-19% del carrete y dejaba afuera 9 de cada 10 fotos que eligio Renato:
+# F1 13/9 -> 10 de 101, F2 26/9 -> 7 de 101 (48 cayeron como "duplicado de rafaga").
+AUTOCULL_AJUSTES = {
+    "sharpness_reject_percentile": 5.0,     # era 15: solo lo claramente movido o fuera de foco
+    "blur_reject_percentile": 3.0,          # era 10
+    "subject_snr_reject_percentile": 10.0,  # era 25
+    "final_reject_percentile": 0.0,         # era 30: sin cuota final, el corte lo hacen Haiku y Sonnet
+    "burst_keep": 3,                        # era 1: las 3 mejores de cada rafaga; Claude no repite jugada
+}
+RANKER = AQUI / "ranker_renato.json"  # ordena las candidatas (aprendido de Renato: p@30 0.37 vs 0.18)
+MAX_A_FILTRO = 900                    # tope al filtro de Haiku. Simulado 3/10: 600 -> 900 suma ~12% de elegidas de Renato
+MAX_NO_LEIDAS = 0.05                  # si mas del 5% no se pudo leer, el analisis no vale
 POR_HOJA = 9               # 3x3
 HOJAS_POR_LLAMADA = 6      # ~54 fotos por claude -p: reparte el costo fijo de cada llamada
 PX_VER = 1280              # lo que ve el juez final
@@ -113,8 +126,13 @@ def jpegs(trabajo):
 
 # ---------------------------------------------------------------- 1. Autocull
 
+def no_leidas(d):
+    return sum(1 for f in d["fotos"] if (f.get("motivo") or "").startswith("Could not load"))
+
+
 def autocull(trabajo, carpeta):
-    """Las rutas JPEG que Autocull dejo pasar. Reusa el resultado si ya corrio."""
+    """Las rutas JPEG candidatas: lo que Autocull no considero basura, las mejores primero segun el
+    ranker aprendido de Renato, hasta MAX_A_FILTRO. Reusa el resultado si ya corrio."""
     salida = carpeta / "autocull.json"
     d = json.loads(salida.read_text(encoding="utf-8")) if salida.exists() else {}
     if d.get("estado") != "listo":
@@ -124,15 +142,28 @@ def autocull(trabajo, carpeta):
         log(f"Autocull sobre {len(fotos)} JPEG (esto tarda)")
         lista = carpeta / "autocull.lista.txt"
         lista.write_text("\n".join(fotos), encoding="utf-8")
+        ajustes = dict(AUTOCULL_AJUSTES)
+        if RANKER.exists():
+            ajustes["ranker_path"] = str(RANKER)
+        (carpeta / "autocull.ajustes.json").write_text(json.dumps(ajustes, indent=1), encoding="utf-8")
         with open(carpeta / "autocull.log", "w", encoding="utf-8", errors="replace") as fh:
-            subprocess.run([str(AUTOCULL_PY), str(AQUI / "autocull_runner.py"), str(lista), str(salida)],
+            subprocess.run([str(AUTOCULL_PY), str(AQUI / "autocull_runner.py"), str(lista), str(salida),
+                            str(carpeta / "autocull.ajustes.json")],
                            cwd=str(AUTOCULL_DIR), stdout=fh, stderr=subprocess.STDOUT, check=True)
         d = json.loads(salida.read_text(encoding="utf-8"))
         if d.get("estado") != "listo":
             raise RuntimeError(f"Autocull termino en estado {d.get('estado')}: {d.get('error')}")
-    pasan = [f["ruta"] for f in d["fotos"] if f["decision"] == "PASS"]
-    log(f"Autocull: {len(pasan)} PASS de {len(d['fotos'])}")
-    return pasan
+        malas = no_leidas(d)
+        if malas > MAX_NO_LEIDAS * len(d["fotos"]):
+            # F2 26/9: un corte de red dejo 1.151 de 1.990 fotos sin leer y la seleccion se hizo
+            # sobre menos de la mitad del carrete. Mejor no dar el analisis por bueno.
+            salida.replace(carpeta / "autocull.fallido.json")
+            raise RuntimeError(f"{malas} de {len(d['fotos'])} fotos no se pudieron leer (NAS inestable); "
+                               "se reintenta en la proxima corrida")
+    pasan = sorted((f for f in d["fotos"] if f["decision"] == "PASS"), key=lambda f: -(f.get("puntaje") or 0))
+    log(f"Autocull: {len(pasan)} candidatas de {len(d['fotos'])} ({no_leidas(d)} sin leer); "
+        f"al filtro van {min(len(pasan), MAX_A_FILTRO)}")
+    return [f["ruta"] for f in pasan[:MAX_A_FILTRO]]
 
 
 def rotular(im, texto, tam=40):
@@ -481,6 +512,15 @@ def main():
     if not base:
         return log("no llego a Fotos\\Galeria\\Trabajo (fuera de casa o la Pi apagada), no hago nada")
     SALIDA.mkdir(exist_ok=True)
+    espera = SALIDA / "esperar_hasta.txt"  # "2026-10-03 23:00": pausa la noche hasta esa hora
+    if args == ["--noche"] and espera.exists():
+        try:
+            hasta = time.mktime(time.strptime(espera.read_text(encoding="utf-8").strip()[:16], "%Y-%m-%d %H:%M"))
+        except ValueError:
+            hasta = 0
+        if time.time() < hasta:
+            return
+        espera.unlink()
     lock = candado()  # noqa: F841 (se mantiene abierto hasta que termina el proceso)
     if lock is None:
         return log("otra corrida sigue trabajando, salgo")
