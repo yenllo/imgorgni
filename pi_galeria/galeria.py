@@ -104,6 +104,14 @@ ANCHO_MUESTRA = int(os.environ.get("GALERIA_ANCHO_MUESTRA", 1400))
 # la portada se muestra a sangre: si se genera del tamaño de la grilla, el
 # navegador la estira y estira la marca de agua con ella
 ANCHO_TAPA = int(os.environ.get("GALERIA_ANCHO_TAPA", 2200))
+# anchos chicos que /muestra/ y /portada/ aceptan con ?w=, para el srcset de
+# la portada. Lista cerrada a proposito: un ?w= libre dejaria a cualquiera
+# llenar el cache de la Pi pidiendo un ancho distinto por request
+ANCHOS = (480, 800)
+
+# el dominio publico, para el canonical y el sitemap. Va fijo y no sale de
+# request.url_root: detras del tunel ese puede llegar como http:// o 127.0.0.1
+SITIO = os.environ.get("GALERIA_SITIO", "https://rbfotos.studio").rstrip("/")
 
 # Numero de WhatsApp en formato internacional sin signos: 56912345678.
 # Vacio = no se dibuja el boton, en vez de dejar un link roto.
@@ -1699,7 +1707,27 @@ def publicas(limite=None):
     return filas[:limite] if limite else filas
 
 
-def _viz(plantilla, titulo=None, desc=None, og_img=None, **kw):
+@app.template_global()
+def srcset(url, grande=None):
+    """Las variantes chicas de una foto de la vidriera, para srcset.
+
+    El telefono baja la de 480/800 en vez de la de 1400: era 1,3 MB de mas en
+    la portada segun PageSpeed. La ultima entrada es la URL tal cual, que
+    sigue sirviendo el tamaño de siempre (y es la que usa el og:image).
+    """
+    sep = "&" if "?" in url else "?"
+    return ", ".join(["%s%sw=%d %dw" % (url, sep, w, w) for w in ANCHOS]
+                     + ["%s %dw" % (url, grande or ANCHO_MUESTRA)])
+
+
+def _ancho_pedido():
+    """El ?w= de la request si es uno de ANCHOS, o None."""
+    w = request.args.get("w", "")
+    return int(w) if w.isdigit() and int(w) in ANCHOS else None
+
+
+def _viz(plantilla, titulo=None, desc=None, og_img=None, indexar=False,
+         precarga=None, **kw):
     """Todas las paginas publicas comparten los mismos datos de cabecera."""
     kw.setdefault("seccion", "")
     T0 = textos()
@@ -1707,6 +1735,7 @@ def _viz(plantilla, titulo=None, desc=None, og_img=None, **kw):
         BASE_HTML,
         titulo=titulo or ("rb.fotos \u00b7 " + T0["hero_titulo"]),
         desc=desc or T0["hero_bajada"], og_img=og_img,
+        indexar=indexar, canonical=SITIO + request.path, precarga=precarga,
         cuerpo=render_template_string(
         plantilla, wsp=WHATSAPP, fecha_corta=fecha_corta, T=textos(),
         lineas=lineas, parrafos=parrafos, tramos=tramos, precio_de=precio_de,
@@ -1720,12 +1749,16 @@ def home():
     fotos = muestras()
     return _viz(PORTADA, fotos=fotos, eventos=publicas(6), seccion="inicio",
                 og_img=("%smuestra/%s" % (request.url_root, fotos[0])
-                        if fotos else None))
+                        if fotos else None),
+                indexar=True,
+                precarga=("/muestra/%s" % urllib.parse.quote(fotos[0])
+                          if fotos else None))
 
 
 @app.get("/sobre-mi")
 def sobre_mi():
-    return _viz(SOBREMI, seccion="sobre-mi", titulo="Sobre mi \u00b7 rb.fotos")
+    return _viz(SOBREMI, seccion="sobre-mi", titulo="Sobre mi \u00b7 rb.fotos",
+                indexar=True)
 
 
 @app.get("/calculadora")
@@ -1740,11 +1773,32 @@ def eventos_publicos():
     """La vidriera de eventos. Solo lista: para ver las fotos hay que entrar
     a la galeria como siempre, con el email."""
     evs = publicas()
-    return _viz(EVENTOS, eventos=evs, seccion="eventos",
+    return _viz(EVENTOS, eventos=evs, seccion="eventos", indexar=True,
                 titulo="Eventos \u00b7 rb.fotos",
                 desc="%d eventos publicados" % len(evs) if evs else None,
                 og_img=("%sportada/%s?og=1&v=%s" % (request.url_root, evs[0]["slug"], evs[0]["portada_foto_id"])
                         if evs else None))
+
+
+# lo que se indexa: las mismas paginas que piden indexar=True en _viz
+INDEXABLES = ("/", "/eventos", "/sobre-mi")
+
+
+@app.get("/robots.txt")
+def robots():
+    """El panel y la API fuera. /g/ NO se bloquea aca a proposito: un
+    Disallow impide que el buscador lea el noindex de la galeria, y entonces
+    puede listar el link igual (sin contenido) si alguien lo publico."""
+    return Response("User-agent: *\nDisallow: /panel\nDisallow: /api/\n\n"
+                    "Sitemap: %s/sitemap.xml\n" % SITIO, mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    urls = "".join("<url><loc>%s%s</loc></url>" % (SITIO, p) for p in INDEXABLES)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns='
+                    '"http://www.sitemaps.org/schemas/sitemap/0.9">%s</urlset>\n'
+                    % urls, mimetype="application/xml")
 
 
 def galerias_de_carpeta(cx, cid):
@@ -1839,7 +1893,8 @@ def muestra(nombre):
             or f.resolve().parent != MUESTRAS.resolve()):
         abort(404)
     try:
-        return send_file(sin_marca(f), mimetype="image/jpeg", max_age=604800)
+        return send_file(sin_marca(f, _ancho_pedido()), mimetype="image/jpeg",
+                         max_age=604800)
     except Exception:
         app.logger.exception("no pude generar la muestra %s", f)
         abort(404)
@@ -2398,14 +2453,17 @@ def portada(slug):
         (gal["id"], gal["portada_foto_id"], gal["portada_foto_id"])).fetchone()
     if f is None or not dentro_de_raiz(f["ruta"]) or not os.path.exists(f["ruta"]):
         abort(404)
+    # ?w= es la miniatura de la tarjeta de evento (srcset); sin el, la tapa
+    # de siempre, que el gate usa de fondo a pantalla completa
+    chica = _ancho_pedido()
     try:
         return send_file(
             preview(f["id"], f["ruta"], gal["marca_texto"],
                     # ?og=1 la pide chica: WhatsApp descarta las imagenes
                     # pesadas y no dibuja ninguna vista previa
-                    1200 if request.args.get("og") else ANCHO_TAPA, 0.017,
-                    logos_de(gal), firma_de(gal))
-            if gal["marca"] else sin_marca(f["ruta"]),
+                    chica or (1200 if request.args.get("og") else ANCHO_TAPA),
+                    0.017, logos_de(gal), firma_de(gal))
+            if gal["marca"] else sin_marca(f["ruta"], chica),
             mimetype="image/jpeg", max_age=86400)
     except Exception:
         abort(404)
@@ -4855,7 +4913,15 @@ form.gate .btn{border-radius:0;width:100%;padding:.9rem;font-weight:400;
 
 BASE_HTML = """<!doctype html><html lang="es"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
+{# indexar lo pide solo la vidriera publica (inicio, eventos, sobre mi). El
+   default es noindex: galerias, gate, compra y panel no van a Google aunque
+   alguien publique el link, y una pagina nueva nace oculta. #}
+{% if indexar %}<link rel="canonical" href="{{ canonical }}">
+{% else %}<meta name="robots" content="noindex,nofollow">{% endif %}
+{# la tapa es el LCP: anunciada aca el navegador la pide antes de parsear el
+   <style>, que son ~10 KB que si no van primero #}
+{% if precarga %}<link rel="preload" as="image" href="{{ precarga }}"
+  imagesrcset="{{ srcset(precarga) }}" imagesizes="100vw" fetchpriority="high">{% endif %}
 {# lo que muestra WhatsApp (y cualquier chat) al pegar el link. Sin esto solo
    ve el <title> y el dominio, y todos los links se ven iguales. #}
 <title>{{ titulo|default('rb.fotos') }}</title>
@@ -5178,6 +5244,7 @@ code{background:#1c1c1c;padding:.15rem .4rem;border-radius:4px;font-size:.88em}
    para cambiarla, renombrala para que ordene antes. El encuadre se corre con
    object-position; 40% deja el horizonte alto, que es donde suele caer el
    sujeto en un plano de cancha. */
+main.inicio{padding:0;max-width:none;margin:0}
 .capa{position:relative;min-height:min(86vh,760px);display:grid;
   /* la columna va acotada: un track `auto` toma el max-content del
      titulo y en el telefono empuja la pagina fuera de la pantalla */
@@ -5385,7 +5452,9 @@ PIE = """<hr class="luz">
 # la tarjeta de evento: portada, /eventos y las carpetas. La tarifa solo si
 # esta en venta: en una carpeta tambien hay galerias que no se venden.
 TARJETAS = """{% for g in eventos %}<a class="evcard" href="/g/{{ g['slug'] }}">
-<img src="/portada/{{ g['slug'] }}?v={{ g['portada_foto_id'] }}" loading="lazy" alt="">
+{% set tapa = '/portada/%s?v=%s' % (g['slug'], g['portada_foto_id']) %}
+<img src="{{ tapa }}" srcset="{{ srcset(tapa) }}"
+  sizes="(max-width:640px) 100vw, 380px" loading="lazy" alt="">
 <div class="txt"><span class="nom">{{ g['nombre'] }}</span>
 <span class="cuando">{{ fecha_corta(g['fecha'] or g['creada']) }}
   &middot; {{ g['fotos'] }} fotos</span>
@@ -5396,8 +5465,9 @@ TARJETAS = """{% for g in eventos %}<a class="evcard" href="/g/{{ g['slug'] }}">
 </div></a>
 {% endfor %}"""
 
-PORTADA = BARRA + """<header class="capa">
-{% if fotos %}<img class="capa-foto" src="/muestra/{{ fotos[0]|urlencode }}"
+PORTADA = BARRA + """<main class="inicio"><header class="capa">
+{% if fotos %}{% set tapa = '/muestra/' ~ fotos[0]|urlencode %}
+<img class="capa-foto" src="{{ tapa }}" srcset="{{ srcset(tapa) }}" sizes="100vw"
   alt="" fetchpriority="high">{% endif %}
 <div class="capa-txt">
 <h1>{{ T.hero_titulo }}</h1>
@@ -5428,12 +5498,15 @@ PORTADA = BARRA + """<header class="capa">
 {% if resto %}<section class="bloque" id="trabajos">
 <div class="viz"><p class="rotulo">{{ T.rotulo_trabajos }}</p></div>
 <div class="tira">
-{% for f in resto[:5] %}<figure><img src="/muestra/{{ f|urlencode }}" alt=""
-  loading="lazy" draggable="false"></figure>
+{% for f in resto[:5] %}{% set m = '/muestra/' ~ f|urlencode %}<figure><img
+  src="{{ m }}" srcset="{{ srcset(m) }}" alt="" loading="lazy" draggable="false"
+  sizes="{{ '(max-width:880px) 100vw, 820px' if loop.first
+            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px' }}"></figure>
 {% endfor %}</div></section>{% endif %}
 
 {% if resto|length > 5 %}<div class="banda">
-<img src="/muestra/{{ resto[5]|urlencode }}" alt="" loading="lazy"
+{% set m = '/muestra/' ~ resto[5]|urlencode %}<img src="{{ m }}"
+  srcset="{{ srcset(m) }}" sizes="100vw" alt="" loading="lazy"
   draggable="false"></div>{% endif %}
 
 {% if T.como_titulo %}<section class="viz bloque">
@@ -5446,10 +5519,13 @@ PORTADA = BARRA + """<header class="capa">
 
 {% if resto|length > 6 %}<section class="bloque">
 <div class="tira">
-{% for f in resto[6:] %}<figure><img src="/muestra/{{ f|urlencode }}" alt=""
-  loading="lazy" draggable="false"></figure>
+{% for f in resto[6:] %}{% set m = '/muestra/' ~ f|urlencode %}<figure><img
+  src="{{ m }}" srcset="{{ srcset(m) }}" alt="" loading="lazy" draggable="false"
+  sizes="{{ '(max-width:880px) 100vw, 820px' if loop.first
+            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px' }}"></figure>
 {% endfor %}</div></section>{% endif %}
 
+</main>
 <div class="viz">""" + PIE + """</div>"""
 
 CALCULADORA = BARRA + """<main class="viz">
@@ -8468,11 +8544,35 @@ def test():
         assert "/g/ddd" not in html, "FUGA: se listo una galeria vencida"
         assert "/g/ccc" in c.get("/").get_data(as_text=True), "la portada no la lista"
 
+        # buscadores: la vidriera se indexa, lo privado no. El default de
+        # BASE_HTML es noindex, asi que una pagina nueva nace oculta
+        for p in INDEXABLES:
+            h = c.get(p).get_data(as_text=True).split("<style>")[0]
+            assert "noindex" not in h, "%s no se puede indexar" % p
+            assert 'rel="canonical" href="%s%s"' % (SITIO, p) in h, p
+        for p in ("/g/ccc", "/calculadora", "/panel"):
+            assert "noindex" in c.get(p).get_data(as_text=True).split("<style>")[0], \
+                "FUGA: %s se puede indexar" % p
+        rb = c.get("/robots.txt").get_data(as_text=True)
+        assert "Disallow: /panel" in rb and "Disallow: /g/" not in rb, rb
+        assert "%s/eventos</loc>" % SITIO in c.get("/sitemap.xml").get_data(as_text=True)
+
+        # tarjeta de evento con srcset: ?w= solo acepta los anchos de ANCHOS,
+        # y uno inventado cae en la tapa de siempre en vez de generar otra
+        assert "/portada/ccc?v=" in html and "&amp;w=480 480w" in html, "sin srcset"
+        chica = c.get("/portada/ccc?w=480")
+        assert chica.status_code == 200
+        assert Image.open(io.BytesIO(chica.data)).width <= 480
+        rara = c.get("/portada/ccc?w=333")
+        assert Image.open(io.BytesIO(rara.data)).width != 333, "acepto un ancho libre"
+
         # comprar: hay que haber entrado, y no existe si la venta esta apagada
         assert c.get("/g/ccc/comprar").status_code == 302, "compro sin entrar"
         assert c.get("/g/aaa/comprar").status_code == 404, "compro con la venta apagada"
         c.post("/g/ccc/entrar", data={"email": "z@y.com", "clave": "secreta"})
         assert c.get("/g/ccc/comprar").status_code == 200
+        assert "noindex" in c.get("/g/ccc/comprar").get_data(as_text=True), \
+            "FUGA: la pagina de compra se puede indexar"
         # -------------------------------------------------------- carrito
         # el carrito no es una lista que se administre: no sale entre las
         # listas del cliente, pero se cuenta y se puede abrir como galeria
