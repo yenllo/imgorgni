@@ -43,7 +43,7 @@ from flask import (Flask, g, session, request, redirect, url_for, abort,
                    send_file, render_template_string, jsonify, Response)
 from markupsafe import Markup
 from werkzeug.utils import secure_filename
-from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps, features
 
 BASE = Path(__file__).resolve().parent
 DB = Path(os.environ.get("GALERIA_DB", BASE / "galeria.db"))
@@ -871,7 +871,22 @@ def marcar(origen, destino, texto=None, ancho=None, factor=0.042, logos=(),
     if firma:
         pegar_firma(out, *firma)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    out.save(destino, "JPEG", quality=82, optimize=True)
+    guardar(out, destino, quality=82, optimize=True)
+
+
+# WebP a 80 desde el original: medido sobre fotos reales a 480/800/1400 px,
+# pesa 20% menos que el JPEG a 82 y tiene MAS calidad (PSNR 35,9 vs 35,5 dB).
+# Pasarlo desde el JPEG ya cacheado era mas simple pero perdia 1,7 dB.
+CALIDAD_WEBP = int(os.environ.get("GALERIA_CALIDAD_WEBP", 80))
+WEBP_OK = features.check("webp")      # Pillow sin libwebp: todo sigue en JPEG
+
+
+def guardar(im, destino, **jpeg):
+    """Guarda en el formato que dice la extension del destino: .webp o JPEG."""
+    if Path(destino).suffix == ".webp":
+        im.save(destino, "WEBP", quality=CALIDAD_WEBP, method=4)
+    else:
+        im.save(destino, "JPEG", **jpeg)
 
 
 def ruta_cache(ruta, texto, logos, ancho, factor, firma=None):
@@ -1003,7 +1018,7 @@ def entregable(ruta, firma):
 
 
 def preview(foto_id, ruta, texto=None, ancho=None, factor=0.042, logos=(),
-            firma=None):
+            firma=None, webp=False):
     """Cachea por (ruta, mtime, texto de la marca, logos, ancho).
 
     El texto y los logos van en la clave a proposito: cambiar la marca de una
@@ -1014,6 +1029,8 @@ def preview(foto_id, ruta, texto=None, ancho=None, factor=0.042, logos=(),
     ancho = ancho or ANCHO_PREVIEW
     logos = tuple(logos)
     destino = ruta_cache(ruta, texto, logos, ancho, factor, firma)
+    if webp:
+        destino = destino.with_suffix(".webp")   # misma clave: la limpieza la encuentra
     if not destino.exists():
         marcar(ruta, destino, texto, ancho, factor, logos, firma)
     return destino
@@ -1029,17 +1046,21 @@ def limpiar_cache(gid, texto, logos, firma=None):
     archivos ni tocar las previews de otras galerias.
     """
     n = 0
+    # mas las de la tapa que piden la tarjeta (srcset) y la vista previa del
+    # chat (og, 1200): sin ellas quedaban huerfanas al cambiar la marca
+    medidas = MEDIDAS + tuple((w, 0.017) for w in ANCHOS + (1200,))
     for f in db().execute("SELECT ruta FROM foto WHERE galeria_id = ?", (gid,)):
-        for ancho, factor in MEDIDAS:
+        for ancho, factor in medidas:
             try:
                 p = ruta_cache(f["ruta"], MARCA if texto is None else texto,
                                tuple(logos), ancho or ANCHO_PREVIEW, factor,
                                firma)
             except OSError:
                 break        # la foto ya no esta en el disco: nada que limpiar
-            if p.exists():
-                p.unlink()
-                n += 1
+            for q in (p, p.with_suffix(".webp")):
+                if q.exists():
+                    q.unlink()
+                    n += 1
     return n
 
 
@@ -1098,17 +1119,19 @@ def _clave_sin_marca(ruta, ancho=None):
     return CACHE / clave[:2] / f"{clave}.jpg"
 
 
-def sin_marca(ruta, ancho=None):
+def sin_marca(ruta, ancho=None, webp=False):
     """Como preview() pero sin marca de agua y mas grande. Mismo cache."""
     ancho = ancho or ANCHO_MUESTRA
     destino = _clave_sin_marca(ruta, ancho)
+    if webp:
+        destino = destino.with_suffix(".webp")
     if not destino.exists():
         destino.parent.mkdir(parents=True, exist_ok=True)
         im = Image.open(ruta)
         im.draft("RGB", (ancho, ancho))                   # igual que marcar()
         im = ImageOps.exif_transpose(im).convert("RGB")
         im.thumbnail((ancho, ancho), Image.LANCZOS)
-        im.save(destino, "JPEG", quality=82, optimize=True, progressive=True)
+        guardar(im, destino, quality=82, optimize=True, progressive=True)
     return destino
 
 
@@ -1708,7 +1731,7 @@ def publicas(limite=None):
 
 
 @app.template_global()
-def srcset(url, grande=None):
+def srcset(url, grande=None, webp=False):
     """Las variantes chicas de una foto de la vidriera, para srcset.
 
     El telefono baja la de 480/800 en vez de la de 1400: era 1,3 MB de mas en
@@ -1716,14 +1739,89 @@ def srcset(url, grande=None):
     sigue sirviendo el tamaño de siempre (y es la que usa el og:image).
     """
     sep = "&" if "?" in url else "?"
-    return ", ".join(["%s%sw=%d %dw" % (url, sep, w, w) for w in ANCHOS]
-                     + ["%s %dw" % (url, grande or ANCHO_MUESTRA)])
+    fin = "%sf=webp" % sep if webp else ""
+    sep = "&" if "?" in url + fin else "?"
+    return ", ".join(["%s%s%sw=%d %dw" % (url, fin, sep, w, w) for w in ANCHOS]
+                     + ["%s%s %dw" % (url, fin, grande or ANCHO_MUESTRA)])
+
+
+@app.template_global()
+def foto(url, sizes, grande=None, clase=None, **attrs):
+    """<picture> con WebP y el JPEG de respaldo, para la vidriera.
+
+    El WebP va en un <source> y no directo en el srcset del <img>: un Safari
+    de iOS 12-13 (un iPhone 6 no pasa de ahi) no lo dibuja, y con <picture>
+    se queda con el JPEG solo. picture{display:contents} en el CSS hace que
+    el <img> se acomode como si el envoltorio no estuviera.
+    """
+    if clase:
+        attrs["class"] = clase
+    extra = Markup("").join(Markup(' {}="{}"').format(k, v)
+                            for k, v in attrs.items())
+    fuente = Markup('<source type="image/webp" srcset="{}" sizes="{}">').format(
+        srcset(url, grande, webp=True), sizes) if WEBP_OK else Markup("")
+    return Markup('<picture>{}<img src="{}" srcset="{}" sizes="{}"{}></picture>'
+                  ).format(fuente, url, srcset(url, grande), sizes, extra)
+
+
+@app.template_global()
+def url_muestra(nombre):
+    """La URL de una foto de la vidriera, versionada por su fecha de cambio.
+
+    Con ?h= el navegador y Cloudflare la guardan un año sin preguntar
+    (immutable): si Renzo reemplaza la foto con el mismo nombre, cambia el
+    mtime, cambia la URL y se baja la nueva. Sin version habia que elegir
+    entre cache corto o fotos viejas.
+    """
+    try:
+        h = int((MUESTRAS / nombre).stat().st_mtime)
+    except OSError:
+        h = 0
+    return "/muestra/%s?h=%d" % (urllib.parse.quote(nombre), h)
+
+
+@app.template_global()
+def url_tapa(gal):
+    """La URL de la tapa de una galeria, versionada por lo que la dibuja.
+
+    ponytail: la version sale de la fila de la galeria (foto elegida, marca,
+    logos, firma, cuantas fotos tiene), no del disco: leer el mtime de cada
+    tapa en /eventos son N stats al HDD por pagina. Lo que no ve: reemplazar
+    el archivo de la foto o un logo con el mismo nombre. Para eso, cambiar la
+    portada y volverla a poner.
+    """
+    campos = ("portada_foto_id", "fotos", "marca", "marca_texto", "logos",
+              "firma", "firma_pos", "firma_tam")
+    ks = gal.keys()
+    h = hashlib.sha1(repr([gal[k] if k in ks else None for k in campos])
+                     .encode()).hexdigest()[:10]
+    return "/portada/%s?h=%s" % (gal["slug"], h)
 
 
 def _ancho_pedido():
     """El ?w= de la request si es uno de ANCHOS, o None."""
     w = request.args.get("w", "")
     return int(w) if w.isdigit() and int(w) in ANCHOS else None
+
+
+def _webp_pedido():
+    """?f=webp, si este Pillow sabe escribirlo."""
+    return WEBP_OK and request.args.get("f") == "webp"
+
+
+UN_ANO = 365 * 24 * 3600
+
+
+def servir_vidriera(archivo, max_age):
+    """Manda una foto de la vidriera (JPEG o WebP, segun como se genero), con
+    cache de un año si la URL viene versionada (?h=)."""
+    tipo = "image/webp" if Path(archivo).suffix == ".webp" else "image/jpeg"
+    versionada = bool(request.args.get("h"))
+    r = send_file(archivo, mimetype=tipo,
+                  max_age=UN_ANO if versionada else max_age)
+    if versionada:
+        r.cache_control.immutable = True
+    return r
 
 
 def _viz(plantilla, titulo=None, desc=None, og_img=None, indexar=False,
@@ -1751,8 +1849,7 @@ def home():
                 og_img=("%smuestra/%s" % (request.url_root, fotos[0])
                         if fotos else None),
                 indexar=True,
-                precarga=("/muestra/%s" % urllib.parse.quote(fotos[0])
-                          if fotos else None))
+                precarga=url_muestra(fotos[0]) if fotos else None)
 
 
 @app.get("/sobre-mi")
@@ -1799,6 +1896,65 @@ def sitemap():
     return Response('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns='
                     '"http://www.sitemaps.org/schemas/sitemap/0.9">%s</urlset>\n'
                     % urls, mimetype="application/xml")
+
+
+@lru_cache(maxsize=1)
+def _icono():
+    """El icono del sitio: "rb" y el punto verde de la marca sobre el negro
+    de la pagina. Se dibuja aca, una vez por proceso, en vez de ser un archivo
+    mas que llevar a la Pi y que se pueda perder."""
+    lado = 256
+    im = Image.new("RGBA", (lado, lado), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, lado - 1, lado - 1), radius=48, fill="#090C0A")
+    letra = _fuente(150)
+    x0, y0, x1, y1 = d.textbbox((0, 0), "rb", font=letra)
+    punto = 34
+    x = (lado - (x1 - x0) - punto - 8) // 2 - x0
+    y = (lado - (y1 - y0)) // 2 - y0
+    d.text((x, y), "rb", font=letra, fill="#F0F3EA")
+    px = x + x1 + 8
+    d.ellipse((px, y + y1 - punto, px + punto, y + y1), fill="#C6F04A")
+    return im
+
+
+@app.get("/favicon.ico")
+def favicon():
+    buf = io.BytesIO()
+    _icono().save(buf, "ICO", sizes=[(16, 16), (32, 32), (48, 48)])
+    buf.seek(0)
+    return send_file(buf, mimetype="image/x-icon", max_age=604800)
+
+
+@app.get("/apple-touch-icon.png")
+def icono_apple():
+    """El que usa el iPhone al "agregar a inicio": cuadrado y sin
+    transparencia, iOS le redondea las esquinas solo."""
+    fondo = Image.new("RGB", (256, 256), "#090C0A")
+    fondo.paste(_icono(), mask=_icono())
+    buf = io.BytesIO()
+    fondo.resize((180, 180), Image.LANCZOS).save(buf, "PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png", max_age=604800)
+
+
+@app.after_request
+def cabeceras(resp):
+    """Lo que PageSpeed pedia en "Confianza y seguridad".
+
+    - HSTS: el navegador no vuelve a intentar http://. Un año, sin
+      includeSubDomains ni preload a proposito: esas dos son las que no se
+      pueden deshacer rapido. Para sacarlo: max-age=0, y esperar a que cada
+      navegador vuelva a pasar.
+    - X-Frame-Options: nadie puede meter el sitio en un iframe ajeno y hacer
+      clickear "comprar" o "me gusta" por debajo. El sitio no usa iframes.
+    - nosniff: el navegador respeta el tipo que mandamos.
+    Los navegadores ignoran HSTS sobre http, asi que en local no molesta.
+    """
+    resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return resp
 
 
 def galerias_de_carpeta(cx, cid):
@@ -1893,8 +2049,8 @@ def muestra(nombre):
             or f.resolve().parent != MUESTRAS.resolve()):
         abort(404)
     try:
-        return send_file(sin_marca(f, _ancho_pedido()), mimetype="image/jpeg",
-                         max_age=604800)
+        return servir_vidriera(sin_marca(f, _ancho_pedido(), _webp_pedido()),
+                               604800)
     except Exception:
         app.logger.exception("no pude generar la muestra %s", f)
         abort(404)
@@ -2457,14 +2613,14 @@ def portada(slug):
     # de siempre, que el gate usa de fondo a pantalla completa
     chica = _ancho_pedido()
     try:
-        return send_file(
+        return servir_vidriera(
             preview(f["id"], f["ruta"], gal["marca_texto"],
                     # ?og=1 la pide chica: WhatsApp descarta las imagenes
                     # pesadas y no dibuja ninguna vista previa
                     chica or (1200 if request.args.get("og") else ANCHO_TAPA),
-                    0.017, logos_de(gal), firma_de(gal))
-            if gal["marca"] else sin_marca(f["ruta"], chica),
-            mimetype="image/jpeg", max_age=86400)
+                    0.017, logos_de(gal), firma_de(gal), _webp_pedido())
+            if gal["marca"] else sin_marca(f["ruta"], chica, _webp_pedido()),
+            86400)
     except Exception:
         abort(404)
 
@@ -4920,8 +5076,13 @@ BASE_HTML = """<!doctype html><html lang="es"><meta charset="utf-8">
 {% else %}<meta name="robots" content="noindex,nofollow">{% endif %}
 {# la tapa es el LCP: anunciada aca el navegador la pide antes de parsear el
    <style>, que son ~10 KB que si no van primero #}
-{% if precarga %}<link rel="preload" as="image" href="{{ precarga }}"
-  imagesrcset="{{ srcset(precarga) }}" imagesizes="100vw" fetchpriority="high">{% endif %}
+{# type=webp: un navegador sin WebP la saltea en vez de bajar algo que no
+   va a usar; los demas eligen igual que el <source> de la tapa #}
+{% if precarga %}<link rel="preload" as="image" type="image/webp"
+  href="{{ precarga }}&amp;f=webp" imagesrcset="{{ srcset(precarga, webp=True) }}"
+  imagesizes="100vw" fetchpriority="high">{% endif %}
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 {# lo que muestra WhatsApp (y cualquier chat) al pegar el link. Sin esto solo
    ve el <title> y el dominio, y todos los links se ven iguales. #}
 <title>{{ titulo|default('rb.fotos') }}</title>
@@ -5245,6 +5406,9 @@ code{background:#1c1c1c;padding:.15rem .4rem;border-radius:4px;font-size:.88em}
    object-position; 40% deja el horizonte alto, que es donde suele caer el
    sujeto en un plano de cancha. */
 main.inicio{padding:0;max-width:none;margin:0}
+/* foto() envuelve cada imagen en <picture>; asi no ocupa caja propia y el
+   <img> se acomoda como antes (la tapa es absolute dentro de un grid) */
+picture{display:contents}
 .capa{position:relative;min-height:min(86vh,760px);display:grid;
   /* la columna va acotada: un track `auto` toma el max-content del
      titulo y en el telefono empuja la pagina fuera de la pantalla */
@@ -5452,9 +5616,7 @@ PIE = """<hr class="luz">
 # la tarjeta de evento: portada, /eventos y las carpetas. La tarifa solo si
 # esta en venta: en una carpeta tambien hay galerias que no se venden.
 TARJETAS = """{% for g in eventos %}<a class="evcard" href="/g/{{ g['slug'] }}">
-{% set tapa = '/portada/%s?v=%s' % (g['slug'], g['portada_foto_id']) %}
-<img src="{{ tapa }}" srcset="{{ srcset(tapa) }}"
-  sizes="(max-width:640px) 100vw, 380px" loading="lazy" alt="">
+{{ foto(url_tapa(g), "(max-width:640px) 100vw, 380px", loading="lazy", alt="") }}
 <div class="txt"><span class="nom">{{ g['nombre'] }}</span>
 <span class="cuando">{{ fecha_corta(g['fecha'] or g['creada']) }}
   &middot; {{ g['fotos'] }} fotos</span>
@@ -5466,9 +5628,8 @@ TARJETAS = """{% for g in eventos %}<a class="evcard" href="/g/{{ g['slug'] }}">
 {% endfor %}"""
 
 PORTADA = BARRA + """<main class="inicio"><header class="capa">
-{% if fotos %}{% set tapa = '/muestra/' ~ fotos[0]|urlencode %}
-<img class="capa-foto" src="{{ tapa }}" srcset="{{ srcset(tapa) }}" sizes="100vw"
-  alt="" fetchpriority="high">{% endif %}
+{% if fotos %}{{ foto(url_muestra(fotos[0]), "100vw", clase="capa-foto", alt="",
+                       fetchpriority="high") }}{% endif %}
 <div class="capa-txt">
 <h1>{{ T.hero_titulo }}</h1>
 <p class="bajada">{{ T.hero_bajada }}</p>
@@ -5498,16 +5659,14 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 {% if resto %}<section class="bloque" id="trabajos">
 <div class="viz"><p class="rotulo">{{ T.rotulo_trabajos }}</p></div>
 <div class="tira">
-{% for f in resto[:5] %}{% set m = '/muestra/' ~ f|urlencode %}<figure><img
-  src="{{ m }}" srcset="{{ srcset(m) }}" alt="" loading="lazy" draggable="false"
-  sizes="{{ '(max-width:880px) 100vw, 820px' if loop.first
-            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px' }}"></figure>
+{% for f in resto[:5] %}<figure>{{ foto(url_muestra(f), '(max-width:880px) 100vw, 820px' if loop.first
+            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px',
+  alt="", loading="lazy", draggable="false") }}</figure>
 {% endfor %}</div></section>{% endif %}
 
 {% if resto|length > 5 %}<div class="banda">
-{% set m = '/muestra/' ~ resto[5]|urlencode %}<img src="{{ m }}"
-  srcset="{{ srcset(m) }}" sizes="100vw" alt="" loading="lazy"
-  draggable="false"></div>{% endif %}
+{{ foto(url_muestra(resto[5]), "100vw", alt="", loading="lazy",
+         draggable="false") }}</div>{% endif %}
 
 {% if T.como_titulo %}<section class="viz bloque">
 <div class="como">
@@ -5519,10 +5678,9 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 
 {% if resto|length > 6 %}<section class="bloque">
 <div class="tira">
-{% for f in resto[6:] %}{% set m = '/muestra/' ~ f|urlencode %}<figure><img
-  src="{{ m }}" srcset="{{ srcset(m) }}" alt="" loading="lazy" draggable="false"
-  sizes="{{ '(max-width:880px) 100vw, 820px' if loop.first
-            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px' }}"></figure>
+{% for f in resto[6:] %}<figure>{{ foto(url_muestra(f), '(max-width:880px) 100vw, 820px' if loop.first
+            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px',
+  alt="", loading="lazy", draggable="false") }}</figure>
 {% endfor %}</div></section>{% endif %}
 
 </main>
@@ -7362,9 +7520,10 @@ def _declaraciones_top(js):
 def test():
     """ponytail: un solo check que falla si se rompe algo que importa."""
     import tempfile
-    global DB, CACHE, RAIZ_FOTOS, RAIZ_DERIVADAS, LOGOS
+    global DB, CACHE, RAIZ_FOTOS, RAIZ_DERIVADAS, LOGOS, MUESTRAS
     tmp = Path(tempfile.mkdtemp())
     DB, CACHE = tmp / "t.db", tmp / "cache"
+    MUESTRAS = tmp / "portada"     # las fotos de la vidriera de verdad no se tocan
     # las raices apuntan al tmp desde el principio: si apuntaran al disco de
     # verdad, tenerlo desconectado cuelga el self-check entero (su punto de
     # automontaje no falla, espera)
@@ -8559,12 +8718,71 @@ def test():
 
         # tarjeta de evento con srcset: ?w= solo acepta los anchos de ANCHOS,
         # y uno inventado cae en la tapa de siempre en vez de generar otra
-        assert "/portada/ccc?v=" in html and "&amp;w=480 480w" in html, "sin srcset"
+        assert "/portada/ccc?h=" in html and "&amp;w=480 480w" in html, "sin srcset"
+        assert '<source type="image/webp"' in html and "f=webp&amp;w=480" in html, \
+            "la tarjeta no ofrece WebP"
         chica = c.get("/portada/ccc?w=480")
         assert chica.status_code == 200
         assert Image.open(io.BytesIO(chica.data)).width <= 480
         rara = c.get("/portada/ccc?w=333")
         assert Image.open(io.BytesIO(rara.data)).width != 333, "acepto un ancho libre"
+
+        # WebP de verdad, y el cache largo solo con la URL versionada: sin ?h=
+        # la tapa sigue con su dia, porque nada avisaria que cambio
+        h = url_tapa(conectar().execute(
+            "SELECT * FROM galeria WHERE slug = 'ccc'").fetchone())
+        w = c.get(h + "&f=webp&w=480")
+        assert w.mimetype == "image/webp", w.mimetype
+        assert Image.open(io.BytesIO(w.data)).format == "WEBP"
+        assert "immutable" in w.headers["Cache-Control"], w.headers["Cache-Control"]
+        assert "max-age=31536000" in w.headers["Cache-Control"]
+        sin_v = c.get("/portada/ccc").headers["Cache-Control"]
+        assert "immutable" not in sin_v and "max-age=86400" in sin_v, sin_v
+        # la version cambia si cambia lo que dibuja la tapa
+        cx = conectar()
+        cx.execute("UPDATE galeria SET marca_texto = 'otra' WHERE slug = 'ccc'")
+        assert url_tapa(cx.execute("SELECT * FROM galeria WHERE slug = 'ccc'"
+                                   ).fetchone()) != h, "la tapa nueva no cambia de URL"
+        cx.rollback()
+        cx.close()
+
+        # cambiar la marca borra tambien la tapa chica y su WebP
+        g_ = conectar().execute("SELECT * FROM galeria WHERE slug = 'ccc'").fetchone()
+        if g_["marca"]:
+            f_ = conectar().execute(
+                "SELECT ruta FROM foto WHERE galeria_id = ? AND (? IS NULL OR id = ?) "
+                "ORDER BY orden, id LIMIT 1", (g_["id"], g_["portada_foto_id"],
+                                               g_["portada_foto_id"])).fetchone()
+            jpg_ = ruta_cache(f_["ruta"], MARCA if g_["marca_texto"] is None
+                              else g_["marca_texto"], logos_de(g_), 480, 0.017,
+                              firma_de(g_))
+            assert jpg_.with_suffix(".webp").exists(), "el webp no quedo al lado"
+            with app.app_context():
+                limpiar_cache(g_["id"], g_["marca_texto"], logos_de(g_), firma_de(g_))
+            assert not jpg_.exists() and not jpg_.with_suffix(".webp").exists(), \
+                "quedaron huerfanas la tapa chica o su webp"
+
+        # la vidriera: version por mtime, reemplazar la foto cambia la URL
+        MUESTRAS.mkdir(exist_ok=True)
+        Image.new("RGB", (1600, 1000), (40, 90, 60)).save(MUESTRAS / "a b.jpg")
+        um = url_muestra("a b.jpg")
+        assert um.startswith("/muestra/a%20b.jpg?h="), um
+        m_ = c.get(um + "&f=webp&w=800")
+        assert m_.mimetype == "image/webp" and "immutable" in m_.headers["Cache-Control"]
+        assert Image.open(io.BytesIO(m_.data)).width == 800
+        os.utime(MUESTRAS / "a b.jpg", (1, 1))
+        assert url_muestra("a b.jpg") != um, "reemplazar la muestra no cambia la URL"
+        assert "max-age=604800" in c.get("/muestra/a%20b.jpg").headers["Cache-Control"]
+        assert c.get("/muestra/a%20b.jpg?f=webp").mimetype == "image/webp"
+
+        # icono y cabeceras de seguridad, en todas las respuestas
+        ico = c.get("/favicon.ico")
+        assert ico.status_code == 200 and Image.open(io.BytesIO(ico.data)).format == "ICO"
+        assert Image.open(io.BytesIO(c.get("/apple-touch-icon.png").data)).size == (180, 180)
+        for r_ in (c.get("/"), c.get("/g/ccc"), w):
+            assert r_.headers.get("Strict-Transport-Security") == "max-age=31536000"
+            assert r_.headers.get("X-Frame-Options") == "SAMEORIGIN"
+            assert r_.headers.get("X-Content-Type-Options") == "nosniff"
 
         # comprar: hay que haber entrado, y no existe si la venta esta apagada
         assert c.get("/g/ccc/comprar").status_code == 302, "compro sin entrar"
