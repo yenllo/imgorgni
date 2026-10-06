@@ -5114,7 +5114,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const cabFija = document.querySelector("header");
   if (!cabFija) return;
   const ajustarCab = () => {
-    document.body.style.paddingTop = cabFija.offsetHeight + "px";
+    // solo si no coincide con lo que reservo el CSS: asignar siempre
+    // provocaba un salto de diseño en cada carga
+    const alto = cabFija.offsetHeight;
+    if (Math.abs(alto - parseFloat(getComputedStyle(document.body).paddingTop)) > 1)
+      document.body.style.paddingTop = alto + "px";
   };
   ajustarCab();
   addEventListener("resize", ajustarCab);
@@ -5189,7 +5193,8 @@ form.gate{max-width:27rem;margin:15vh auto;padding:3rem 2.6rem;background:#18181
   border:1px solid #2a2a2a;box-shadow:0 18px 50px rgba(0,0,0,.5)}
 form.gate h2{margin:0 0 1.1rem;font:400 1.05rem/1.3 Georgia,"Times New Roman",serif;
   letter-spacing:.24em;text-transform:uppercase;color:#f2f2f2}
-form.gate p{color:#8d8d8d;font-size:.92rem;margin:0 0 1.6rem}
+/* #8d8d8d sobre el #181818 del recuadro daba 4,0 y el minimo es 4,5 */
+form.gate p{color:#a9a9a9;font-size:.92rem;margin:0 0 1.6rem}
 form.gate input{border:1px solid #333;border-radius:0;background:var(--noche);
   color:#eee;padding:.9rem 1rem}
 form.gate input::placeholder{color:#5f5f5f}
@@ -5318,12 +5323,18 @@ header{padding:1.2rem 1.5rem;border-bottom:1px solid #262626;display:flex;
   /* fixed y no sticky: sticky se cae en navegadores viejos y en los embebidos
      (el de Instagram). El hueco lo reserva ajustarCab() midiendo la barra. */
   position:fixed;top:0;left:0;right:0;z-index:40;background:var(--noche);
-  backdrop-filter:blur(6px)}
+  backdrop-filter:blur(6px);min-height:var(--barra)}
+/* el hueco de la barra lo reserva el CSS, no el JS: cuando lo ponia el JS al
+   terminar de cargar, la pagina se movia hacia abajo (CLS 0,133). El JS sigue
+   para el caso raro de que la barra mida otra cosa (un titulo larguisimo). */
+:root{--barra:91px}
+body{padding-top:var(--barra)}
 @media (max-width:640px){
   /* en un telefono la barra se comia 169 de 812 px (un quinto de la pantalla).
      Va con "body" adelante a proposito: el estilo de la pagina publica define
      despues `header .tit` y, con la misma especificidad, gana el ultimo.
      Grilla de 2 filas: titulo + botones arriba, la linea chica abajo. */
+  :root{--barra:73px}
   body header{display:grid;grid-template-columns:minmax(0,1fr) auto auto;
     align-items:center;padding:.5rem .8rem;gap:.15rem .5rem}
   body header .tit{display:contents}
@@ -5982,7 +5993,7 @@ fotos, el total y el ID se actualizan aca.</p>
 GATE = PIXIE + """<header><span class="tit"><b>{{ gal['nombre'] }}</b>
 <span>rb.fotos</span></span></header>
 {% if gal['portada_foto_id'] %}<div class="fondo">
-<img src="/portada/{{ gal['slug'] }}?v={{ gal['portada_foto_id'] }}" alt=""></div>{% endif %}
+{{ foto(url_tapa(gal), "100vw", alt="", fetchpriority="high") }}</div>{% endif %}
 <main><form class="gate" method="post" action="/g/{{ gal['slug'] }}/entrar">
 <h2 style="margin:0">{{ gal['nombre'] }}</h2>
 <p>Dejame tu email y entras a ver la galeria.</p>
@@ -8991,6 +9002,10 @@ def test():
         # tarjeta de evento con srcset: ?w= solo acepta los anchos de ANCHOS,
         # y uno inventado cae en la tapa de siempre en vez de generar otra
         assert "/portada/ccc?h=" in html and "&amp;w=480 480w" in html, "sin srcset"
+        # el muro de email tampoco baja la tapa entera
+        gate = c.get("/g/ccc").get_data(as_text=True)
+        assert 'class="fondo"' not in gate or ("/portada/ccc?h=" in gate and "w=480 480w" in gate),             "la tapa del muro se baja entera"
+
         assert '<source type="image/webp"' in html and "f=webp&amp;w=480" in html, \
             "la tarjeta no ofrece WebP"
         chica = c.get("/portada/ccc?w=480")
