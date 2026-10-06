@@ -107,7 +107,7 @@ ANCHO_TAPA = int(os.environ.get("GALERIA_ANCHO_TAPA", 2200))
 # anchos chicos que /muestra/ y /portada/ aceptan con ?w=, para el srcset de
 # la portada. Lista cerrada a proposito: un ?w= libre dejaria a cualquiera
 # llenar el cache de la Pi pidiendo un ancho distinto por request
-ANCHOS = (480, 800)
+ANCHOS = (320, 480, 600, 800, 1000)
 
 # el dominio publico, para el canonical y el sitemap. Va fijo y no sale de
 # request.url_root: detras del tunel ese puede llegar como http:// o 127.0.0.1
@@ -1960,6 +1960,13 @@ def cabeceras(resp):
     resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # COOP: una ventana que abrimos con target=_blank no puede tocar esta.
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    # el link secreto de una galeria no viaja en el Referer hacia otro sitio
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # el sitio no usa camara, microfono ni ubicacion: que nadie los pida
+    resp.headers.setdefault("Permissions-Policy",
+                            "camera=(), microphone=(), geolocation=(), payment=()")
     return resp
 
 
@@ -5813,7 +5820,7 @@ PIE = """<hr class="luz">
 # la tarjeta de evento: portada, /eventos y las carpetas. La tarifa solo si
 # esta en venta: en una carpeta tambien hay galerias que no se venden.
 TARJETAS = """{% for g in eventos %}<a class="evcard" href="/g/{{ g['slug'] }}">
-{{ foto(url_tapa(g), "(max-width:640px) 100vw, 380px", loading="lazy", alt="") }}
+{{ foto(url_tapa(g), "(max-width:640px) 100vw, 290px", loading="lazy", alt="") }}
 <div class="txt"><span class="nom">{{ g['nombre'] }}</span>
 <span class="cuando">{{ fecha_corta(g['fecha'] or g['creada']) }}
   &middot; {{ g['fotos'] }} fotos</span>
@@ -5856,8 +5863,8 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 {% if resto %}<section class="bloque" id="trabajos">
 <div class="viz"><p class="rotulo">{{ T.rotulo_trabajos }}</p></div>
 <div class="tira">
-{% for f in resto[:5] %}<figure>{{ foto(url_muestra(f), '(max-width:880px) 100vw, 820px' if loop.first
-            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px',
+{% for f in resto[:5] %}<figure>{{ foto(url_muestra(f), '(max-width:880px) 100vw, 792px' if loop.first
+            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 392px',
   alt="", loading="lazy", draggable="false") }}</figure>
 {% endfor %}</div></section>{% endif %}
 
@@ -5875,8 +5882,8 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 
 {% if resto|length > 6 %}<section class="bloque">
 <div class="tira">
-{% for f in resto[6:] %}<figure>{{ foto(url_muestra(f), '(max-width:880px) 100vw, 820px' if loop.first
-            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 410px',
+{% for f in resto[6:] %}<figure>{{ foto(url_muestra(f), '(max-width:880px) 100vw, 792px' if loop.first
+            else '(max-width:560px) 100vw, (max-width:880px) 50vw, 392px',
   alt="", loading="lazy", draggable="false") }}</figure>
 {% endfor %}</div></section>{% endif %}
 
@@ -9047,6 +9054,9 @@ def test():
         for r_ in (c.get("/"), c.get("/g/ccc"), w):
             assert r_.headers.get("Strict-Transport-Security") == "max-age=31536000"
             assert r_.headers.get("X-Frame-Options") == "SAMEORIGIN"
+            assert r_.headers.get("Cross-Origin-Opener-Policy") == "same-origin"
+            assert r_.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+            assert "camera=()" in (r_.headers.get("Permissions-Policy") or "")
             assert r_.headers.get("X-Content-Type-Options") == "nosniff"
 
         # comprar: hay que haber entrado, y no existe si la venta esta apagada
