@@ -5185,12 +5185,21 @@ def panel(slug=None):
 
 # ---------------------------------------------------------------------- HTML
 
-PIXIE = """<script>
+PIXIE = """<style>
+/* el hueco de la barra fija lo reserva el CSS, no el JS: cuando lo ponia el
+   JS al terminar de cargar, la pagina se movia hacia abajo (CLS 0,133). El JS
+   sigue para el caso raro de que la barra mida otra cosa. Esto vive aca y no
+   en el estilo compartido: la vidriera no tiene barra fija. */
+:root{--barra:91px}
+body{padding-top:var(--barra)}
+@media (max-width:640px){:root{--barra:73px}}
+</style>
+<script>
 // la barra es position:fixed, asi que no ocupa lugar: el hueco lo ponemos
 // nosotros, medido, y se recalcula si cambia de alto (girar el telefono,
 // titulo que pasa a dos lineas)
 document.addEventListener("DOMContentLoaded", () => {
-  const cabFija = document.querySelector("header");
+  const cabFija = document.querySelector("header.pcab");
   if (!cabFija) return;
   const ajustarCab = () => {
     // solo si no coincide con lo que reservo el CSS: asignar siempre
@@ -5401,30 +5410,28 @@ header{padding:1.2rem 1.5rem;border-bottom:1px solid #262626;display:flex;
   align-items:baseline;gap:1rem;flex-wrap:wrap;
   /* fixed y no sticky: sticky se cae en navegadores viejos y en los embebidos
      (el de Instagram). El hueco lo reserva ajustarCab() midiendo la barra. */
-  position:fixed;top:0;left:0;right:0;z-index:40;background:var(--noche);
-  backdrop-filter:blur(6px);min-height:var(--barra)}
-/* el hueco de la barra lo reserva el CSS, no el JS: cuando lo ponia el JS al
-   terminar de cargar, la pagina se movia hacia abajo (CLS 0,133). El JS sigue
-   para el caso raro de que la barra mida otra cosa (un titulo larguisimo). */
-:root{--barra:91px}
-body{padding-top:var(--barra)}
+  position:sticky;top:0;z-index:40;background:var(--noche);
+  backdrop-filter:blur(6px)}
+/* la barra de una galeria es fija de verdad (sticky se cae en los navegadores
+   embebidos). Solo la llevan las paginas de galeria: en la vidriera el
+   <header> es la portada a sangre y no debe moverse de su lugar. */
+header.pcab{position:fixed;top:0;left:0;right:0;min-height:var(--barra)}
 @media (max-width:640px){
   /* en un telefono la barra se comia 169 de 812 px (un quinto de la pantalla).
-     Va con "body" adelante a proposito: el estilo de la pagina publica define
+     Va con la clase a proposito: el estilo de la pagina publica define
      despues `header .tit` y, con la misma especificidad, gana el ultimo.
      Grilla de 2 filas: titulo + botones arriba, la linea chica abajo. */
-  :root{--barra:73px}
-  body header{display:grid;grid-template-columns:minmax(0,1fr) auto auto;
+  header.pcab{display:grid;grid-template-columns:minmax(0,1fr) auto auto;
     align-items:center;padding:.5rem .8rem;gap:.15rem .5rem}
-  body header .tit{display:contents}
-  body header .tit b{grid-column:1;grid-row:1;font:700 .95rem/1.3 var(--sans);
+  header.pcab .tit{display:contents}
+  header.pcab .tit b{grid-column:1;grid-row:1;font:700 .95rem/1.3 var(--sans);
     letter-spacing:-.01em;text-transform:none}
-  body header .tit span{grid-column:1/-1;grid-row:2;font-size:.7rem;line-height:1.2}
-  body header .tit b,body header .tit span{overflow:hidden;text-overflow:ellipsis;
+  header.pcab .tit span{grid-column:1/-1;grid-row:2;font-size:.7rem;line-height:1.2}
+  header.pcab .tit b,header.pcab .tit span{overflow:hidden;text-overflow:ellipsis;
     white-space:nowrap;min-width:0}
-  body #blistas{grid-column:2;grid-row:1;margin-left:0;padding:.35rem .6rem;font-size:.82rem}
-  body .bcomprar{grid-column:3;grid-row:1;padding:.35rem .7rem;font-size:.82rem}
-  body #plistas{right:.6rem;left:.6rem;width:auto}
+  #blistas{grid-column:2;grid-row:1;margin-left:0;padding:.35rem .6rem;font-size:.82rem}
+  .bcomprar{grid-column:3;grid-row:1;padding:.35rem .7rem;font-size:.82rem}
+  #plistas{right:.6rem;left:.6rem;width:auto}
 }
 }
 #blistas{margin-left:auto;background:#1f1f1f;border:1px solid #3a3a3a;color:#eee;
@@ -6069,7 +6076,7 @@ fotos, el total y el ID se actualizan aca.</p>
 </section>
 </main>"""
 
-GATE = PIXIE + """<header><span class="tit"><b>{{ gal['nombre'] }}</b>
+GATE = PIXIE + """<header class="pcab"><span class="tit"><b>{{ gal['nombre'] }}</b>
 <span>rb.fotos</span></span></header>
 {% if gal['portada_foto_id'] %}<div class="fondo">
 {{ foto(url_tapa(gal), "100vw", alt="", fetchpriority="high") }}</div>{% endif %}
@@ -6116,7 +6123,7 @@ VIDEOS = PIXIE + """<style>
   gap:.8rem;color:#ddd;text-align:center;padding:1rem}
 #vvisor .carga p{margin:0}
 </style>
-<header><span class="tit"><b>{{ gal['nombre'] }}</b>
+<header class="pcab"><span class="tit"><b>{{ gal['nombre'] }}</b>
 <span>videos{% if dia %} &middot; {{ dia.strftime('%d/%m/%Y') }}{% endif %}</span></span></header>
 <main class="vid">
 <section class="tarifas ordenar">
@@ -6231,7 +6238,7 @@ CELDAS = """{% for f in fotos %}<figure class="celda" style="margin:0">
 {% if f['tiene_raw'] and gal['raw_descarga'] %}<a class="raw" href="/d/{{ f['id'] }}/raw{{ llave_d(gal['id']) }}" title="Descargar RAW">RAW</a>{% endif %}{% endif %}
 </div></figure>{% endfor %}"""
 
-GRILLA = PIXIE + """<header>
+GRILLA = PIXIE + """<header class="pcab">
 <span class="tit"><b>{% if lista %}{{ lista['nombre'] }}{% else %}{{ gal['nombre'] }}{% endif %}</b>
 <span>{% if lista %}<a href="/g/{{ gal['slug'] }}">&larr; {{ gal['nombre'] }}</a>
 &middot; {{ total }} fotos{% else %}{{ marca }} &middot; {{ total }} fotos
