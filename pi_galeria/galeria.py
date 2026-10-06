@@ -1944,6 +1944,75 @@ def icono_apple():
     return send_file(buf, mimetype="image/png", max_age=604800)
 
 
+# El beacon de Cloudflare lo inyecta el proxy, sin nuestro nonce: va por
+# nombre. 'unsafe-inline' en los estilos se queda: son 128 atributos style=
+# en las plantillas y sacarlos no cambia el riesgo real (no ejecutan codigo).
+CSP = ("default-src 'self'; "
+       "script-src 'self' 'nonce-%s' https://static.cloudflareinsights.com; "
+       "style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; "
+       "connect-src 'self' https://cloudflareinsights.com; "
+       "form-action 'self'; frame-ancestors 'self'; base-uri 'none'; "
+       "object-src 'none'; report-uri /csp-reportes")
+CSP_TOPE = 1_000_000          # un buzon publico no puede llenar el disco
+
+
+def csp_log():
+    """Se calcula al llamar, no al importar: el self-check mueve CACHE."""
+    return CACHE / "csp.log"
+
+
+@app.before_request
+def _nonce():
+    g.nonce = secrets.token_urlsafe(12)
+
+
+@app.post("/csp-reportes")
+def csp_reportes():
+    """Buzon de los avisos de la CSP. Publico a proposito: lo manda el
+    navegador del visitante, no nuestro codigo."""
+    try:
+        if csp_log().exists() and csp_log().stat().st_size > CSP_TOPE:
+            return "", 204                      # ya hay de sobra para mirar
+        datos = request.get_json(silent=True, force=True) or {}
+        r = datos.get("csp-report", datos)
+        linea = {
+            "cuando": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "pagina": str(r.get("document-uri") or r.get("documentURL") or "")[:200],
+            "regla": str(r.get("violated-directive") or r.get("effectiveDirective") or "")[:60],
+            "bloqueado": str(r.get("blocked-uri") or r.get("blockedURL") or "")[:200],
+            "muestra": str(r.get("script-sample") or "")[:120],
+        }
+        CACHE.mkdir(parents=True, exist_ok=True)
+        with open(csp_log(), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(linea, ensure_ascii=False) + "\n")
+    except Exception:
+        pass                                     # un buzon no devuelve errores
+    return "", 204
+
+
+def csp_resumen():
+    """Que habria bloqueado la CSP, agrupado. Para decidir si se puede activar."""
+    if not csp_log().exists():
+        print("todavia no llego ningun aviso (%s)" % csp_log())
+        return
+    cuenta, paginas, desde = {}, {}, None
+    for l in csp_log().read_text(encoding="utf-8").splitlines():
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        desde = desde or d["cuando"]
+        clave = (d["regla"], d["bloqueado"] or d["muestra"][:40])
+        cuenta[clave] = cuenta.get(clave, 0) + 1
+        paginas.setdefault(clave, set()).add(d["pagina"])
+    print("%d avisos distintos desde %s" % (len(cuenta), desde))
+    for (regla, que), n in sorted(cuenta.items(), key=lambda x: -x[1]):
+        ps = sorted(paginas[(regla, que)])
+        print("  %5d  %-28s %s" % (n, regla, que or "(en linea)"))
+        print("         en: %s%s" % (", ".join(ps[:3]), " ..." if len(ps) > 3 else ""))
+
+
 @app.after_request
 def cabeceras(resp):
     """Lo que PageSpeed pedia en "Confianza y seguridad".
@@ -1967,6 +2036,16 @@ def cabeceras(resp):
     # el sitio no usa camara, microfono ni ubicacion: que nadie los pida
     resp.headers.setdefault("Permissions-Policy",
                             "camera=(), microphone=(), geolocation=(), payment=()")
+    nonce = g.get("nonce")
+    if nonce:
+        resp.headers.setdefault("Content-Security-Policy-Report-Only", CSP % nonce)
+        # el nonce va en los <script> del sitio aca y no en cada plantilla:
+        # son 17 repartidos en 11 paginas y se olvidaria uno
+        if resp.mimetype == "text/html" and not resp.direct_passthrough:
+            cuerpo = resp.get_data()
+            if b"<script>" in cuerpo:
+                resp.set_data(cuerpo.replace(
+                    b"<script>", b'<script nonce="%s">' % nonce.encode()))
     return resp
 
 
@@ -9070,6 +9149,10 @@ def test():
             assert r_.headers.get("Strict-Transport-Security") == "max-age=31536000"
             assert r_.headers.get("X-Frame-Options") == "SAMEORIGIN"
             assert r_.headers.get("Cross-Origin-Opener-Policy") == "same-origin"
+            # la CSP va en modo reportar: avisa, no bloquea
+            csp = r_.headers.get("Content-Security-Policy-Report-Only") or ""
+            assert "nonce-" in csp and "report-uri /csp-reportes" in csp, csp
+            assert not r_.headers.get("Content-Security-Policy"), "la CSP no debe bloquear todavia"
             assert r_.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
             assert "camera=()" in (r_.headers.get("Permissions-Policy") or "")
             assert r_.headers.get("X-Content-Type-Options") == "nosniff"
@@ -9427,6 +9510,23 @@ def test():
         finally:
             db().execute("PRAGMA query_only = OFF")
 
+    # cada pagina lleva su nonce y los <script> lo llevan puesto
+    with app.test_client() as c:
+        r_ = c.get("/")
+        html = r_.get_data(as_text=True)
+        nonce = re.search(r"'nonce-([^']+)'", r_.headers["Content-Security-Policy-Report-Only"]).group(1)
+        assert "<script>" not in html, "quedo un <script> sin nonce"
+        assert ('<script nonce="%s">' % nonce) in html or "<script" not in html
+        # dos visitas, dos nonce distintos
+        otro = c.get("/").headers["Content-Security-Policy-Report-Only"]
+        assert otro != r_.headers["Content-Security-Policy-Report-Only"], "el nonce se repite"
+        # el buzon acepta un aviso y lo anota
+        assert c.post("/csp-reportes", json={"csp-report": {
+            "document-uri": "https://x/y", "violated-directive": "script-src-attr",
+            "blocked-uri": "inline"}}).status_code == 204
+        assert "script-src-attr" in csp_log().read_text(encoding="utf-8")
+        csp_log().unlink()
+
     assert lineas("a\n\n b \n") == ["a", "b"]
     assert parrafos("uno\n\ndos") == ["uno", "dos"]
 
@@ -9782,6 +9882,8 @@ if __name__ == "__main__":
         calentar(sys.argv[2])
     elif cmd == "videos":
         cachear_videos(int(sys.argv[2]) if len(sys.argv) > 2 else 30)
+    elif cmd == "csp":
+        csp_resumen()
     elif cmd == "reparar_raw":
         reparar_raw(sys.argv[2] if len(sys.argv) > 2 else None,
                     sys.argv[3] if len(sys.argv) > 3 else None)
