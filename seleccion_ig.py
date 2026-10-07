@@ -136,7 +136,12 @@ def autocull(trabajo, carpeta):
     """Las rutas JPEG candidatas: lo que Autocull no considero basura, las mejores primero segun el
     ranker aprendido de Renato, hasta MAX_A_FILTRO. Reusa el resultado si ya corrio."""
     salida = carpeta / "autocull.json"
-    d = json.loads(salida.read_text(encoding="utf-8")) if salida.exists() else {}
+    try:
+        d = json.loads(salida.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # F3 3/10: una corrida cortada a la mitad dejo el archivo a medio escribir y los 3
+        # reintentos fallaron en esta linea en vez de volver a correr Autocull
+        d = {}
     if d.get("estado") != "listo":
         fotos = jpegs(trabajo)
         if not fotos:
@@ -439,8 +444,13 @@ def prueba():
 
 def ultima_modificacion(trabajo):
     """mtime mas reciente entre las CARPETAS del trabajo: copiar un archivo cambia el de su carpeta,
-    asi que no hace falta hacer stat a miles de fotos por la red."""
-    return max(os.stat(r).st_mtime for r, _, _ in os.walk(trabajo))
+    asi que no hace falta hacer stat a miles de fotos por la red. Compras\\ no cuenta: ahi caen los
+    pedidos y entregas de clientes (7/10: la lista de Renato copiandose atraso la seleccion de la F3)."""
+    ultima = 0
+    for r, dirs, _ in os.walk(trabajo):
+        dirs[:] = [d for d in dirs if d.lower() != "compras"]
+        ultima = max(ultima, os.stat(r).st_mtime)
+    return ultima
 
 
 def fechas_nuevas(base):
@@ -486,7 +496,7 @@ def anotar_fallo(base, trabajo, vistos):
     archivo.write_text(json.dumps(fallos, ensure_ascii=False, indent=1), encoding="utf-8")
     if fallos[rel] >= MAX_FALLOS:
         marcar_visto(base, trabajo, vistos)
-        log(f"{rel}: {MAX_FALLOS} fallos, lo dejo (para reintentar: sacalo de vistos.json y fallos.json)")
+        log(f"{rel}: {MAX_FALLOS} fallos, lo dejo (para reintentar: sácalo de vistos.json y fallos.json)")
         return False
     return True
 

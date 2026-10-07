@@ -18,9 +18,13 @@ $accion = New-ScheduledTaskAction -Execute 'cmd.exe' -WorkingDirectory $dir `
     -Argument ('/c set PYTHONIOENCODING=utf-8&& "{0}" seleccion_ig.py --noche >> _para_publicar\noche.log 2>&1' -f $py)
 # IgnoreNew: si la anterior sigue (un carrete tarda ~1 h), no se apila otra de la misma tarea.
 $despertar = New-ScheduledTaskSettingsSet -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 5) `
-    -DontStopOnIdleEnd -MultipleInstances IgnoreNew
+    -DontStopOnIdleEnd -MultipleInstances IgnoreNew -StartWhenAvailable
+# 7/10/2026: con los defaults de Windows ("no iniciar con bateria" y "detener al pasar a bateria")
+# la de cada hora no corrio de 12 a 14 con la notebook desenchufada, y un reinicio mato Autocull a
+# mitad. Esta corre igual con bateria, y StartWhenAvailable recupera la hora perdida.
 $sinDespertar = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 5) `
-    -DontStopOnIdleEnd -MultipleInstances IgnoreNew
+    -DontStopOnIdleEnd -MultipleInstances IgnoreNew -StartWhenAvailable `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
 Register-ScheduledTask -TaskName 'IMGorgni seleccion IG' -Action $accion -Settings $despertar -Force `
     -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Friday, Sunday, Monday -At 3:30) `

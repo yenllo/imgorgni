@@ -3582,8 +3582,9 @@ def revision_indice():
             v = _veredictos(d)
             n = len(sel.get("elegidas", []))
             pasa = sum(1 for x in v.values() if x.get("pasa"))
+            buenas = sum(1 for x in v.values() if x.get("buena"))
             trabajos.append({"nombre": d.name, "url": urllib.parse.quote(d.name), "n": n, "pasa": pasa,
-                             "no": sum(1 for x in v.values() if not x.get("pasa")),
+                             "buenas": buenas, "no": len(v) - pasa - buenas,
                              "faltan": n - len(v),
                              "fecha": datetime.fromtimestamp(d.stat().st_mtime).strftime("%d/%m %H:%M")})
     return render_template_string(BASE_HTML, cuerpo=render_template_string(
@@ -3594,7 +3595,7 @@ def revision_indice():
 def revision_trabajo(trabajo):
     d, sel = _trabajo(trabajo)
     v = _veredictos(d)
-    fotos = [dict(e, n=i, veredicto=v.get(e["archivo"], {}).get("pasa"))
+    fotos = [dict(e, n=i, veredicto=_clase(v.get(e["archivo"])))
              for i, e in enumerate(sel.get("elegidas", []), 1)]
     return render_template_string(BASE_HTML, cuerpo=render_template_string(
         PANEL_REVISION, nombre=d.name, url=urllib.parse.quote(d.name), fotos=fotos, apunte=sel.get("apunte", "")))
@@ -3615,9 +3616,17 @@ def revision_foto(trabajo, n):
     return send_file(sin_marca(str(ruta), ancho=1600), mimetype="image/jpeg", max_age=86400)
 
 
+def _clase(x):
+    """El veredicto guardado como clase CSS: si / buena / no, o "" sin votar."""
+    if not x:
+        return ""
+    return "si" if x.get("pasa") else "buena" if x.get("buena") else "no"
+
+
 @app.post("/panel/revision/<path:trabajo>/<int:n>")
 def revision_votar(trabajo, n):
-    """Pasa / no pasa. Lo que pasa se copia a aprobadas/; si se arrepiente, se saca."""
+    """Pasa / buena pero no la subiria / no pasa. Lo que pasa se copia a aprobadas/; si se
+    arrepiente, se saca. "buena" no se copia: es senal de gusto (buena foto, no para Instagram)."""
     d, sel = _trabajo(trabajo)
     elegidas = sel.get("elegidas", [])
     if not 1 <= n <= len(elegidas):
@@ -3627,6 +3636,8 @@ def revision_votar(trabajo, n):
     v = _veredictos(d)
     anterior = (v.get(e["archivo"]) or {}).get("copia")
     entrada = {"pasa": pasa, "cuando": datetime.now().isoformat(timespec="seconds")}
+    if request.form.get("veredicto") == "buena":
+        entrada["buena"] = True
     if pasa:
         # A aprobadas/ va el RAW (Denoise de Lightroom solo trabaja sobre RAW); si no hay, el JPEG.
         jpeg = _ruta_pi(e.get("original"))
@@ -3645,7 +3656,7 @@ def revision_votar(trabajo, n):
     tmp = d / "revision.json.tmp"
     tmp.write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, d / "revision.json")
-    return jsonify(ok=True, pasa=pasa,
+    return jsonify(ok=True, pasa=pasa, clase=_clase(entrada),
                    pasan=sum(1 for x in v.values() if x.get("pasa")),
                    faltan=len(elegidas) - len(v))
 
@@ -4575,14 +4586,26 @@ def _ya_copiada(carpeta, origen):
     return False
 
 
+def carpeta_pedido(lid, nombre):
+    """"<ID>-<nombre de la lista>": la carpeta del pedido dice que es (pedido de
+    Renzo, 7/10/2026). Sin los caracteres que Windows no acepta en un nombre."""
+    limpio = re.sub(r'[\\/:*?"<>|]', "", nombre or "").strip(" .")
+    return codigo_lista(lid) + ("-" + limpio if limpio else "")
+
+
 def carpetas_compra(fotos, codigo):
-    """(pedidos/<ID>, entregados/<ID>) dentro de <evento>/Compras, o None si
-    ninguna foto tiene RAW para saber cual es el evento."""
+    """(pedidos/<carpeta>, entregados/<carpeta>) dentro de <evento>/Compras, o
+    None si ninguna foto tiene RAW para saber cual es el evento. Un pedido de
+    antes del 7/10 se llama solo <ID>: si esta y el nuevo no, sigue siendo ese."""
     ev = next((carpeta_evento(f["raw"]) for f in fotos
                if f["raw"] and carpeta_evento(f["raw"])), None)
     if ev is None:
         return None
-    return ev / "Compras" / "pedidos" / codigo, ev / "Compras" / "entregados" / codigo
+    c = ev / "Compras"
+    viejo = codigo.split("-", 1)[0]
+    if viejo != codigo and not any((c / s / codigo).exists() for s in ("pedidos", "entregados"))             and any((c / s / viejo).exists() for s in ("pedidos", "entregados")):
+        codigo = viejo
+    return c / "pedidos" / codigo, c / "entregados" / codigo
 
 
 def estado_compra(fotos, codigo):
@@ -4846,10 +4869,10 @@ def _lista_de(slug, lid):
 
 @app.post("/panel/<slug>/lista/<int:lid>/<any(solicitar, entregar):accion>")
 def panel_compra(slug, lid, accion):
-    _, _, fotos = _lista_de(slug, lid)
+    _, l, fotos = _lista_de(slug, lid)
     hacer = solicitar_compra if accion == "solicitar" else entregar_compra
     try:
-        hacer(fotos, codigo_lista(lid))
+        hacer(fotos, carpeta_pedido(lid, l["nombre"]))
     except OSError as e:                     # disco desmontado o solo lectura
         return redirect(url_for("panel_lista", slug=slug, lid=lid, error=str(e)))
     return redirect(url_for("panel_lista", slug=slug, lid=lid))
@@ -4864,7 +4887,7 @@ def panel_lista(slug, lid):
     compra = None
     if fotos:
         try:
-            compra = estado_compra(fotos, codigo_lista(lid))
+            compra = estado_compra(fotos, carpeta_pedido(lid, l["nombre"]))
         except OSError as e:
             compra = {"estado": "error", "error": str(e)}
     if request.args.get("error"):
@@ -7072,7 +7095,7 @@ lo que pasa queda en <code>_para_publicar/&lt;trabajo&gt;/aprobadas</code> del N
 {% for t in trabajos %}<li><a href="/panel/revision/{{ t.url }}">
 <span class="fec">{{ t.fecha }}</span>
 <span class="nom">{{ t.nombre }}</span>
-<span class="n">{% if t.faltan %}<b>{{ t.faltan }} por revisar</b> &middot; {% endif %}{{ t.pasa }} pasan &middot; {{ t.no }} no</span>
+<span class="n">{% if t.faltan %}<b>{{ t.faltan }} por revisar</b> &middot; {% endif %}{{ t.pasa }} pasan &middot; {% if t.buenas %}{{ t.buenas }} buenas &middot; {% endif %}{{ t.no }} no</span>
 </a></li>{% endfor %}
 </ul>
 </main>"""
@@ -7081,12 +7104,14 @@ PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
 .rev{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:1.2rem;margin-top:1rem}
 .rev figure{margin:0;background:rgba(127,127,127,.08);border-radius:8px;overflow:hidden;border:3px solid transparent}
 .rev figure.si{border-color:#2e9e4f}.rev figure.no{border-color:#c0392b;opacity:.55}
+.rev figure.buena{border-color:#d4a017}
 .rev img{width:100%;display:block;cursor:zoom-in}
 .rev figcaption{padding:.6rem .8rem;font-size:.9rem;line-height:1.35}
 .rev .cap{font-style:italic;opacity:.85;margin:.3rem 0}
 .rev .botones{display:flex;gap:.5rem;margin-top:.5rem}
 .rev .botones button{flex:1;padding:.6rem;border:0;border-radius:6px;font-size:1rem;cursor:pointer}
 .rev .bsi{background:#2e9e4f;color:#fff}.rev .bno{background:#c0392b;color:#fff}
+.rev .bbuena{background:#d4a017;color:#1a1a1a}
 .apunte{white-space:pre-wrap;font-size:.9rem;opacity:.8}
 </style><main>
 <h1 class="tit">{{ nombre }}</h1>
@@ -7095,7 +7120,7 @@ PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
 {% if apunte %}<p class="apunte">{{ apunte }}</p>{% endif %}
 <div class="rev">
 {% for f in fotos %}
-<figure id="f{{ f.n }}" class="{{ 'si' if f.veredicto == true else 'no' if f.veredicto == false }}">
+<figure id="f{{ f.n }}" class="{{ f.veredicto }}">
 <a href="/panel/revision-foto/{{ url }}/{{ f.n }}?full=1" target="_blank" rel="noopener">
 <img loading="lazy" src="/panel/revision-foto/{{ url }}/{{ f.n }}" alt="{{ f.archivo }}"></a>
 <figcaption><b>{{ f.n }}.</b> {{ f.vista or f.motivo }}
@@ -7103,6 +7128,7 @@ PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
 <div style="opacity:.6;font-size:.8rem">{{ f.archivo }}</div>
 <div class="botones">
 <button class="bsi" onclick="votar({{ f.n }}, 'pasa')">Pasa</button>
+<button class="bbuena" onclick="votar({{ f.n }}, 'buena')" title="Buena foto, pero no la subiria">Buena, no la subo</button>
 <button class="bno" onclick="votar({{ f.n }}, 'no')">No pasa</button>
 </div></figcaption></figure>
 {% endfor %}
@@ -7112,7 +7138,7 @@ function votar(n, v) {
   fetch('/panel/revision/{{ url }}/' + n, {method: 'POST',
     headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'veredicto=' + v})
   .then(r => r.json()).then(j => {
-    document.getElementById('f' + n).className = j.pasa ? 'si' : 'no';
+    document.getElementById('f' + n).className = j.clase;
     document.getElementById('resumen').textContent =
       j.pasan + ' pasan' + (j.faltan ? ' · ' + j.faltan + ' por revisar' : ' · revision completa');
   });
@@ -8237,6 +8263,10 @@ def test():
     solicitar_compra(fotos_c, "ABC123")
     assert not ped_.exists(), "entregada se volvio a pedir"
     assert estado_compra([{"raw": None}], "ZZZ999")["estado"] == "sin_raw"
+    # un pedido de antes del 7/10 (carpeta solo <ID>) sigue siendo ese, no se pide de nuevo
+    assert estado_compra(fotos_c, "ABC123-Favoritos")["estado"] == "entregada"
+    assert carpetas_compra(fotos_c, "ABC123-Favoritos")[1] == ent_
+    assert carpetas_compra(fotos_c, "QQQ111-Favoritos")[0].name == "QQQ111-Favoritos"
 
     # ---- ficha del cliente: los hechos sueltos se agrupan en visitas
     with app.test_client() as c:
@@ -8358,7 +8388,8 @@ def test():
         fid_ = cx_.execute("SELECT id FROM foto WHERE galeria_id=?", (gid_,)).fetchone()["id"]
         cx_.execute("INSERT INTO lista_foto (lista_id, foto_id) VALUES (?, ?)", (lid_, fid_))
         cx_.commit()
-        cod_ = codigo_lista(lid_)
+        cod_ = codigo_lista(lid_) + "-Favoritos"     # la carpeta lleva el nombre de la lista
+        assert carpeta_pedido(lid_, 'EDICION: "completa"/ IG.') == codigo_lista(lid_) + "-EDICION completa IG"
         html = c.get(f"/panel/ccomp/lista/{lid_}").get_data(as_text=True)
         assert "Lista solicitada" in html and not (ev5 / "Compras/pedidos" / cod_).exists()
         assert c.post(f"/panel/ccomp/lista/{lid_}/solicitar").status_code == 302
