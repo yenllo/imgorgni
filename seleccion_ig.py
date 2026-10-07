@@ -1,7 +1,8 @@
-r"""Elige las ~20 mejores fotos de un trabajo deportivo para Instagram y las copia completas.
+r"""Elige las ~40 mejores fotos de un trabajo deportivo para Instagram y las copia completas.
 
     python seleccion_ig.py "Liga ExScuola\Liga ExScuola 2026-1\2026-07-11 F9 (Final)"   # uno, ya
     python seleccion_ig.py --noche     # lo que usa la tarea de las 3:30 (ver abajo)
+    python seleccion_ig.py --renato    # solo el top de las selecciones terminadas de Renato
     python seleccion_ig.py --prueba    # self-check
 
 Trabaja sobre CARPETAS de `Fotos\Galeria\Trabajo` (rutas relativas a esa carpeta), no sobre
@@ -21,7 +22,7 @@ Embudo, del mas barato al mas caro. Todo Claude, sin agy ni Gemini (pedido de Re
      OJO: su puntaje NO es editorial, por eso pasan TODAS las PASS al paso 2 y no solo su top.
   2. Filtro Claude Haiku sobre HOJAS DE CONTACTO de 9 fotos (~240 tokens por foto en vez de
      ~1.500 foto por foto): nota gruesa a todas las PASS.
-  3. Claude Sonnet ve las <=60 mejores a 1280 px y elige ELEGIR (20) sin repetir jugada, en orden de
+  3. Claude Sonnet ve las <=80 mejores a 1280 px y elige ELEGIR (40) sin repetir jugada, en orden de
      publicacion. Lee `data/apuntes_renato.md` (lo que aprendio de lo que elige Renato, ver
      aprender_apuntes.py) y deja un apunte de esta seleccion en `_para_publicar\bitacora.md`.
      Una segunda pasada mira solo las elegidas y escribe que se ve (para verificar) y el caption.
@@ -31,6 +32,10 @@ Embudo, del mas barato al mas caro. Todo Claude, sin agy ni Gemini (pedido de Re
 Salida en `_para_publicar\<trabajo>\`: las fotos `01_DSC....jpg`, `seleccion.json` y los
 intermedios (autocull.json, filtro.json, ver\, hojas\). Para rehacer un trabajo, borra su carpeta.
 No escribe en photos_v2.db ni en la carpeta de fotos: solo lee de ahi.
+
+Ademas, cada corrida --noche mira en la Pi si Renato (cliente de la Liga ExScuola) apreto "Termine mi
+seleccion" en alguna galeria: de sus ~100 fotos Sonnet elige las TOP_RENATO mejores para Instagram y
+quedan en renato.json, segunda seccion de /panel/revision de esa fecha (pedido de Renzo, 7/10/2026).
 """
 import ctypes
 import json
@@ -62,9 +67,10 @@ MODELO_FILTRO = "haiku"    # nota gruesa sobre hojas de contacto: barato
 MODELO_CLAUDE = "sonnet"   # ponytail: sonnet cuida la cuota semanal; "opus" si el gusto no alcanza
 VISTOS = SALIDA / "vistos.json"   # trabajos ya conocidos: lo que no esta aca es una fecha nueva
 ESTABLE_HORAS = 2                  # una fecha se analiza recien cuando termino de copiarse
-ELEGIR = 20  # Renzo aprueba en /panel/revision entre 2 y 10 de cada 10: con 20 le quedan ~10 publicables.
-             # Ajustar con la tasa real de aprobacion de revision.json cuando haya varios trabajos.
-MAX_A_CLAUDE = 60
+ELEGIR = 40  # 7/10/2026: Renzo pidio "hartas mas" que 20 por fecha para revisar.
+MAX_A_CLAUDE = 80  # el juez lee todas juntas a 1280 px (~1.800 tokens c/u): 80 es ~145 mil, cerca del techo
+TOP_RENATO = 20    # de las ~100 que elige Renato, las mejores para Instagram (segunda seccion del panel)
+PX_RENATO = 1024   # sus ~100 a 1280 px no caben en una sola lectura; a 1024 son ~1.100 tokens c/u
 # Autocull solo bota basura (3/10/2026). Con sus valores de siempre (cuotas fijas por percentil y 1 foto
 # por rafaga) pasaba el 6-19% del carrete y dejaba afuera 9 de cada 10 fotos que eligio Renato:
 # F1 13/9 -> 10 de 101, F2 26/9 -> 7 de 101 (48 cayeron como "duplicado de rafaga").
@@ -191,7 +197,7 @@ def rotular(im, texto, tam=40):
     return im
 
 
-def achicar(rutas, carpeta):
+def achicar(rutas, carpeta, px=PX_VER):
     """C001.jpg... a 1280 px para los jueces, con el id escrito encima. Devuelve {id: ruta original}."""
     carpeta.mkdir(parents=True, exist_ok=True)
     mapa = {}
@@ -200,9 +206,9 @@ def achicar(rutas, carpeta):
         destino = carpeta / f"{fid}.jpg"
         if not destino.exists():
             im = Image.open(ruta)
-            im.draft("RGB", (PX_VER, PX_VER))  # decodifica el JPEG ya reducido: 42 MP pesan
+            im.draft("RGB", (px, px))  # decodifica el JPEG ya reducido: 42 MP pesan
             im = ImageOps.exif_transpose(im).convert("RGB")
-            im.thumbnail((PX_VER, PX_VER))
+            im.thumbnail((px, px))
             rotular(im, fid).save(destino, quality=88)
         mapa[fid] = ruta
     return mapa
@@ -309,7 +315,7 @@ _ID_EN_IMAGEN = ("Cada imagen tiene su id escrito en amarillo en la esquina supe
                  "id. Usa SIEMPRE el id que lees en la imagen, no el que recuerdes del nombre de archivo.")
 
 
-def claude(carpeta, ids, evento):
+def claude(carpeta, ids, evento, elegir=ELEGIR):
     """Paso A: elige y ordena. Solo ids y por que; detallar() mira despues solo a esas."""
     prompt = f"""{CRITERIO}{apuntes()}
 Trabajo: {evento}.
@@ -317,7 +323,7 @@ En esta carpeta hay {len(ids)} fotos candidatas: {', '.join(i + '.jpg' for i in 
 Lee TODAS con la herramienta Read, varias en paralelo por turno para no gastar turnos.
 {_ID_EN_IMAGEN}
 
-Elige hasta {ELEGIR} candidatas para publicar (menos si no hay {ELEGIR} buenas de verdad). El
+Elige hasta {elegir} candidatas para publicar (menos si no hay {elegir} buenas de verdad). El
 fotografo las revisa despues y se queda con algunas, asi que conviene variedad. Reglas:
 - Nunca dos fotos de la misma jugada o del mismo momento: quedate con la mejor.
 - Variedad: distintos jugadores/equipos y tipos de momento (accion, arquero, celebracion, historia).
@@ -436,9 +442,84 @@ def procesar(base, trabajo):
     log(f"listo: {carpeta}")
 
 
+# ---------------------------------------------------------------- top de lo que eligio Renato
+
+# Corre en la Pi: los JPEG de todas las listas del cliente que apreto "Termine mi seleccion".
+CONSULTA_RENATO = r'''
+import json, sqlite3
+c = sqlite3.connect("/home/yenllo/galeria/galeria.db")
+out = []
+for gid, cid in c.execute("SELECT galeria_id, cliente_id FROM seleccion_lista").fetchall():
+    out.append(sorted({r[0] for r in c.execute(
+        "SELECT f.ruta FROM lista l JOIN lista_foto lf ON lf.lista_id = l.id JOIN foto f ON f.id = lf.foto_id "
+        "WHERE l.cliente_id = ? AND f.galeria_id = ?", (cid, gid))}))
+print(json.dumps(out))
+'''
+MAX_INTENTOS_RENATO = 3
+
+
+def trabajo_de(foto):
+    """El trabajo de una foto: la primera carpeta hacia arriba que tiene RAW/ adentro."""
+    return next((p for p in foto.parents if (p / "RAW").is_dir()), None)
+
+
+def renato(base):
+    """Top de cada seleccion terminada de Renato que todavia no lo tenga. Sin la Pi, no hace nada."""
+    try:
+        r = subprocess.run(["ssh", "fotosnas", "python3", "-"], input=CONSULTA_RENATO, capture_output=True,
+                           text=True, encoding="utf-8", timeout=60, check=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        return log(f"top de Renato: no llegue a la Pi ({str(e)[:100]})")
+    for rutas in json.loads(r.stdout):
+        fotos = [base / Path(x.split("/Galeria/Trabajo/", 1)[1]) for x in rutas if "/Galeria/Trabajo/" in x]
+        trabajo = trabajo_de(fotos[0]) if fotos else None
+        if trabajo is None:
+            continue
+        carpeta = SALIDA / nombre_salida(base, trabajo)
+        intentos = carpeta / "renato.intentos"
+        n = int(intentos.read_text()) if intentos.exists() else 0
+        if (carpeta / "renato.json").exists() or n >= MAX_INTENTOS_RENATO:
+            continue
+        try:
+            procesar_renato(base, trabajo, [str(f) for f in fotos])
+        except Exception as e:
+            carpeta.mkdir(parents=True, exist_ok=True)
+            intentos.write_text(str(n + 1))
+            log(f"top de Renato {trabajo.name} fallo ({n + 1}/{MAX_INTENTOS_RENATO}): {e}")
+
+
+def procesar_renato(base, trabajo, rutas):
+    evento = nombre_salida(base, trabajo)
+    carpeta = SALIDA / evento
+    log(f"=== top de Renato: {evento} ({len(rutas)} fotos)")
+    ver = carpeta / "ver_renato"
+    mapa = achicar(rutas, ver, PX_RENATO)
+    contexto = (f"{evento}. Estas {len(mapa)} fotos ya las eligio el cliente (Renato, organizador de la "
+                f"liga) de todo el carrete: elige las mejores para el Instagram del fotografo")
+    elegidas, apunte, uso = claude(ver, list(mapa), contexto, TOP_RENATO)
+    elegidas, uso_b = detallar(ver, elegidas, evento)
+    for n, e in enumerate(elegidas, 1):
+        e["original"] = mapa[e["id"]]
+        e["archivo"] = f"R{n:02d}_{Path(e['original']).name}"  # R: no choca con las de seleccion.json
+    (carpeta / "renato.json").write_text(json.dumps(
+        {"trabajo": evento, "apunte": apunte, "elegidas": elegidas, "de": len(mapa),
+         "uso_claude": {"eleccion": uso, "detalle": uso_b}}, ensure_ascii=False, indent=1), encoding="utf-8")
+    nas = Path(base).parents[2] / "_para_publicar" / evento
+    nas.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(carpeta / "renato.json", nas / "renato.json")
+    avisar(f"Top {len(elegidas)} de la seleccion de Renato", evento, PANEL + urllib.parse.quote(evento))
+    log(f"top de Renato listo: {len(elegidas)} de {len(mapa)}")
+
+
 def prueba():
     assert extraer_json('bla {"a": {"b": 1}} fin') == {"a": {"b": 1}}
     assert extraer_json('{"a": "linea1\nlinea2"}') == {"a": "linea1\nlinea2"}
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "F3" / "RAW").mkdir(parents=True)
+        (Path(d) / "F3" / "jpeg").mkdir()
+        assert trabajo_de(Path(d) / "F3" / "jpeg" / "a.JPG") == Path(d) / "F3"
+        assert trabajo_de(Path(d) / "otro" / "a.JPG") is None
     print("ok")
 
 
@@ -541,10 +622,14 @@ def main():
     if args == ["--noche"]:
         nuevos, vistos = fechas_nuevas(base)
         todo = nuevos + [base / c for c in cola]
-        if not todo:
-            return  # lo normal casi todas las horas: nada nuevo, nada que anotar
+    elif args == ["--renato"]:
+        todo = []
     else:
         todo = [base / a for a in args]
+    if args in (["--noche"], ["--renato"]):
+        # antes que los carretes: son ~100 fotos y no deben esperar horas detras de uno de 3.000.
+        # Sin seleccion terminada de Renato pendiente, es una consulta de un segundo a la Pi.
+        renato(base)
     for trabajo in dict.fromkeys(todo):
         try:
             if not trabajo.is_dir():

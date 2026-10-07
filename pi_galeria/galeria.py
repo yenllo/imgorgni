@@ -24,6 +24,7 @@ import time
 import secrets
 import shutil
 import subprocess
+import threading
 import sqlite3
 import contextlib
 import unicodedata
@@ -3533,12 +3534,26 @@ def _ruta_pi(original):
     return None
 
 
+SECCIONES = {"": "seleccion.json", "renato": "renato.json"}
+
+
 def _trabajo(trabajo):
-    """(carpeta, seleccion) de un trabajo, o 404. dentro_de_raiz ataja '..'."""
+    """La carpeta de un trabajo con algo que revisar, o 404. dentro_de_raiz ataja '..'."""
     d = REVISION / trabajo
-    if not dentro_de_raiz(d) or not (d / "seleccion.json").exists():
+    if not dentro_de_raiz(d) or not any((d / f).exists() for f in SECCIONES.values()):
         abort(404)
-    return d, json.loads((d / "seleccion.json").read_text(encoding="utf-8-sig"))
+    return d
+
+
+def _seccion(d, s=""):
+    """seleccion.json (las que eligio Claude del carrete) o renato.json (el top de lo que eligio
+    Renato, 7/10/2026). {} si esa seccion no esta."""
+    if s not in SECCIONES:
+        abort(404)
+    try:
+        return json.loads((d / SECCIONES[s]).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {}
 
 
 _EXT_RAW = (".arw", ".cr2", ".cr3", ".nef", ".dng", ".raf", ".orf", ".rw2")
@@ -3576,11 +3591,10 @@ def revision_indice():
     trabajos = []
     if REVISION.is_dir():
         for d in sorted(REVISION.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if not (d / "seleccion.json").exists():
+            if not any((d / f).exists() for f in SECCIONES.values()):
                 continue
-            sel = json.loads((d / "seleccion.json").read_text(encoding="utf-8-sig"))
             v = _veredictos(d)
-            n = len(sel.get("elegidas", []))
+            n = sum(len(_seccion(d, s).get("elegidas", [])) for s in SECCIONES)
             pasa = sum(1 for x in v.values() if x.get("pasa"))
             buenas = sum(1 for x in v.values() if x.get("buena"))
             trabajos.append({"nombre": d.name, "url": urllib.parse.quote(d.name), "n": n, "pasa": pasa,
@@ -3593,19 +3607,24 @@ def revision_indice():
 
 @app.get("/panel/revision/<path:trabajo>")
 def revision_trabajo(trabajo):
-    d, sel = _trabajo(trabajo)
+    d = _trabajo(trabajo)
     v = _veredictos(d)
-    fotos = [dict(e, n=i, veredicto=_clase(v.get(e["archivo"])))
-             for i, e in enumerate(sel.get("elegidas", []), 1)]
+    sel, ren = _seccion(d), _seccion(d, "renato")
+
+    def fotos(datos):
+        return [dict(e, n=i, veredicto=_clase(v.get(e["archivo"])))
+                for i, e in enumerate(datos.get("elegidas", []), 1)]
     return render_template_string(BASE_HTML, cuerpo=render_template_string(
-        PANEL_REVISION, nombre=d.name, url=urllib.parse.quote(d.name), fotos=fotos, apunte=sel.get("apunte", "")))
+        PANEL_REVISION, nombre=d.name, url=urllib.parse.quote(d.name), fotos=fotos(sel),
+        apunte=sel.get("apunte", ""), fotos_r=fotos(ren), de_r=ren.get("de", 0),
+        pasan=sum(1 for x in v.values() if x.get("pasa")),
+        faltan=len(sel.get("elegidas", [])) + len(ren.get("elegidas", [])) - len(v)))
 
 
 @app.get("/panel/revision-foto/<path:trabajo>/<int:n>")
 def revision_foto(trabajo, n):
     """La foto n del trabajo, sin marca. ?full=1 manda el original tal cual."""
-    _d, sel = _trabajo(trabajo)
-    elegidas = sel.get("elegidas", [])
+    elegidas = _seccion(_trabajo(trabajo), request.args.get("s", "")).get("elegidas", [])
     if not 1 <= n <= len(elegidas):
         abort(404)
     ruta = _ruta_pi(elegidas[n - 1].get("original"))
@@ -3623,12 +3642,20 @@ def _clase(x):
     return "si" if x.get("pasa") else "buena" if x.get("buena") else "no"
 
 
+_VOTO = threading.Lock()   # dos votos seguidos (toques rapidos) leian el mismo revision.json y uno se perdia
+
+
 @app.post("/panel/revision/<path:trabajo>/<int:n>")
 def revision_votar(trabajo, n):
+    with _VOTO:
+        return _votar(trabajo, n)
+
+
+def _votar(trabajo, n):
     """Pasa / buena pero no la subiria / no pasa. Lo que pasa se copia a aprobadas/; si se
     arrepiente, se saca. "buena" no se copia: es senal de gusto (buena foto, no para Instagram)."""
-    d, sel = _trabajo(trabajo)
-    elegidas = sel.get("elegidas", [])
+    d = _trabajo(trabajo)
+    elegidas = _seccion(d, request.args.get("s", "")).get("elegidas", [])
     if not 1 <= n <= len(elegidas):
         abort(404)
     e = elegidas[n - 1]
@@ -3658,7 +3685,7 @@ def revision_votar(trabajo, n):
     os.replace(tmp, d / "revision.json")
     return jsonify(ok=True, pasa=pasa, clase=_clase(entrada),
                    pasan=sum(1 for x in v.values() if x.get("pasa")),
-                   faltan=len(elegidas) - len(v))
+                   faltan=sum(len(_seccion(d, s).get("elegidas", [])) for s in SECCIONES) - len(v))
 
 
 
@@ -7101,7 +7128,10 @@ lo que pasa queda en <code>_para_publicar/&lt;trabajo&gt;/aprobadas</code> del N
 </main>"""
 
 PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
-.rev{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:1.2rem;margin-top:1rem}
+/* Una foto bajo la otra, y a la derecha la barra con las que pasan: lo que se va a subir de esta
+   fecha, a la vista mientras se revisa (pedido de Renzo, 7/10/2026). En el telefono es una tira abajo. */
+.lay{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:1.6rem;align-items:start}
+.rev{display:flex;flex-direction:column;gap:1.6rem;max-width:1150px}
 .rev figure{margin:0;background:rgba(127,127,127,.08);border-radius:8px;overflow:hidden;border:3px solid transparent}
 .rev figure.si{border-color:#2e9e4f}.rev figure.no{border-color:#c0392b;opacity:.55}
 .rev figure.buena{border-color:#d4a017}
@@ -7113,36 +7143,75 @@ PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
 .rev .bsi{background:#2e9e4f;color:#fff}.rev .bno{background:#c0392b;color:#fff}
 .rev .bbuena{background:#d4a017;color:#1a1a1a}
 .apunte{white-space:pre-wrap;font-size:.9rem;opacity:.8}
+#barra{position:sticky;top:1rem;max-height:calc(100vh - 2rem);overflow-y:auto}
+#barra h3{margin-top:0}
+#barra a{display:block;border:0;margin-bottom:.5rem}
+#barra img{width:100%;display:block;border-radius:4px}
+#barra .vacio{font-size:.85rem;opacity:.6}
+@media (max-width:800px){
+  .lay{display:block}
+  #barra{position:fixed;left:0;right:0;bottom:0;top:auto;max-height:none;overflow-x:auto;overflow-y:hidden;
+    display:flex;align-items:center;gap:.4rem;padding:.4rem .6rem;background:var(--noche);
+    border-top:1px solid var(--linea);z-index:20}
+  #barra h3{margin:0;white-space:nowrap;font-size:.65rem}
+  #barra #lista{display:flex;gap:.4rem}
+  #barra a{margin:0;flex:none}
+  #barra img{height:56px;width:auto}
+  main{padding-bottom:6rem}
+}
 </style><main>
 <h1 class="tit">{{ nombre }}</h1>
 <p class="migas"><a href="/panel/revision">&larr; revision</a> &middot;
-<span id="resumen"></span></p>
-{% if apunte %}<p class="apunte">{{ apunte }}</p>{% endif %}
-<div class="rev">
-{% for f in fotos %}
-<figure id="f{{ f.n }}" class="{{ f.veredicto }}">
-<a href="/panel/revision-foto/{{ url }}/{{ f.n }}?full=1" target="_blank" rel="noopener">
-<img loading="lazy" src="/panel/revision-foto/{{ url }}/{{ f.n }}" alt="{{ f.archivo }}"></a>
+<span id="resumen">{{ pasan }} pasan &middot; {{ faltan ~ ' por revisar' if faltan else 'revision completa' }}</span>{% if fotos_r %} &middot; <a href="#renato">top de Renato</a>{% endif %}</p>
+{% macro tarjeta(f, s) %}
+<figure id="{{ 'r' if s else 'f' }}{{ f.n }}" class="{{ f.veredicto }}"
+  data-orig="{{ f.original }}" data-img="/panel/revision-foto/{{ url }}/{{ f.n }}{{ '?s=' ~ s if s }}">
+<a href="/panel/revision-foto/{{ url }}/{{ f.n }}?full=1{{ '&s=' ~ s if s }}" target="_blank" rel="noopener">
+<img loading="lazy" src="/panel/revision-foto/{{ url }}/{{ f.n }}{{ '?s=' ~ s if s }}" alt="{{ f.archivo }}"></a>
 <figcaption><b>{{ f.n }}.</b> {{ f.vista or f.motivo }}
 {% if f.caption %}<div class="cap">&ldquo;{{ f.caption }}&rdquo;</div>{% endif %}
 <div style="opacity:.6;font-size:.8rem">{{ f.archivo }}</div>
 <div class="botones">
-<button class="bsi" onclick="votar({{ f.n }}, 'pasa')">Pasa</button>
-<button class="bbuena" onclick="votar({{ f.n }}, 'buena')" title="Buena foto, pero no la subiria">Buena, no la subo</button>
-<button class="bno" onclick="votar({{ f.n }}, 'no')">No pasa</button>
+<button class="bsi" onclick="votar('{{ s }}', {{ f.n }}, 'pasa')">Pasa</button>
+<button class="bbuena" onclick="votar('{{ s }}', {{ f.n }}, 'buena')" title="Buena foto, pero no la subiria">Buena, no la subo</button>
+<button class="bno" onclick="votar('{{ s }}', {{ f.n }}, 'no')">No pasa</button>
 </div></figcaption></figure>
-{% endfor %}
+{% endmacro %}
+<div class="lay"><div>
+{% if fotos %}<h3>Seleccion de Claude &middot; {{ fotos|length }} del carrete</h3>
+{% if apunte %}<p class="apunte">{{ apunte }}</p>{% endif %}
+<div class="rev">{% for f in fotos %}{{ tarjeta(f, '') }}{% endfor %}</div>{% endif %}
+{% if fotos_r %}<h3 id="renato">Top {{ fotos_r|length }} de la seleccion de Renato{% if de_r %} &middot; de sus {{ de_r }}{% endif %}</h3>
+<div class="rev">{% for f in fotos_r %}{{ tarjeta(f, 'renato') }}{% endfor %}</div>{% endif %}
+</div>
+<aside id="barra"><h3>Para subir &middot; <span id="nsub">0</span></h3><div id="lista"></div></aside>
 </div></main>
 <script>
-function votar(n, v) {
-  fetch('/panel/revision/{{ url }}/' + n, {method: 'POST',
+function pintar() {
+  // las que pasan, sin repetir: una misma foto puede estar en las dos secciones
+  const vistas = new Set(), lista = document.getElementById('lista');
+  lista.innerHTML = '';
+  document.querySelectorAll('.rev figure.si').forEach(f => {
+    if (vistas.has(f.dataset.orig)) return;
+    vistas.add(f.dataset.orig);
+    const a = document.createElement('a'), im = document.createElement('img');
+    a.href = '#' + f.id; im.src = f.dataset.img; im.loading = 'lazy'; im.alt = '';
+    a.appendChild(im); lista.appendChild(a);
+  });
+  document.getElementById('nsub').textContent = vistas.size;
+  if (!vistas.size) lista.innerHTML = '<p class="vacio">Lo que marques Pasa aparece aca.</p>';
+}
+function votar(s, n, v) {
+  fetch('/panel/revision/{{ url }}/' + n + (s ? '?s=' + s : ''), {method: 'POST',
     headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'veredicto=' + v})
   .then(r => r.json()).then(j => {
-    document.getElementById('f' + n).className = j.clase;
+    document.getElementById((s ? 'r' : 'f') + n).className = j.clase;
     document.getElementById('resumen').textContent =
       j.pasan + ' pasan' + (j.faltan ? ' · ' + j.faltan + ' por revisar' : ' · revision completa');
+    pintar();
   });
 }
+pintar();
 </script>"""
 
 PANEL_EVENTOS = PANEL_CSS + PANEL_BARRA + """<main>
