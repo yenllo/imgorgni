@@ -124,6 +124,18 @@ def nombre_salida(base, trabajo):
     return " - ".join(trabajo.relative_to(base).parts)
 
 
+def espejo_local(trabajo):
+    """La copia local del trabajo (TrabajoFotografico/*/<nombre>) si tiene exactamente los mismos JPEG
+    que el NAS, o None. Leer local es ~100x mas rapido: el 7/10, fuera de casa por Tailscale, Autocull iba
+    a 0,09 fotos/s (la F3 eran ~6 h) y la F3 estaba copiada en la notebook."""
+    nas = None
+    for c in (AQUI / "TrabajoFotografico").glob(f"*/{trabajo.name}"):
+        nas = nas if nas is not None else {os.path.relpath(f, trabajo) for f in jpegs(trabajo)}
+        if nas and {os.path.relpath(f, c) for f in jpegs(c)} == nas:
+            return c
+    return None
+
+
 def jpegs(trabajo):
     salida = []
     for actual, dirs, archivos in os.walk(trabajo):
@@ -408,7 +420,10 @@ def procesar(base, trabajo):
         return
     log(f"=== {evento}")
     carpeta.mkdir(parents=True, exist_ok=True)
-    mapa = achicar(autocull(trabajo, carpeta), carpeta / VER)
+    espejo = espejo_local(trabajo)
+    if espejo:
+        log(f"leo la copia local {espejo} (mismos JPEG que el NAS)")
+    mapa = achicar(autocull(espejo or trabajo, carpeta), carpeta / VER)
     (carpeta / "mapa.json").write_text(json.dumps(mapa, ensure_ascii=False, indent=1), encoding="utf-8")
 
     archivo_f = carpeta / "filtro.json"
@@ -431,6 +446,8 @@ def procesar(base, trabajo):
         e["original"] = mapa[e["id"]]
         e["archivo"] = f"{n:02d}_{Path(e['original']).name}"
         shutil.copy2(e["original"], carpeta / e["archivo"])  # completa, sin recomprimir; EXIF intacto
+        if espejo:  # el panel de la Pi sirve la foto del NAS: se publica la ruta de alla
+            e["original"] = str(trabajo / Path(e["original"]).relative_to(espejo))
     (carpeta / "seleccion.json").write_text(json.dumps(
         {"trabajo": evento, "apunte": apunte, "elegidas": elegidas, "uso_claude": uso, "filtro_si": si,
          "autocull_pass": len(mapa)}, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -520,6 +537,8 @@ def prueba():
         (Path(d) / "F3" / "jpeg").mkdir()
         assert trabajo_de(Path(d) / "F3" / "jpeg" / "a.JPG") == Path(d) / "F3"
         assert trabajo_de(Path(d) / "otro" / "a.JPG") is None
+        (Path(d) / "F3" / "jpeg" / "a.JPG").write_bytes(b"x")
+        assert espejo_local(Path(d) / "F3") is None  # sin copia en TrabajoFotografico
     print("ok")
 
 
