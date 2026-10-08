@@ -6,20 +6,26 @@ Hace lo mismo que el boton "Lista solicitada" del panel (solicitar_compra de gal
 <evento>/Compras/pedidos/<ID>-<lista> y entregados/<ID>-<lista>/RAW y /Export. Si el evento tiene copia local
 (TrabajoFotografico\\*\\<evento>), arma lo mismo ahi copiando desde su RAW\\ y Lightroom trabaja local.
     python editar_renato.py            # solo encola lo nuevo
-    python editar_renato.py --abrir    # y abre Lightroom (catalogo Automatico), que procesa la cola
+    python editar_renato.py --abrir    # y si hay pendientes abre Lightroom (catalogo Automatico), espera
+                                       # a que el plugin termine y avisa por ntfy como salio
+La tarea "IMGorgni editar Renato" (registrar_tarea_ig.ps1) lo corre con --abrir a las 3:00.
 """
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from seleccion_ig import raiz_trabajo
+from seleccion_ig import avisar, raiz_trabajo
 
 AQUI = Path(__file__).resolve().parent
 LR = AQUI / "_lightroom"
 COLA = LR / "cola.tsv"
+HECHOS = LR / "hechos.tsv"
+FIN = LR / "fin.txt"              # el plugin lo reescribe al terminar la cola
+ESPERA_MIN = 90                   # 100 RAW con presets y nivelado tardan minutos; mas que esto, algo fallo
 LOCAL = AQUI / "TrabajoFotografico"
 CATALOGO = r"C:\Fotos\otro\catalogos\Automatico\Automatico.lrcat"
 LR_EXE = r"C:\Program Files\Adobe\Adobe Lightroom Classic\Lightroom.exe"
@@ -74,6 +80,60 @@ def pedido_local(p):
     return ped
 
 
+def log(*a):
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
+
+
+def pendientes():
+    """Trabajos de la cola que el plugin todavia no termino bien (hechos.tsv con "ok")."""
+    ok = set()
+    if HECHOS.exists():
+        for l in HECHOS.read_text(encoding="utf-8").splitlines():
+            c = l.split("\t")
+            if len(c) > 1 and c[1] == "ok":
+                ok.add(c[0])
+    ids = [l.split("\t")[0] for l in COLA.read_text(encoding="utf-8").splitlines()
+           if l.strip() and not l.startswith("#")] if COLA.exists() else []
+    return [i for i in ids if i not in ok]
+
+
+def lightroom_abierto():
+    r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Lightroom.exe", "/NH"], capture_output=True, text=True)
+    return "lightroom.exe" in r.stdout.lower()
+
+
+def abrir_y_esperar(pend):
+    """Deja la bandera, abre Lightroom si no estaba y espera fin.txt. El plugin (Inicio.lua) solo procesa
+    con el catalogo Automatico abierto: si Renzo tenia abierto el suyo, no toca nada y se avisa."""
+    antes = FIN.stat().st_mtime if FIN.exists() else 0
+    (LR / "procesar_al_abrir").touch()
+    if lightroom_abierto():
+        log("Lightroom ya estaba abierto: no lanzo otro; procesa solo si tiene el catalogo Automatico")
+    else:
+        # Lightroom.exe tenia RUNASADMIN (Popen daba WinError 740; Renzo lo saco el 7/10).
+        # ShellExecute anda en los dos casos.
+        os.startfile(LR_EXE, arguments=f'"{CATALOGO}"')
+        log("Lightroom abriendo con el catalogo Automatico")
+    for _ in range(ESPERA_MIN):
+        time.sleep(60)
+        if FIN.exists() and FIN.stat().st_mtime > antes:
+            break
+    else:
+        log(f"Lightroom no proceso la cola en {ESPERA_MIN} min")
+        avisar("Lightroom no edito lo de Renato",
+               f"{len(pend)} trabajo(s) siguen pendientes. Revisa _lightroom/plugin.log")
+        return
+    quedan = pendientes()
+    hechos = [i for i in pend if i not in quedan]
+    log(f"Lightroom termino: {len(hechos)} ok, {len(quedan)} pendientes")
+    if quedan:
+        avisar("Edicion de Renato con errores", f"Listos: {len(hechos)}. Con error: {', '.join(quedan)}. "
+               "Detalle en _lightroom/plugin.log")
+    else:
+        avisar("Edicion de Renato lista", f"{len(hechos)} tanda(s) reveladas en Lightroom (catalogo "
+               "Automatico, sin exportar). Estan en sus colecciones.")
+
+
 def main():
     r = subprocess.run(["ssh", "fotosnas", "python3", "-"], input=SOLICITAR, capture_output=True,
                        text=True, encoding="utf-8", check=True)
@@ -90,17 +150,18 @@ def main():
         preset, nivelar = PRESETS[tipo]
         titulo = p["galeria"].replace("Seleccion ", "")
         cola += f"{jid}\t{ped}\t{preset}\t\t\t\t{titulo} - {p['codigo']} {tipo.capitalize()}\t{nivelar}\n"
-        print(f"encolado {jid} ({tipo}): {len(p['raws'])} RAW en {ped}")
+        log(f"encolado {jid} ({tipo}): {len(p['raws'])} RAW en {ped}")
         nuevos += 1
     COLA.write_text(cola, encoding="utf-8")
     if not nuevos:
-        print("nada nuevo")
+        log("nada nuevo de Renato")
+    pend = pendientes()
     if "--abrir" in sys.argv:
-        (LR / "procesar_al_abrir").touch()
-        # Lightroom.exe tenia RUNASADMIN (Popen daba WinError 740; Renzo lo saco el 7/10).
-        # ShellExecute anda en los dos casos.
-        os.startfile(LR_EXE, arguments=f'"{CATALOGO}"')
-        print("Lightroom abriendo: procesa la cola ~30 s despues de abrir")
+        if pend:
+            log(f"pendientes: {', '.join(pend)}")
+            abrir_y_esperar(pend)
+        else:
+            log("nada pendiente en la cola: no abro Lightroom")
 
 
 if __name__ == "__main__":

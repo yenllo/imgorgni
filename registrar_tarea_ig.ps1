@@ -36,10 +36,23 @@ Register-ScheduledTask -TaskName 'IMGorgni seleccion IG cada hora' -Action $acci
     -Trigger $cadaHora `
     -Description 'Fechas nuevas de Trabajo -> seleccion para Instagram. Cada hora con la notebook prendida, sin despertarla.' | Out-Null
 
+# 8/10/2026: edicion de lo que eligio Renato. A las 3:00 pide en la Pi las listas de las galerias donde
+# apreto "Termine mi seleccion" (como el boton "Lista solicitada"), las encola y, solo si hay algo
+# pendiente, abre Lightroom con el catalogo Automatico y avisa por ntfy como salio (editar_renato.py).
+# Sin nada pendiente no abre Lightroom. Antes del 8/10 esto no estaba programado: se hizo a mano.
+$editar = New-ScheduledTaskAction -Execute 'cmd.exe' -WorkingDirectory $dir `
+    -Argument ('/c set PYTHONIOENCODING=utf-8&& "{0}" editar_renato.py --abrir >> _lightroom\noche.log 2>&1' -f $py)
+$editarAjustes = New-ScheduledTaskSettingsSet -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 3) `
+    -DontStopOnIdleEnd -MultipleInstances IgnoreNew -StartWhenAvailable `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName 'IMGorgni editar Renato' -Action $editar -Settings $editarAjustes -Force `
+    -Trigger (New-ScheduledTaskTrigger -Daily -At 3:00) `
+    -Description 'Selecciones terminadas de Renato -> Lightroom (catalogo Automatico), sin exportar. Avisa por ntfy.' | Out-Null
+
 # La tarea de prueba del 1/10 ya no hace falta
 Unregister-ScheduledTask -TaskName 'IMGorgni seleccion IG prueba' -Confirm:$false -ErrorAction SilentlyContinue
 
-Get-ScheduledTask -TaskName 'IMGorgni seleccion IG*' | ForEach-Object {
+Get-ScheduledTask -TaskName 'IMGorgni*' | ForEach-Object {
     $i = $_ | Get-ScheduledTaskInfo
     [pscustomobject]@{ Tarea = $_.TaskName; Estado = $_.State; Proxima = $i.NextRunTime }
 }
