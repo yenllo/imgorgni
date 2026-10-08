@@ -136,10 +136,15 @@ def espejo_local(trabajo):
     return None
 
 
+# Lo que se hace DESPUES de sacar las fotos: editadas, copias por equipo, pedidos de clientes. No son
+# candidatas (7/10: Babbo F2 contaba sus 140 editadas de Export como fotos nuevas, 3.011 en vez de 2.846).
+DERIVADAS = {"export", "seleccion", "compras"}
+
+
 def jpegs(trabajo):
     salida = []
     for actual, dirs, archivos in os.walk(trabajo):
-        dirs[:] = [d for d in dirs if not es_raw(d) and not d.startswith(".")]
+        dirs[:] = [d for d in dirs if not es_raw(d) and not d.startswith(".") and d.lower() not in DERIVADAS]
         salida += [str(Path(actual) / a) for a in archivos if a.lower().endswith((".jpg", ".jpeg"))]
     return sorted(salida)
 
@@ -539,6 +544,9 @@ def prueba():
         assert trabajo_de(Path(d) / "otro" / "a.JPG") is None
         (Path(d) / "F3" / "jpeg" / "a.JPG").write_bytes(b"x")
         assert espejo_local(Path(d) / "F3") is None  # sin copia en TrabajoFotografico
+        (Path(d) / "F3" / "Export").mkdir()
+        (Path(d) / "F3" / "Export" / "b.jpg").write_bytes(b"x")
+        assert jpegs(Path(d) / "F3") == [str(Path(d) / "F3" / "jpeg" / "a.JPG")]  # Export no es candidata
     print("ok")
 
 
