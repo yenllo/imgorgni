@@ -6,6 +6,7 @@ cola no partio, y asi tambien sirve si Lightroom ya estaba abierto cuando aparec
 Solo en el catalogo Automatico: con otro catalogo abierto (el de trabajo de Renzo) la bandera se
 deja quieta. El 8/10 Renzo edito la F3 a mano y una bandera vieja la habria vuelto a pisar. ]]
 local LrApplication = import "LrApplication"
+local LrDate = import "LrDate"
 local LrFileUtils = import "LrFileUtils"
 local LrTasks = import "LrTasks"
 
@@ -15,7 +16,10 @@ local CATALOGO = "automatico.lrcat"
 
 local function log(msg)
 	local f = io.open(LOG, "a")
-	if f then f:write("inicio: ", msg, "\n"); f:close() end
+	if f then
+		f:write(LrDate.timeToUserFormat(LrDate.currentTime(), "%Y-%m-%d %H:%M:%S"), " inicio: ", msg, "\n")
+		f:close()
+	end
 end
 
 local function es_automatico()
