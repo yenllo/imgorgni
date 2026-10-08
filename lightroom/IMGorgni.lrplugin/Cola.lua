@@ -190,6 +190,28 @@ local function trabajo(catalogo, c)
 		end, { timeout = 600 })
 	end
 	local detalle = #fotos .. " fotos reveladas"
+	-- Modelo de color de Renzo (color_modelo.py, 8/10/2026): si editar_renato.py dejo color_<id>.tsv
+	-- (ruta, temperatura, matiz, exposicion), se aplica encima del preset. Sin archivo, queda el preset.
+	local tsv = BASE .. "\\color_" .. id .. ".tsv"
+	if LrFileUtils.exists(tsv) then
+		local valores = {}
+		for _, l in ipairs(lineas(tsv)) do
+			local c = campos(l)
+			if c[1] and tonumber(c[2]) then valores[c[1]:lower()] = c end
+		end
+		local n = 0
+		catalogo:withWriteAccessDo("IMGorgni: color " .. id, function()
+			for _, p in ipairs(fotos) do
+				local c = valores[p:getRawMetadata("path"):lower()]
+				if c then
+					p:applyDevelopSettings({ WhiteBalance = "Custom", Temperature = tonumber(c[2]),
+						Tint = tonumber(c[3]), Exposure2012 = tonumber(c[4]) }, "Color de Renzo")
+					n = n + 1
+				end
+			end
+		end, { timeout = 600 })
+		detalle = detalle .. ", color del modelo en " .. n
+	end
 	if con_nivelado then detalle = detalle .. ", " .. nivelar(catalogo, fotos, id) .. " niveladas" end
 	if coleccion ~= "" then
 		catalogo:withWriteAccessDo("IMGorgni: coleccion " .. coleccion, function()

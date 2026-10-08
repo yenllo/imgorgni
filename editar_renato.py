@@ -84,6 +84,24 @@ def log(*a):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
 
 
+def color_modelo(jid, carpeta):
+    """Temperatura, matiz y exposicion del modelo de color de Renzo (color_modelo.py) para cada RAW de la
+    tanda -> _lightroom/color_<jid>.tsv, que el plugin aplica encima del preset. Solo si el modelo paso
+    la prueba (existe _color/activo); si algo falla, la tanda sigue con el preset solo."""
+    if not (AQUI / "_color" / "activo").exists():
+        return
+    try:
+        from color_modelo import predecir
+        rutas = sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw")
+        pred = predecir(rutas)
+        (LR / f"color_{jid}.tsv").write_text("".join(
+            f"{r}\t{v['Temperature']}\t{v['Tint']}\t{v['Exposure2012']}\n" for r, v in pred.items()),
+            encoding="utf-8")
+        log(f"color del modelo para {len(pred)} fotos de {jid}")
+    except Exception as e:
+        log(f"modelo de color fallo en {jid}, queda el preset solo: {e}")
+
+
 def pendientes():
     """Trabajos de la cola que el plugin todavia no termino bien (hechos.tsv con "ok")."""
     ok = set()
@@ -147,6 +165,7 @@ def main():
         ped = pedido_local(p)
         if ped is None:  # sin copia local: Lightroom lee el pedido del NAS
             ped = raiz_trabajo() / Path(p["pedido"].split("/Galeria/Trabajo/", 1)[1])
+        color_modelo(jid, ped)
         preset, nivelar = PRESETS[tipo]
         titulo = p["galeria"].replace("Seleccion ", "")
         cola += f"{jid}\t{ped}\t{preset}\t\t\t\t{titulo} - {p['codigo']} {tipo.capitalize()}\t{nivelar}\n"
