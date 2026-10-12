@@ -467,16 +467,22 @@ def procesar(base, trabajo):
 # ---------------------------------------------------------------- top de lo que eligio Renato
 
 # Corre en la Pi: los JPEG de todas las listas del cliente que apreto "Termine mi seleccion".
+# Galerias que Renato eligio ANTES de que existiera el boton "Termine" (1/10/2026): F1 13/9 y F2 26/9.
+# Nunca van a aparecer en seleccion_lista; ojo que meterlas ahi dispararia tambien editar_renato.py.
+RENATO_ANTES_DEL_BOTON = (9, 16)
 CONSULTA_RENATO = r'''
 import json, sqlite3
 c = sqlite3.connect("/home/yenllo/galeria/galeria.db")
-out = []
-for gid, cid in c.execute("SELECT galeria_id, cliente_id FROM seleccion_lista").fetchall():
-    out.append(sorted({r[0] for r in c.execute(
+pares = c.execute("SELECT galeria_id, cliente_id FROM seleccion_lista").fetchall()
+pares += c.execute("SELECT DISTINCT cl.galeria_id, cl.id FROM cliente cl JOIN lista l ON l.cliente_id = cl.id "
+                   "WHERE cl.galeria_id IN %s" % (ANTES,)).fetchall()
+por_galeria = {}
+for gid, cid in pares:
+    por_galeria.setdefault(gid, set()).update(r[0] for r in c.execute(
         "SELECT f.ruta FROM lista l JOIN lista_foto lf ON lf.lista_id = l.id JOIN foto f ON f.id = lf.foto_id "
-        "WHERE l.cliente_id = ? AND f.galeria_id = ?", (cid, gid))}))
-print(json.dumps(out))
-'''
+        "WHERE l.cliente_id = ? AND f.galeria_id = ?", (cid, gid)))
+print(json.dumps([sorted(r) for r in por_galeria.values() if r]))
+'''.replace("ANTES", repr(RENATO_ANTES_DEL_BOTON))
 MAX_INTENTOS_RENATO = 3
 
 
