@@ -154,7 +154,15 @@ def abrir_y_esperar(pend):
 
 def main():
     r = subprocess.run(["ssh", "fotosnas", "python3", "-"], input=SOLICITAR, capture_output=True,
-                       text=True, encoding="utf-8", check=True)
+                       text=True, encoding="utf-8")
+    if r.returncode:
+        # 11-12/10/2026: el 8TB quedo sin montar (NTFS sucio) y esto se caia con un traceback en
+        # silencio dos noches seguidas. Ahora avisa: sin la Pi no hay seleccion que editar.
+        detalle = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["sin detalle"]
+        log(f"no pude pedir las listas a la Pi (ssh {r.returncode}): {detalle[0]}")
+        avisar("Edicion de Renato: no llegue a la Pi",
+               f"ssh salio con {r.returncode}: {detalle[0][:150]}. ¿Esta montado el 8TB?")
+        return
     cola = COLA.read_text(encoding="utf-8") if COLA.exists() else "# id\torigen\tpreset_revelado\tpreset_exportacion\tdestino\tmarca_de_agua\tcoleccion\tnivelar\n"
     nuevos = 0
     for p in json.loads(r.stdout):
