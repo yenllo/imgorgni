@@ -161,6 +161,90 @@ local function nivelar(catalogo, fotos, id)
 	return n
 end
 
+-- Receta de edicion (edicion_ig.py, 14/10/2026): un .lua que devuelve
+--   { ["ruta del raw en minusculas"] = { ajustes = {...}, limpiar = bool,
+--       mascaras = { { tipo = "background", valores = { local_Exposure = -0.4, ... } }, ... } } }
+-- ajustes va con applyDevelopSettings; las mascaras de IA solo se pueden crear desde Revelar
+-- (LrDevelopController, SDK 12+), una foto a la vez.
+local function cargar_receta(ruta)
+	local f = io.open(ruta, "r")
+	if not f then error("no existe la receta " .. ruta) end
+	local codigo = f:read("*a")
+	f:close()
+	local fn, err = loadstring(codigo)
+	if not fn then error("receta invalida: " .. tostring(err)) end
+	return fn()
+end
+
+local function tiene_mascaras(p)
+	local m = p:getDevelopSettings().MaskGroupBasedCorrections
+	return type(m) == "table" and next(m) ~= nil -- # da 0 si no es lista: asi la v2 apilo mascaras
+end
+
+local function aplicar_mascaras(catalogo, fotos, receta)
+	local LrApplicationView = import "LrApplicationView"
+	local LrDevelopController = import "LrDevelopController"
+	LrApplicationView.switchToModule("develop")
+	LrTasks.sleep(3)
+	local n, aceptados, rechazados = 0, {}, {}
+	for _, p in ipairs(fotos) do
+		local r = receta[p:getRawMetadata("path"):lower()]
+		if r and r.mascaras then
+			catalogo:setSelectedPhotos(p, { p })
+			LrTasks.sleep(4) -- que Revelar cargue la foto
+			if r.limpiar then -- sin depender de tiene_mascaras: si no las ve, igual hay que borrarlas
+				local ok, err = LrTasks.pcall(LrDevelopController.resetMasking)
+				log("limpiar mascaras de " .. p:getFormattedMetadata("fileName") .. ": " .. tostring(ok) .. " " .. tostring(err or ""))
+				LrTasks.sleep(2)
+			end
+			if not tiene_mascaras(p) then -- volver a correr no apila mascaras
+				for _, m in ipairs(r.mascaras) do
+					LrDevelopController.createNewMask("aiSelection", m.tipo)
+					LrTasks.sleep(m.espera or 8) -- la IA calcula la seleccion
+					for k, v in pairs(m.valores) do
+						local ok = LrTasks.pcall(LrDevelopController.setValue, k, v)
+						if ok then aceptados[k] = true else rechazados[k] = true end
+					end
+				end
+				n = n + 1
+			end
+		end
+	end
+	local a, b = {}, {}
+	for k in pairs(aceptados) do a[#a + 1] = k end
+	for k in pairs(rechazados) do b[#b + 1] = k end
+	log("mascaras: aceptados " .. table.concat(a, ",") .. " | rechazados " .. table.concat(b, ","))
+	LrApplicationView.switchToModule("library")
+	return n
+end
+
+-- 14/10/2026: al exportar, Lightroom frenaba con "Actualizaciones de IA recomendadas" (mascaras y ruido
+-- IA recien puestos) hasta que alguien apretaba Exportar. photo:updateAISettings() (SDK 13.3) lo hace
+-- antes; en un bloque de escritura propio por foto: en el mismo bloque que los ajustes no recalcula.
+local function actualizar_ia(catalogo, fotos)
+	local bien, mal = 0, 0
+	for _, p in ipairs(fotos) do
+		local ok = LrTasks.pcall(function()
+			catalogo:withWriteAccessDo("IMGorgni: actualizar IA", function() p:updateAISettings() end,
+				{ timeout = 300 })
+		end)
+		if ok then bien = bien + 1 else mal = mal + 1 end
+	end
+	log("ajustes de IA actualizados: " .. bien .. " ok, " .. mal .. " con error")
+end
+
+local function exportar_previa(fotos, carpeta)
+	LrFileUtils.createAllDirectories(carpeta)
+	LrExportSession({ photosToExport = fotos, exportSettings = {
+		LR_export_destinationType = "specificFolder", LR_export_destinationPathPrefix = carpeta,
+		LR_export_useSubfolder = false, LR_format = "JPEG", LR_jpeg_quality = 0.85,
+		LR_export_colorSpace = "sRGB", LR_size_doConstrain = true, LR_size_resizeType = "longEdge",
+		LR_size_maxHeight = 1600, LR_size_maxWidth = 1600, LR_size_units = "pixels", LR_size_resolution = 72,
+		LR_outputSharpeningOn = false, LR_reimportExportedPhoto = false, LR_collisionHandling = "overwrite",
+		LR_minimizeEmbeddedMetadata = true, LR_renamingTokensOn = false, LR_useWatermark = false,
+	} }):doExportOnCurrentTask()
+end
+
 local function trabajo(catalogo, c)
 	local id, origen, nombre_rev, nombre_exp, destino, marca = c[1], c[2] or "", c[3] or "", c[4] or "", c[5] or "", c[6] or ""
 	local coleccion, con_nivelado = c[7] or "", (c[8] or "") == "si"
@@ -186,7 +270,8 @@ local function trabajo(catalogo, c)
 	end, { timeout = 600 })
 	if preset then
 		catalogo:withWriteAccessDo("IMGorgni: revelar " .. id, function()
-			for _, p in ipairs(fotos) do p:applyDevelopPreset(preset, _PLUGIN) end
+			-- true = actualiza tambien los ajustes de IA (SDK 13.3+), si no Lightroom pide hacerlo al exportar
+			for _, p in ipairs(fotos) do p:applyDevelopPreset(preset, _PLUGIN, true) end
 		end, { timeout = 600 })
 	end
 	local detalle = #fotos .. " fotos reveladas"
@@ -212,12 +297,27 @@ local function trabajo(catalogo, c)
 		end, { timeout = 600 })
 		detalle = detalle .. ", color del modelo en " .. n
 	end
+	local receta = (c[9] or "") ~= "" and cargar_receta(c[9]) or nil
+	if receta then -- antes de nivelar: si la receta trae el angulo de Renzo, nivelar no lo pisa
+		catalogo:withWriteAccessDo("IMGorgni: receta " .. id, function()
+			for _, p in ipairs(fotos) do
+				local r = receta[p:getRawMetadata("path"):lower()]
+				if r and r.ajustes then p:applyDevelopSettings(r.ajustes, "Receta IMGorgni") end
+			end
+		end, { timeout = 600 })
+	end
 	if con_nivelado then detalle = detalle .. ", " .. nivelar(catalogo, fotos, id) .. " niveladas" end
 	if coleccion ~= "" then
 		catalogo:withWriteAccessDo("IMGorgni: coleccion " .. coleccion, function()
 			catalogo:createCollection(coleccion, nil, true):addPhotos(fotos) -- true: reusa si ya existe
 		end, { timeout = 60 })
 		detalle = detalle .. " en '" .. coleccion .. "'"
+	end
+	if receta then detalle = detalle .. ", mascaras en " .. aplicar_mascaras(catalogo, fotos, receta) end
+	if (c[10] or "") ~= "" then
+		actualizar_ia(catalogo, fotos)
+		exportar_previa(fotos, c[10])
+		detalle = detalle .. ", previas en " .. c[10]
 	end
 	if not exp then return detalle .. " (sin exportar)" end
 
