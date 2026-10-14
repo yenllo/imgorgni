@@ -2,7 +2,7 @@
 
 Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, campos separados por TAB:
 
-	id	origen	preset_revelado	preset_exportacion	destino	marca_de_agua	coleccion	nivelar
+	id	origen	preset_revelado	preset_exportacion	destino	marca_de_agua	coleccion	nivelar	receta	previas	lado
 
 - origen: una carpeta (se importan todas sus fotos, recursivo) o un .txt con una ruta por linea.
 - preset_revelado: nombre del preset de Revelar a aplicar ("IMGorgni Basica"...). Vacio = no tocar
@@ -15,6 +15,10 @@ Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, camp
 - nivelar: "si" = nivelado 2D rapido del Encuadrador (Python, sin mouse): pone CropAngle y una
   calificacion de confianza (3 seguro, 2 probable, 1 revisala). Lo que no se pudo medir queda
   sin tocar y con 0 estrellas: ese es el filtro para pasarle despues la macro del boton "Automatico".
+
+- receta: .lua de edicion_ig.py con ajustes y mascaras de IA por foto (ver cargar_receta). Opcional.
+- previas: carpeta donde exportar JPEG para revisar; lado: lado largo en px (vacio = 1600, 0 = resolucion
+  completa calidad 100). Antes de exportar se actualizan los ajustes de IA (actualizar_ia).
 
 Lo terminado queda en hechos.tsv (id, ok|error, detalle, cuando): un trabajo "ok" no se repite; uno
 con error se reintenta en la proxima corrida. Detalle en plugin.log. Al terminar escribe fin.txt, que
@@ -233,13 +237,15 @@ local function actualizar_ia(catalogo, fotos)
 	log("ajustes de IA actualizados: " .. bien .. " ok, " .. mal .. " con error")
 end
 
-local function exportar_previa(fotos, carpeta)
+-- lado: lado largo en px (1.600 por defecto, para revisar); 0 = resolucion completa, calidad 100
+local function exportar_previa(fotos, carpeta, lado)
+	lado = tonumber(lado) or 1600
 	LrFileUtils.createAllDirectories(carpeta)
 	LrExportSession({ photosToExport = fotos, exportSettings = {
 		LR_export_destinationType = "specificFolder", LR_export_destinationPathPrefix = carpeta,
-		LR_export_useSubfolder = false, LR_format = "JPEG", LR_jpeg_quality = 0.85,
-		LR_export_colorSpace = "sRGB", LR_size_doConstrain = true, LR_size_resizeType = "longEdge",
-		LR_size_maxHeight = 1600, LR_size_maxWidth = 1600, LR_size_units = "pixels", LR_size_resolution = 72,
+		LR_export_useSubfolder = false, LR_format = "JPEG", LR_jpeg_quality = lado == 0 and 1.0 or 0.85,
+		LR_export_colorSpace = "sRGB", LR_size_doConstrain = lado > 0, LR_size_resizeType = "longEdge",
+		LR_size_maxHeight = lado, LR_size_maxWidth = lado, LR_size_units = "pixels", LR_size_resolution = 72,
 		LR_outputSharpeningOn = false, LR_reimportExportedPhoto = false, LR_collisionHandling = "overwrite",
 		LR_minimizeEmbeddedMetadata = true, LR_renamingTokensOn = false, LR_useWatermark = false,
 	} }):doExportOnCurrentTask()
@@ -316,7 +322,7 @@ local function trabajo(catalogo, c)
 	if receta then detalle = detalle .. ", mascaras en " .. aplicar_mascaras(catalogo, fotos, receta) end
 	if (c[10] or "") ~= "" then
 		actualizar_ia(catalogo, fotos)
-		exportar_previa(fotos, c[10])
+		exportar_previa(fotos, c[10], c[11])
 		detalle = detalle .. ", previas en " .. c[10]
 	end
 	if not exp then return detalle .. " (sin exportar)" end
