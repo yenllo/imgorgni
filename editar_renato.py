@@ -120,10 +120,12 @@ def lightroom_abierto():
     return "lightroom.exe" in r.stdout.lower()
 
 
-def abrir_y_esperar(pend):
+def abrir_y_esperar(pend, espera_min=ESPERA_MIN):
     """Deja la bandera, abre Lightroom si no estaba y espera fin.txt. El plugin (Inicio.lua) solo procesa
     con el catalogo Automatico abierto: si Renzo tenia abierto el suyo, no toca nada y se avisa."""
     antes = FIN.stat().st_mtime if FIN.exists() else 0
+    import ctypes   # que Windows no suspenda la notebook mientras Lightroom trabaja (de noche nadie la toca)
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
     (LR / "procesar_al_abrir").touch()
     if lightroom_abierto():
         log("Lightroom ya estaba abierto: no lanzo otro; procesa solo si tiene el catalogo Automatico")
@@ -132,12 +134,12 @@ def abrir_y_esperar(pend):
         # ShellExecute anda en los dos casos.
         os.startfile(LR_EXE, arguments=f'"{CATALOGO}"')
         log("Lightroom abriendo con el catalogo Automatico")
-    for _ in range(ESPERA_MIN):
+    for _ in range(espera_min):
         time.sleep(60)
         if FIN.exists() and FIN.stat().st_mtime > antes:
             break
     else:
-        log(f"Lightroom no proceso la cola en {ESPERA_MIN} min")
+        log(f"Lightroom no proceso la cola en {espera_min} min")
         avisar("Lightroom no edito lo de Renato",
                f"{len(pend)} trabajo(s) siguen pendientes. Revisa _lightroom/plugin.log")
         return

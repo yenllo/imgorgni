@@ -113,9 +113,11 @@ def contraluz(ruta):
     return r["jugador_vs_fondo"] < -0.3, r
 
 
-def receta(carpeta, limpiar=False):
+def receta(carpeta, limpiar=False, fecha_catalogo=None):
+    """fecha_catalogo: como se llama la carpeta de esa fecha en el catalogo, si no es la misma que la local
+    (la F9 en el catalogo es "11-07-2026(FINAL)")."""
     from color_modelo import predecir
-    renzo = ediciones_de_renzo(Path(carpeta).parent.name)
+    renzo = ediciones_de_renzo(fecha_catalogo or Path(carpeta).parent.name)
     rutas = sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw")
     modelo = predecir(rutas)
     out, resumen = {}, []
@@ -157,11 +159,14 @@ def main():
     carpeta, jid = sys.argv[1], sys.argv[2]
     version = sys.argv[sys.argv.index("--version") + 1] if "--version" in sys.argv else "1"
     jid = f"{jid}-v{version}"
-    datos, resumen = receta(carpeta, limpiar=version != "1")   # las versiones nuevas rehacen las mascaras
+    arg = lambda k, d=None: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
+    datos, resumen = receta(carpeta, limpiar=version != "1", fecha_catalogo=arg("--fecha-catalogo"))
     archivo = LR / f"receta_{jid}.lua"
     archivo.write_text("return " + lua(datos) + "\n", encoding="utf-8")
-    previas = LR / "previas" / jid
-    linea = (f"{jid}\t{carpeta}\tIMGorgni Completa base\t\t\t\tF3 Instagram (Claude)\tsi\t{archivo}\t{previas}\n")
+    previas = Path(arg("--salida", LR / "previas" / jid))
+    lado = arg("--lado", "")                        # "0" = resolucion completa
+    coleccion = arg("--coleccion", f"{Path(carpeta).parent.name} Instagram (Claude)")
+    linea = f"{jid}\t{carpeta}\tIMGorgni Completa base\t\t\t\t{coleccion}\tsi\t{archivo}\t{previas}\t{lado}\n"
     cola = (LR / "cola.tsv").read_text(encoding="utf-8")
     if f"\n{jid}\t" not in "\n" + cola:
         (LR / "cola.tsv").write_text(cola + linea, encoding="utf-8")

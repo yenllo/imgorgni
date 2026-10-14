@@ -3588,7 +3588,10 @@ def _veredictos(d):
 
 @app.get("/panel/revision")
 def revision_indice():
+    """Las fechas agrupadas por categoria (la liga), las secciones con lo mas reciente primero
+    (pedido de Renzo, 14/10/2026: con varias ligas la lista plana ya no se leia)."""
     trabajos = []
+    propias = _categorias()
     if REVISION.is_dir():
         for d in sorted(REVISION.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if not any((d / f).exists() for f in SECCIONES.values()):
@@ -3598,11 +3601,51 @@ def revision_indice():
             pasa = sum(1 for x in v.values() if x.get("pasa"))
             buenas = sum(1 for x in v.values() if x.get("buena"))
             trabajos.append({"nombre": d.name, "url": urllib.parse.quote(d.name), "n": n, "pasa": pasa,
+                             "categoria": categoria_de(d.name, propias),
                              "buenas": buenas, "no": len(v) - pasa - buenas,
                              "faltan": n - len(v),
                              "fecha": datetime.fromtimestamp(d.stat().st_mtime).strftime("%d/%m %H:%M")})
+    secciones = {}
+    for x in trabajos:
+        secciones.setdefault(x["categoria"], []).append(x)
     return render_template_string(BASE_HTML, cuerpo=render_template_string(
-        PANEL_REVISION_INDICE, trabajos=trabajos))
+        PANEL_REVISION_INDICE, trabajos=trabajos, secciones=list(secciones.items())))
+
+
+CATEGORIAS = REVISION / "categorias.json"   # {trabajo: categoria} que Renzo eligio a mano en el panel
+
+
+def _categorias():
+    try:
+        return json.loads(CATEGORIAS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def categoria_de(nombre, propias):
+    """La que Renzo eligio, o la liga: lo que va antes del primer " - ", sin una fecha al final
+    ("LigaUandes Max 24-09-2026" -> "LigaUandes Max")."""
+    if propias.get(nombre):
+        return propias[nombre]
+    base = nombre.split(" - ", 1)[0]
+    return re.sub(r"\s+\d{1,2}-\d{1,2}-\d{4}$", "", base).strip() or "Otros"
+
+
+@app.post("/panel/revision-categoria")
+def revision_categoria():
+    """Mueve una fecha a otra categoria; vacio la devuelve a su liga."""
+    trabajo = (request.form.get("t") or "").strip()
+    cat = (request.form.get("c") or "").strip()[:60]
+    _trabajo(trabajo)                       # 404 si no existe o se sale de _para_publicar
+    propias = _categorias()
+    if cat:
+        propias[trabajo] = cat
+    else:
+        propias.pop(trabajo, None)
+    tmp = CATEGORIAS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(propias, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, CATEGORIAS)
+    return redirect("/panel/revision")
 
 
 @app.get("/panel/revision/<path:trabajo>")
@@ -7118,13 +7161,27 @@ PANEL_REVISION_INDICE = PANEL_CSS + PANEL_BARRA + """<main>
 <p class="migas">Las selecciones que arma Claude cada noche. Tu decides que pasa a edicion:
 lo que pasa queda en <code>_para_publicar/&lt;trabajo&gt;/aprobadas</code> del NAS.</p>
 {% if not trabajos %}<p>No hay selecciones todavia.</p>{% endif %}
-<ul class="evs">
-{% for t in trabajos %}<li><a href="/panel/revision/{{ t.url }}">
+<style>
+.revcat li{display:flex;align-items:center;gap:.5rem;border-bottom:1px solid var(--linea)}
+.revcat li a{flex:1;min-width:0;border-bottom:0}
+.revcat form input{width:8.5rem;font-size:.75rem;padding:.25rem .4rem;background:transparent;
+  color:inherit;border:1px solid var(--linea);border-radius:4px}
+@media (max-width:700px){.revcat form{display:none}}
+</style>
+{% for cat, ts in secciones %}
+<h3>{{ cat }} &middot; {{ ts|length }}</h3>
+<ul class="evs revcat">
+{% for t in ts %}<li><a href="/panel/revision/{{ t.url }}">
 <span class="fec">{{ t.fecha }}</span>
 <span class="nom">{{ t.nombre }}</span>
 <span class="n">{% if t.faltan %}<b>{{ t.faltan }} por revisar</b> &middot; {% endif %}{{ t.pasa }} pasan &middot; {% if t.buenas %}{{ t.buenas }} buenas &middot; {% endif %}{{ t.no }} no</span>
-</a></li>{% endfor %}
+</a>
+<form method="post" action="/panel/revision-categoria"><input type="hidden" name="t" value="{{ t.nombre }}">
+<input name="c" list="cats" placeholder="Mover a..." aria-label="Categoria de {{ t.nombre }}" onchange="this.form.submit()"></form>
+</li>{% endfor %}
 </ul>
+{% endfor %}
+<datalist id="cats">{% for cat, _ in secciones %}<option value="{{ cat }}">{% endfor %}</datalist>
 </main>"""
 
 PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>

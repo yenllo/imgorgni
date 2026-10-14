@@ -322,6 +322,7 @@ local function trabajo(catalogo, c)
 	if receta then detalle = detalle .. ", mascaras en " .. aplicar_mascaras(catalogo, fotos, receta) end
 	if (c[10] or "") ~= "" then
 		actualizar_ia(catalogo, fotos)
+		actualizar_ia(catalogo, fotos) -- 2a pasada: la de la F3 dejo 1 de 13 esperando un clic; si ya esta al dia tarda 1 s
 		exportar_previa(fotos, c[10], c[11])
 		detalle = detalle .. ", previas en " .. c[10]
 	end
