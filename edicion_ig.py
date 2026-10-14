@@ -38,6 +38,7 @@ TIPICOS = {"Tint": 30, "Contrast2012": 15, "Highlights2012": -60, "Shadows2012":
 # v2 (14/10/2026, mirando la v1 al lado de las suyas): el pasto hacia el amarillo y mas oscuro quedo
 # oliva y sucio, y la mascara de fondo a -0,4 EV (la IA mete el pasto en el "fondo", media foto) mas la
 # vinyeta apagaban todo. Renzo edita luminoso y con el pasto verde vivo: eso se respeta.
+RECORTE_DERECHO = 0.984   # 1 - 128/7952: la franja mide ~120 px (medida en la DSC07893, 14/10)
 MEJORAS = {
     "ColorGradeHighlightHue": 45, "ColorGradeHighlightSat": 10,
     "ColorGradeShadowHue": 215, "ColorGradeShadowSat": 5, "ColorGradeBlending": 50,
@@ -134,12 +135,19 @@ def receta(carpeta, limpiar=False):
         aj.update(MEJORAS)
         aj["WhiteBalance"] = "Custom" if "Temperature" in aj else aj.get("WhiteBalance", "As Shot")
         aj["Vibrance"] = (aj.get("Vibrance") or 0) + 4
+        # la reduccion de ruido de Lightroom mete una franja en el borde derecho del sensor de la a7R III
+        # (memoria lightroom-denoise-franja-morada): ~128 px fuera siempre. Se vio en la v3 del 14/10.
+        aj.setdefault("CropLeft", 0), aj.setdefault("CropTop", 0), aj.setdefault("CropBottom", 1)
+        aj["CropRight"] = min(aj.get("CropRight") or 1, RECORTE_DERECHO)
+        aj["HasCrop"] = True
         luz, r = contraluz(ruta)
         sujeto = dict(SUJETO)
         if luz:
             sujeto.update(local_Exposure=0.5, local_Shadows=25)
         out[str(ruta).lower()] = {"ajustes": aj, "limpiar": limpiar, "mascaras": [
-            {"tipo": "background", "valores": FONDO}, {"tipo": "subject", "valores": sujeto}]}
+            # 12 s por mascara: con 8 la de sujeto de la DSC08104 no alcanzaba a calcularse (14/10)
+            {"tipo": "background", "valores": FONDO, "espera": 12},
+            {"tipo": "subject", "valores": sujeto, "espera": 12}]}
         resumen.append(f"{ruta.name}: base {de}, {aj.get('Temperature')} K, exp {aj.get('Exposure2012')}"
                        f"{', contraluz' if luz else ''} (jugador/fondo {r['jugador_vs_fondo']:+.2f})")
     return out, resumen
