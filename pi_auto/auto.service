@@ -1,0 +1,12 @@
+[Unit]
+Description=Recorridos del auto (ingesta del ESP32 + pagina de viajes)
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/yenllo/auto
+ExecStart=/usr/bin/python3 /home/yenllo/auto/auto.py servir
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
