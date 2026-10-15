@@ -8,6 +8,29 @@ agy describió fotos equivocadas y en headless no puede escribir archivos. El gu
 (cliente de la Liga ExScuola) vive en `data/apuntes_renato.md`; cada selección nocturna deja su
 apunte en `_para_publicar/bitacora.md`. La regla general de delegar a agy sigue valiendo para el resto.
 
+## Mapa del repo (ordenado el 15/10/2026)
+
+La raiz tenia 445 archivos sueltos. Quedaron solo los puntos de entrada y los
+modulos que alguien importa:
+
+| Carpeta | Que hay | Ojo con |
+|---|---|---|
+| raiz | pipeline (`1_indexado.py`..`5_duplicados.py`), `main.py`, `db.py`, `app.py`, `web_curador.py`, `galeria.py`, `utils_*.py`, los `.bat`/`.ps1`/`.sh`, `config.json`, `config_K.json`, `photos_v2.db` | no mover nada de aca sin revisar los 25 lanzadores: una ruta rota ahi falla recien cuando corre la tarea programada |
+| `mantenimiento/` | auditoria y rescate: `fase4_*`, `fase5_*`, `fase6_quirurgico.py`, `marcar_ausentes.py`, `verificar_*`, `refrescar_hashes.py` | cada uno abre con `_ROOT`/`_HERE` en `sys.path`; los datos (base, cache, logs) los busca en la RAIZ, no en su carpeta |
+| `tests/` | los 17 test de `pytest` + `conftest.py` | `pytest.ini` acota la coleccion a `tests/`: afuera hay scripts de prueba que trabajan al importarse |
+| `docs/` | guias, runbooks, bitacoras y specs | `CLAUDE.md` y `README.md` se quedan en la raiz |
+| `archivo_historico/` | ~80 scripts de una sola vez ya cumplidos (migraciones de `E:`, `F:`, `G:`) y `pruebas_manuales/` | estan en Git a proposito: documentan como se hizo cada migracion |
+| `configs_historicos/` | los 7 `config_*.json` de unidades muertas | el unico config vivo es `config_K.json`; `config.json` es su copia porque muchos scripts lo usan por defecto |
+| `_salidas_locales/` | `csv/`, `txt_reportes/`, `scratch_sesion/`, el cache de huellas | **ignorada por Git**. Los 77 `.log`/`.err`/`.out` de corridas viejas se borraron |
+
+**Guardia contra el disco caido:** `db.verificar_disco_montado(root)` corta si el
+NAS no esta montado o monto a medias. Lo llaman `1_indexado.py`,
+`5_duplicados.py`, `verificar_sistema.py`, `vaiven_8tb.py` y
+`mantenimiento/marcar_ausentes.py`. Existe porque el 15/10/2026 un corte de luz
+tumbo el NAS un segundo y, con el punto de montaje vacio, un barrido habria
+dado por ausentes las 139.760 filas de la base.
+
+
 ## Delegar trabajo a Antigravity (agy)
 
 El protocolo general está en `~/.claude/CLAUDE.md` y vale para todos los proyectos.
