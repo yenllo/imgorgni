@@ -26,6 +26,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from db import DiscoCaido, verificar_disco_montado
+
 ORIGEN = Path("E:/")
 PUENTES = [Path(r"C:\_ferry_E")]
 HECHO = Path("ferry_hecho.txt")
@@ -122,7 +124,15 @@ def main():
         return
     letra = sys.argv[1].rstrip(":")
 
+    # "existe la letra" no alcanza: un montaje a medias se ve vacio y el
+    # drenaje copiaria sobre un disco que no esta (corte del 15/10/2026)
     tb_conectado = Path(f"{letra}:\\").exists()
+    if tb_conectado:
+        try:
+            verificar_disco_montado(f"{letra}:\\")
+        except DiscoCaido as e:
+            print("el 8TB no esta listo: %s" % e)
+            return
     e_conectado = ORIGEN.exists()
 
     if tb_conectado:

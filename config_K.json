@@ -1,16 +1,20 @@
 {
-  "_nota": "Todo el material vive en K: (8TB). Excluye Fotos_Organizadas_IA_v3 porque es la SALIDA de la Fase 4: si se indexa, la Fase 1 la detecta como duplicado exacto y la mueve entera a _duplicados_contenido.",
+  "_nota": "Todo el material vive en K: (8TB). Desde la limpieza del 15/10/2026 las fotos cuelgan de K:\\Fotos\\ (Galeria, AOrdenar, Lightroom_extraido, DCIM_Jpeg_2026, _Telefono, Backup) y lo dudoso de K:\\_Cuarentena\\. Fotos_Organizadas_IA_v3, Fotos_Organizadas, _duplicados_contenido y _duplicados_cuarentena ya no existen.",
   "_nota_exclude": "OJO: exclude_dirs se compara como SUBCADENA contra la ruta completa, no como nombre de carpeta. 'Descargas' estaba aca y de paso se comia K:\\Fotos_F_rescatadas\\Descargas\\ (124 fotos reales). Poner solo nombres que no puedan aparecer anidados.",
+  "_nota_facet": "_facet_train son 9.158 hardlinks a Fotos\\Galeria: si se indexa, la Fase 1 los ve como duplicados exactos de la galeria y los manda a cuarentena. Por eso esta excluido.",
   "root_dir": "K:\\",
   "db_path": "C:\\Renzo\\Proyectos\\IMGorgni\\photos_v2.db",
   "exclude_dirs": [
-    "Fotos_Organizadas_IA_v3",
-    "$RECYCLE.BIN"
+    "$RECYCLE.BIN",
+    "_facet_train",
+    "_Cuarentena",
+    "_previews",
+    "_para_publicar"
   ],
   "watermark_path": null,
   "discard_watermark_dir": "_descartadas_watermark",
   "discard_mobile_dir": "_descartadas_movil_screenshot",
-  "discard_duplicates_dir": "_duplicados_contenido",
+  "discard_duplicates_dir": "_Cuarentena\\duplicados_contenido",
   "watermark_threshold": 0.85,
   "yolo_onnx_path": "",
   "feature_model_onnx_path": "C:\\Renzo\\Proyectos\\IMGorgni\\models\\visual\\model.onnx",

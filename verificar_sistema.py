@@ -6,6 +6,8 @@ Para el Organizador de Fotos con IA
 import os
 import json
 import sys
+
+from db import DiscoCaido, verificar_disco_montado
 from pathlib import Path
 
 for _s in (sys.stdout, sys.stderr):
@@ -90,11 +92,27 @@ def main():
     
     # Rutas base: el proyecto es esta carpeta; las fotos salen de config.json
     project_dir = Path(__file__).parent.resolve()
+    # config_K.json primero: config.json apunta a una carpeta que ya no existe
+    # (C:\...\IMGorgniotos) desde que todo vive en K:
+    photos_dir = project_dir / "fotos"
+    for nombre in ("config_K.json", "config.json"):
+        try:
+            with open(project_dir / nombre, "r", encoding="utf-8") as f:
+                candidato = Path(json.load(f)["root_dir"])
+            if candidato.exists():
+                photos_dir = candidato
+                break
+        except Exception:
+            continue
+
+    # Si el NAS no esta montado, TODO va a dar "falta": se dice una vez y se
+    # corta, en vez de reportar 136.260 fotos ausentes por un cable flojo.
     try:
-        with open(project_dir / "config.json", "r", encoding="utf-8") as f:
-            photos_dir = Path(json.load(f)["root_dir"])
-    except Exception:
-        photos_dir = project_dir / "fotos"
+        verificar_disco_montado(str(photos_dir))
+    except DiscoCaido as e:
+        print("   NAS CAIDO: %s" % e)
+        print("   Revisa el cable o el montaje y volve a correr esto.")
+        sys.exit(2)
     
     print("ðŸ“‚ VERIFICACIÃ“N DE DIRECTORIOS:")
     print("-" * 40)

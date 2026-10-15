@@ -14,6 +14,36 @@ import sqlite3
 from typing import List, Tuple, Dict, Optional
 
 
+class DiscoCaido(RuntimeError):
+    """El NAS no esta montado. Se levanta antes de tocar la base, no despues."""
+
+
+def verificar_disco_montado(root_path: str, exigir: str = "Fotos/Galeria") -> None:
+    """Corta si el NAS no responde, ANTES de marcar huerfanos o borrar nada.
+
+    El 15/10/2026 a las 07:42 un corte de luz reinicio la Pi y de paso tumbo un
+    segundo el gabinete USB del 8TB. En ese instante `os.path.exists()` devolvia
+    False para TODO, y un script que marcaba ausentes habria dado por perdidas
+    las 139.760 filas de la base. No alcanza con que exista la raiz: una unidad
+    de red caida o un automount a medias deja el punto de montaje visible pero
+    vacio, por eso ademas se exige una carpeta conocida con algo adentro.
+    """
+    import os
+
+    raiz = os.path.abspath(root_path)
+    if not os.path.isdir(raiz):
+        raise DiscoCaido("el NAS no esta montado: no existe %s" % raiz)
+    adentro = os.path.join(raiz, *exigir.replace("\\", "/").split("/"))
+    if not os.path.isdir(adentro):
+        raise DiscoCaido("el NAS respondio pero falta %s: montaje a medias" % adentro)
+    try:
+        next(os.scandir(adentro))
+    except StopIteration:
+        raise DiscoCaido("%s esta vacia: el disco no termino de montar" % adentro)
+    except OSError as e:
+        raise DiscoCaido("no puedo leer %s: %s" % (adentro, e))
+
+
 def get_conn(db_path: str, check_same_thread: bool = True, read_only: bool = False) -> sqlite3.Connection:
     if read_only:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,

@@ -28,7 +28,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from db import get_conn
+from db import get_conn, verificar_disco_montado
 from utils_images import SUPPORTED_RAW_EXTS
 from utils_log import Spinner, log_step
 
@@ -283,6 +283,9 @@ def run(config_path: str = "config.json", umbral: int = 5,
         incluir_raw_jpg: bool = False, salida_csv: str = "duplicados.csv"):
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
+
+    # con el disco caido, TODO parece duplicado ausente: se corta antes
+    verificar_disco_montado(cfg["root_dir"])
 
     conn = get_conn(cfg["db_path"])
     vivos, args_vivos = _filtro_vivos(conn)

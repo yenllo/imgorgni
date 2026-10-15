@@ -7,7 +7,7 @@ import threading
 from tqdm import tqdm
 from utils_log import Spinner, log_step
 
-from db import get_conn, init_db, enable_fast_writes, fetch_all_hashes, fetch_all_paths, upsert_file_nocommit
+from db import get_conn, init_db, enable_fast_writes, fetch_all_hashes, fetch_all_paths, upsert_file_nocommit, verificar_disco_montado
 from utils_images import is_image_file, compute_sha256, read_exif_info, detect_watermark, move_to_discard, mobile_or_screenshot, SUPPORTED_RAW_EXTS
 
 
@@ -88,7 +88,12 @@ def index_directory(root_dir: str, watermark_path: str | None, discard_duplicate
     """
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    
+
+    # Sin disco no se indexa NI se marca nada: el 15/10/2026 un corte de luz
+    # tumbo el NAS un segundo y, con el punto de montaje vacio, un barrido
+    # habria dado por ausentes las 139.760 filas de la base.
+    verificar_disco_montado(cfg.get("root_dir", root_dir))
+
     conn = get_conn(cfg["db_path"])
     init_db(conn)
     
