@@ -250,11 +250,13 @@ def claude_texto(prompt, carpeta, modelo):
     exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
     # Sin esto cada llamada cargaba ~50 mil tokens antes de la primera foto (prompt de Claude Code,
     # todas las herramientas, MCP, skills): medido en la prueba del 1/10. Solo hace falta Read.
-    r = subprocess.run([exe, "-p", prompt, "--model", modelo, "--output-format", "json",
+    # El prompt va por stdin: `claude` es claude.CMD y cmd.exe corta argv en el primer salto de linea,
+    # llevandose ademas todos los flags de despues (14/10: llego solo la 1a linea, sin --tools ni json).
+    r = subprocess.run([exe, "-p", "--model", modelo, "--output-format", "json",
                         "--tools", "Read", "--allowedTools", "Read", "--strict-mcp-config",
                         "--disable-slash-commands", "--system-prompt", SISTEMA],
-                       cwd=str(carpeta), capture_output=True,
-                       stdin=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=3600)
+                       cwd=str(carpeta), capture_output=True, input=prompt,
+                       text=True, encoding="utf-8", timeout=3600)
     if r.returncode:
         raise RuntimeError(f"claude -p salio con {r.returncode}: {r.stdout[-400:]} {r.stderr[-400:]}")
     salida = json.loads(r.stdout)
