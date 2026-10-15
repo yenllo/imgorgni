@@ -5,6 +5,17 @@ truncados los cruza por nombre de archivo contra hermanos sanos (mismo disparo,
 otra extension/version) para sugerir un reemplazo. No copia ni borra nada:
 solo actualiza `ancho`/`alto` de los que resultaron sanos y deja un reporte.
 """
+
+import sys
+from pathlib import Path as _Path
+
+# Este script vive en mantenimiento/ pero los modulos (db.py, utils_*) y los
+# datos (photos_v2.db, _salidas_locales/) viven en la raiz del repo.
+_ROOT = _Path(__file__).resolve().parent.parent
+_HERE = _Path(__file__).resolve().parent
+for _p in (str(_ROOT), str(_HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 import os
 import re
 import sqlite3

@@ -8,13 +8,24 @@ compara: si alguna difiere, algo se rompio y hay que volver atras.
     python verificar_tags.py                 # sobre photos_v2.db del proyecto
     python verificar_tags.py otra_base.db
 """
+
+import sys
+from pathlib import Path as _Path
+
+# Este script vive en mantenimiento/ pero los modulos (db.py, utils_*) y los
+# datos (photos_v2.db, _salidas_locales/) viven en la raiz del repo.
+_ROOT = _Path(__file__).resolve().parent.parent
+_HERE = _Path(__file__).resolve().parent
+for _p in (str(_ROOT), str(_HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 import json
 import sqlite3
 import sys
 import time
 from pathlib import Path
 
-DB = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parent / "photos_v2.db")
+DB = sys.argv[1] if len(sys.argv) > 1 else str(_ROOT / "photos_v2.db")
 
 
 def main():

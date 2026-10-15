@@ -11,6 +11,8 @@ Lo que tiene que cumplir:
 """
 import os
 import sqlite3
+
+import pytest
 import sys
 import tempfile
 
@@ -34,6 +36,20 @@ CREATE TABLE duplicados (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT, razon 
     mb REAL, ruta_conservar TEXT, ruta_descartar TEXT, id_conservar INT,
     id_descartar INT, decision TEXT DEFAULT 'pendiente', score INT DEFAULT -1,
     ambos_corruptos INT);"""
+
+
+@pytest.fixture
+def w(tmp_path, monkeypatch):
+    """web_curador con un duplicados.csv de prueba en el directorio actual.
+
+    El archivo nacio para correrse a mano (ver main() abajo): ahi `w` era el
+    modulo que se pasaba por parametro. Bajo pytest, `w` parecia una fixture
+    que no existia y los tres tests daban error de setup.
+    """
+    (tmp_path / "duplicados.csv").write_text(CSV, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    import web_curador
+    return web_curador
 
 
 def _base():

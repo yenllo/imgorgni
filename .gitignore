@@ -4,6 +4,7 @@
 /*
 
 !/.gitignore
+!/pytest.ini
 !/*.py
 !/*.md
 !/*.ps1
@@ -35,3 +36,13 @@ __pycache__/
 
 # edicion automatica de Lightroom (plugin)
 !/lightroom/
+
+# carpetas del orden del 15/10/2026 (la lista blanca de arriba tapa lo nuevo)
+!/mantenimiento/
+!/tests/
+!/docs/
+!/archivo_historico/
+!/configs_historicos/
+
+# salidas de corridas: se guardan, no se versionan
+/_salidas_locales/

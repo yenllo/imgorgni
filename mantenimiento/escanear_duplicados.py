@@ -11,13 +11,23 @@ borrar por espacio. Detecta:
     python escanear_duplicados.py --solo-exactos "F:/" "E:/Adobe"   # rápido
     python escanear_duplicados.py --umbral 6 --csv dups.csv  ...
 """
+
+import sys
+from pathlib import Path as _Path
+
+# Este script vive en mantenimiento/ pero los modulos (db.py, utils_*) y los
+# datos (photos_v2.db, _salidas_locales/) viven en la raiz del repo.
+_ROOT = _Path(__file__).resolve().parent.parent
+_HERE = _Path(__file__).resolve().parent
+for _p in (str(_ROOT), str(_HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 import argparse
 import sys
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-sys.path.insert(0, ".")
 from utils_images import compute_sha256, load_image_array, is_image_file, SUPPORTED_RAW_EXTS
 from utils_analisis import phash as calc_phash
 from utils_log import Spinner, log_step

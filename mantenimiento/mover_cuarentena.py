@@ -14,6 +14,17 @@ de su grupo exista en disco**. Sin eso, un grupo cuyo keeper se perdio en el
 camino te dejaria sin ninguna copia. Es la unica forma de que esto pierda datos,
 asi que es la unica condicion que aborta el archivo entero.
 """
+
+import sys
+from pathlib import Path as _Path
+
+# Este script vive en mantenimiento/ pero los modulos (db.py, utils_*) y los
+# datos (photos_v2.db, _salidas_locales/) viven en la raiz del repo.
+_ROOT = _Path(__file__).resolve().parent.parent
+_HERE = _Path(__file__).resolve().parent
+for _p in (str(_ROOT), str(_HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 import csv
 import os
 import sys
