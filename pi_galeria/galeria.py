@@ -7219,7 +7219,7 @@ PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
 </style><main>
 <h1 class="tit">{{ nombre }}</h1>
 <p class="migas"><a href="/panel/revision">&larr; revision</a> &middot;
-<span id="resumen">{{ pasan }} pasan &middot; {{ faltan ~ ' por revisar' if faltan else 'revision completa' }}</span>{% if fotos_r %} &middot; <a href="#renato">top de Renato</a>{% endif %}</p>
+<span id="resumen">{{ pasan }} pasan &middot; {{ faltan ~ ' por revisar' if faltan else 'revision completa' }}</span>{% if fotos_r %} &middot; <a href="#renato">top del cliente</a>{% endif %}</p>
 {% macro tarjeta(f, s) %}
 <figure id="{{ 'r' if s else 'f' }}{{ f.n }}" class="{{ f.veredicto }}"
   data-orig="{{ f.original }}" data-img="/panel/revision-foto/{{ url }}/{{ f.n }}{{ '?s=' ~ s if s }}">
@@ -7238,7 +7238,7 @@ PANEL_REVISION = PANEL_CSS + PANEL_BARRA + """<style>
 {% if fotos %}<h3>Seleccion de Claude &middot; {{ fotos|length }} del carrete</h3>
 {% if apunte %}<p class="apunte">{{ apunte }}</p>{% endif %}
 <div class="rev">{% for f in fotos %}{{ tarjeta(f, '') }}{% endfor %}</div>{% endif %}
-{% if fotos_r %}<h3 id="renato">Top {{ fotos_r|length }} de la seleccion de Renato{% if de_r %} &middot; de sus {{ de_r }}{% endif %}</h3>
+{% if fotos_r %}<h3 id="renato">Top {{ fotos_r|length }} de la seleccion del cliente{% if de_r %} &middot; de sus {{ de_r }}{% endif %}</h3>
 <div class="rev">{% for f in fotos_r %}{{ tarjeta(f, 'renato') }}{% endfor %}</div>{% endif %}
 </div>
 <aside id="barra"><h3>Para subir &middot; <span id="nsub">0</span></h3><div id="lista"></div></aside>

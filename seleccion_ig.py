@@ -53,7 +53,7 @@ from PIL import Image, ImageOps
 AQUI = Path(__file__).resolve().parent
 SALIDA = AQUI / "_para_publicar"
 COLA = SALIDA / "cola.txt"
-CRITERIO = (AQUI / "criterio_ig.md").read_text(encoding="utf-8")
+CRITERIO = (AQUI / "docs" / "criterio_ig.md").read_text(encoding="utf-8")   # docs/ desde el orden del 15/10/2026
 AUTOCULL_DIR = AQUI  # el paquete autocull/ vive en este proyecto
 AUTOCULL_PY = Path(r"C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe")  # el venv no se mueve
 NTFY = AQUI / "ntfy_tema.txt"  # tema privado de ntfy (una linea). Fuera de git: la lista blanca no incluye .txt
@@ -471,7 +471,7 @@ def procesar(base, trabajo):
 # Corre en la Pi: los JPEG de todas las listas del cliente que apreto "Termine mi seleccion".
 # Galerias que Renato eligio ANTES de que existiera el boton "Termine" (1/10/2026): F1 13/9 y F2 26/9.
 # Nunca van a aparecer en seleccion_lista; ojo que meterlas ahi dispararia tambien editar_renato.py.
-RENATO_ANTES_DEL_BOTON = (9, 16)
+RENATO_ANTES_DEL_BOTON = (9, 16, 5, 14)   # + las 2 de LigaBabbo (el cliente eligio 140 en cada una; 15/10)
 CONSULTA_RENATO = r'''
 import json, sqlite3
 c = sqlite3.connect("/home/yenllo/galeria/galeria.db")
@@ -523,9 +523,9 @@ def procesar_renato(base, trabajo, rutas):
     carpeta = SALIDA / evento
     log(f"=== top de Renato: {evento} ({len(rutas)} fotos)")
     ver = carpeta / "ver_renato"
-    mapa = achicar(rutas, ver, PX_RENATO)
-    contexto = (f"{evento}. Estas {len(mapa)} fotos ya las eligio el cliente (Renato, organizador de la "
-                f"liga) de todo el carrete: elige las mejores para el Instagram del fotografo")
+    mapa = achicar(rutas, ver, PX_RENATO if len(rutas) <= 110 else 896)   # 140 a 1024 px no caben juntas
+    contexto = (f"{evento}. Estas {len(mapa)} fotos ya las eligio el cliente (el organizador de la liga) "
+                f"de todo el carrete: elige las mejores para el Instagram del fotografo")
     elegidas, apunte, uso = claude(ver, list(mapa), contexto, TOP_RENATO)
     elegidas, uso_b = detallar(ver, elegidas, evento)
     for n, e in enumerate(elegidas, 1):
@@ -537,7 +537,7 @@ def procesar_renato(base, trabajo, rutas):
     nas = Path(base).parents[2] / "_para_publicar" / evento
     nas.mkdir(parents=True, exist_ok=True)
     shutil.copy2(carpeta / "renato.json", nas / "renato.json")
-    avisar(f"Top {len(elegidas)} de la seleccion de Renato", evento, PANEL + urllib.parse.quote(evento))
+    avisar(f"Top {len(elegidas)} de la seleccion del cliente", evento, PANEL + urllib.parse.quote(evento))
     log(f"top de Renato listo: {len(elegidas)} de {len(mapa)}")
 
 
