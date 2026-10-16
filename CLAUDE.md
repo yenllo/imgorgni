@@ -8,6 +8,11 @@ agy describió fotos equivocadas y en headless no puede escribir archivos. El gu
 (cliente de la Liga ExScuola) vive en `data/apuntes_renato.md`; cada selección nocturna deja su
 apunte en `_para_publicar/bitacora.md`. La regla general de delegar a agy sigue valiendo para el resto.
 
+**Todo `claude -p` lanzado desde un script lleva `--max-turns`** (en `seleccion_ig.py`: `claude_texto(...,
+max_turnos)` y `turnos_para(n_imagenes)`). El 16/10/2026, sin tope, Sonnet no pudo retener 80 fotos y
+entro en loop releyendolas: 2.184 Read, 1.093 turnos, 4 M de tokens de salida y un transcript de 1,13 GB
+en 39 min, hasta que la API corto por cuota. Por eso tambien `MAX_A_CLAUDE` volvio a 60.
+
 ## Mapa del repo (ordenado el 15/10/2026)
 
 La raiz tenia 445 archivos sueltos. Quedaron solo los puntos de entrada y los
