@@ -129,7 +129,9 @@ def espejo_local(trabajo):
     que el NAS, o None. Leer local es ~100x mas rapido: el 7/10, fuera de casa por Tailscale, Autocull iba
     a 0,09 fotos/s (la F3 eran ~6 h) y la F3 estaba copiada en la notebook."""
     nas = None
-    for c in (AQUI / "TrabajoFotografico").glob(f"*/{trabajo.name}"):
+    # _espejos/: copias achicadas que arma la Pi (espejo en la Pi, 16/10/2026) cuando se trabaja fuera de casa
+    candidatas = list((AQUI / "TrabajoFotografico").glob(f"*/{trabajo.name}")) + list((AQUI / "_espejos").glob(f"*/{trabajo.name}"))
+    for c in candidatas:
         nas = nas if nas is not None else {os.path.relpath(f, trabajo) for f in jpegs(trabajo)}
         if nas and {os.path.relpath(f, c) for f in jpegs(c)} == nas:
             return c

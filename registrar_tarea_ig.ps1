@@ -32,6 +32,9 @@ Register-ScheduledTask -TaskName 'IMGorgni seleccion IG' -Action $accion -Settin
 
 $cadaHora = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours((Get-Date).Hour + 1) `
     -RepetitionInterval (New-TimeSpan -Hours 1)
+# 16/10/2026: con StopAtDurationEnd (el default) Windows cortaba la corrida larga cada ~2 h (22:00, 00:00)
+# y Autocull volvia a empezar de cero: Babbo F1 (5.093 fotos por Tailscale) nunca terminaba.
+$cadaHora.Repetition.StopAtDurationEnd = $false
 Register-ScheduledTask -TaskName 'IMGorgni seleccion IG cada hora' -Action $accion -Settings $sinDespertar -Force `
     -Trigger $cadaHora `
     -Description 'Fechas nuevas de Trabajo -> seleccion para Instagram. Cada hora con la notebook prendida, sin despertarla.' | Out-Null
