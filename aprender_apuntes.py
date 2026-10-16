@@ -95,7 +95,8 @@ Responde con este formato exacto (texto plano, NO JSON):
 HALLAZGO: <1 o 2 lineas: lo nuevo o lo corregido con esta fecha>
 {SEPARADOR}
 <los apuntes completos actualizados, en markdown>"""
-    texto, uso = s.claude_texto(prompt, carpeta, s.MODELO_CLAUDE)
+    texto, uso = s.claude_texto(prompt, carpeta, s.MODELO_CLAUDE,
+                                s.turnos_para(len(hojas['elegidas']) + len(hojas['no_elegidas']), por_turno=6))
     hallazgo, apuntes = partir(texto)
     return nombre, apuntes, hallazgo, uso
 

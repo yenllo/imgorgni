@@ -68,7 +68,7 @@ MODELO_CLAUDE = "sonnet"   # ponytail: sonnet cuida la cuota semanal; "opus" si 
 VISTOS = SALIDA / "vistos.json"   # trabajos ya conocidos: lo que no esta aca es una fecha nueva
 ESTABLE_HORAS = 2                  # una fecha se analiza recien cuando termino de copiarse
 ELEGIR = 40  # 7/10/2026: Renzo pidio "hartas mas" que 20 por fecha para revisar.
-MAX_A_CLAUDE = 80  # el juez lee todas juntas a 1280 px (~1.800 tokens c/u): 80 es ~145 mil, cerca del techo
+MAX_A_CLAUDE = 60  # 16/10/2026: con 80 Sonnet no las retuvo, entro en loop releyendolas (ver claude_texto)
 TOP_RENATO = 20    # de las ~100 que elige Renato, las mejores para Instagram (segunda seccion del panel)
 PX_RENATO = 1024   # sus ~100 a 1280 px no caben en una sola lectura; a 1024 son ~1.100 tokens c/u
 # Autocull solo bota basura (3/10/2026). Con sus valores de siempre (cuotas fijas por percentil y 1 foto
@@ -240,21 +240,31 @@ def extraer_json(texto):
     return json.loads(texto[texto.index("{"):texto.rindex("}") + 1], strict=False)
 
 
-def claude_json(prompt, carpeta, modelo):
+def claude_json(prompt, carpeta, modelo, max_turnos=6):
     """`claude -p` en *carpeta*, devuelve (JSON de la respuesta, uso de tokens)."""
-    texto, uso = claude_texto(prompt, carpeta, modelo)
+    texto, uso = claude_texto(prompt, carpeta, modelo, max_turnos)
     return extraer_json(texto), uso
 
 
-def claude_texto(prompt, carpeta, modelo):
+def turnos_para(n_imagenes, por_turno=10):
+    """Tope de turnos para leer n imagenes de a ~10 por turno y responder, con un poco de holgura."""
+    return n_imagenes // por_turno + 4
+
+
+def claude_texto(prompt, carpeta, modelo, max_turnos=6):
     """`claude -p` en *carpeta* (solo puede leer ahi), devuelve (texto de la respuesta, uso de tokens).
-    Usa la suscripcion: en la tarea programada, por CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)."""
+    Usa la suscripcion: en la tarea programada, por CLAUDE_CODE_OAUTH_TOKEN (claude setup-token).
+
+    max_turnos es OBLIGATORIO en la practica: el 16/10/2026, sin --max-turns, Sonnet no pudo retener 80
+    fotos, entro en loop releyendolas (2.184 Read, 1.093 turnos, 4 M de tokens de salida, un transcript
+    de 1,13 GB) durante 39 min hasta que la API corto por cuota. Con el tope, ese caso falla limpio."""
     exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
     # Sin esto cada llamada cargaba ~50 mil tokens antes de la primera foto (prompt de Claude Code,
     # todas las herramientas, MCP, skills): medido en la prueba del 1/10. Solo hace falta Read.
     # El prompt va por stdin: `claude` es claude.CMD y cmd.exe corta argv en el primer salto de linea,
     # llevandose ademas todos los flags de despues (14/10: llego solo la 1a linea, sin --tools ni json).
     r = subprocess.run([exe, "-p", "--model", modelo, "--output-format", "json",
+                        "--max-turns", str(max_turnos),
                         "--tools", "Read", "--allowedTools", "Read", "--strict-mcp-config",
                         "--disable-slash-commands", "--system-prompt", SISTEMA],
                        cwd=str(carpeta), capture_output=True, input=prompt,
@@ -322,7 +332,7 @@ Lee con Read estas hojas de contacto (cada celda tiene su id en amarillo): {', '
 Para CADA id ({', '.join(ids_tanda)}) responde SOLO un JSON
 {{"<id>": {{"veredicto": "si"|"no", "nota": 1-10, "motivo": "frase corta"}}}} sin texto antes ni despues."""
         try:
-            datos, _uso = claude_json(prompt, hojas_dir, MODELO_FILTRO)
+            datos, _uso = claude_json(prompt, hojas_dir, MODELO_FILTRO, max_turnos=4)
             veredictos.update({i: v for i, v in datos.items() if i in ids_tanda})
         except Exception as e:  # una tanda mala no tumba el trabajo: esas fotos quedan sin nota
             log(f"  filtro: tanda {ids_tanda[0]}.. fallo: {str(e)[:150]}")
@@ -341,7 +351,8 @@ def claude(carpeta, ids, evento, elegir=ELEGIR):
     prompt = f"""{CRITERIO}{apuntes()}
 Trabajo: {evento}.
 En esta carpeta hay {len(ids)} fotos candidatas: {', '.join(i + '.jpg' for i in ids)}.
-Lee TODAS con la herramienta Read, varias en paralelo por turno para no gastar turnos.
+Lee TODAS con la herramienta Read, varias en paralelo por turno para no gastar turnos. Lee cada foto UNA
+sola vez: no vuelvas a leer ninguna aunque no la recuerdes en detalle; despues de leerlas, responde de inmediato.
 {_ID_EN_IMAGEN}
 
 Elige hasta {elegir} candidatas para publicar (menos si no hay {elegir} buenas de verdad). El
@@ -356,7 +367,7 @@ fotografo las revisa despues y se queda con algunas, asi que conviene variedad. 
 
 Responde SOLO este JSON:
 {{"apunte": "...", "elegidas": [{{"id": "C001", "motivo": "..."}}]}}"""
-    datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE)
+    datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE, turnos_para(len(ids)))
     return [e for e in datos["elegidas"] if e.get("id") in ids], datos.get("apunte", ""), uso
 
 
@@ -375,7 +386,7 @@ Para cada id:
 
 Responde SOLO este JSON:
 {{"<id>": {{"vista": "...", "caption": "..."}}}}"""
-    datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE)
+    datos, uso = claude_json(prompt, carpeta, MODELO_CLAUDE, turnos_para(len(ids)))
     for e in elegidas:
         e.update(datos.get(e["id"], {}))
     return elegidas, uso
