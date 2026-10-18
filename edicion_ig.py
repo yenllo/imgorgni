@@ -31,21 +31,23 @@ BASICOS = ("WhiteBalance", "Temperature", "Tint", "Exposure2012", "Contrast2012"
 # El mezclador de colores fue el plus de Renzo en la completa de la F3 (14/10/2026): verde tono +28 en 26 de
 # 36 (lo aleja del amarillo: por eso su verde no queda oliva), y saturacion de rojo/verde/naranja/amarillo.
 # Si la foto ya tiene su edicion se usa la suya; si no, sus medianas.
-MEZCLADOR = {"HueAdjustmentGreen": 28, "SaturationAdjustmentGreen": 10, "SaturationAdjustmentRed": 20,
+# 16/10/2026, mirando sus correcciones de la F1: el +28 lo bajo en 6 de 10 (queda azulado) y subio la
+# saturacion del verde en 7 de 10. Con una completa suya se usan sus valores, no estos.
+MEZCLADOR = {"HueAdjustmentGreen": 12, "SaturationAdjustmentGreen": 35, "SaturationAdjustmentRed": 20,
              "HueAdjustmentOrange": 2, "SaturationAdjustmentOrange": 10, "SaturationAdjustmentYellow": 10}
 TIPICOS = {"Tint": 30, "Contrast2012": 15, "Highlights2012": -60, "Shadows2012": 60, "Whites2012": 12,
            "Blacks2012": -20, "Vibrance": 14, "LensProfileEnable": 1}      # medianas de sus completas
 # v2 (14/10/2026, mirando la v1 al lado de las suyas): el pasto hacia el amarillo y mas oscuro quedo
 # oliva y sucio, y la mascara de fondo a -0,4 EV (la IA mete el pasto en el "fondo", media foto) mas la
 # vinyeta apagaban todo. Renzo edita luminoso y con el pasto verde vivo: eso se respeta.
-RECORTE_DERECHO = 0.984   # 1 - 128/7952: la franja mide ~120 px (medida en la DSC07893, 14/10)
 MEJORAS = {
     "ColorGradeHighlightHue": 45, "ColorGradeHighlightSat": 10,
     "ColorGradeShadowHue": 215, "ColorGradeShadowSat": 5, "ColorGradeBlending": 50,
     "PostCropVignetteAmount": -5, "PostCropVignetteMidpoint": 50, "PostCropVignetteFeather": 70,
     "Dehaze": 4,
 }
-FONDO = {"local_Exposure": -0.2, "local_Saturation": -6, "local_Clarity": -5}
+# Lo que Renzo corrigio en la F1 (10 fotos, 16/10/2026) sobre bases que no eran una completa suya
+AJUSTE_RENZO = {"Exposure2012": 0.2, "Contrast2012": 10, "Highlights2012": -15, "Shadows2012": 20, "Vibrance": -10}
 SUJETO = {"local_Exposure": 0.3, "local_Texture": 15, "local_Clarity": 10, "local_Shadows": 15}
 
 
@@ -136,19 +138,19 @@ def receta(carpeta, limpiar=False, fecha_catalogo=None):
             aj.setdefault(k, modelo[str(ruta)][k])
         aj.update(MEJORAS)
         aj["WhiteBalance"] = "Custom" if "Temperature" in aj else aj.get("WhiteBalance", "As Shot")
-        aj["Vibrance"] = (aj.get("Vibrance") or 0) + 4
-        # la reduccion de ruido de Lightroom mete una franja en el borde derecho del sensor de la a7R III
-        # (memoria lightroom-denoise-franja-morada): ~128 px fuera siempre. Se vio en la v3 del 14/10.
-        aj.setdefault("CropLeft", 0), aj.setdefault("CropTop", 0), aj.setdefault("CropBottom", 1)
-        aj["CropRight"] = min(aj.get("CropRight") or 1, RECORTE_DERECHO)
-        aj["HasCrop"] = True
+        if de != "completa":
+            for k, d in AJUSTE_RENZO.items():
+                aj[k] = max(-100, min(100, (aj.get(k) or 0) + d)) if k != "Exposure2012" else (aj.get(k) or 0) + d
+        # El recorte (borde derecho por la franja del denoise + proporcion 3:2) lo hace Cola.lua al final,
+        # despues del nivelado: aca se perdia o rompia el 3:2 (Renzo los reencuadro todos, 16/10).
         luz, r = contraluz(ruta)
         sujeto = dict(SUJETO)
         if luz:
             sujeto.update(local_Exposure=0.5, local_Shadows=25)
         out[str(ruta).lower()] = {"ajustes": aj, "limpiar": limpiar, "mascaras": [
             # 12 s por mascara: con 8 la de sujeto de la DSC08104 no alcanzaba a calcularse (14/10)
-            {"tipo": "background", "valores": FONDO, "espera": 12},
+            # sin mascara de "fondo" con IA: metia el pasto y Renzo la reemplazo por un degradado menos
+            # el sujeto (ver copiar_mascaras en Cola.lua)
             {"tipo": "subject", "valores": sujeto, "espera": 12}]}
         resumen.append(f"{ruta.name}: base {de}, {aj.get('Temperature')} K, exp {aj.get('Exposure2012')}"
                        f"{', contraluz' if luz else ''} (jugador/fondo {r['jugador_vs_fondo']:+.2f})")

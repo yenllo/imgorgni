@@ -3,6 +3,7 @@ r"""Elige las ~40 mejores fotos de un trabajo deportivo para Instagram y las cop
     python seleccion_ig.py "Liga ExScuola\Liga ExScuola 2026-1\2026-07-11 F9 (Final)"   # uno, ya
     python seleccion_ig.py --noche     # lo que usa la tarea de las 3:30 (ver abajo)
     python seleccion_ig.py --renato    # solo el top de las selecciones terminadas de Renato
+    python seleccion_ig.py --solo-autocull <carpeta local> <nombre en _para_publicar>   # sin Claude
     python seleccion_ig.py --prueba    # self-check
 
 Trabaja sobre CARPETAS de `Fotos\Galeria\Trabajo` (rutas relativas a esa carpeta), no sobre
@@ -642,6 +643,18 @@ def candado():
     return fh
 
 
+def solo_autocull(trabajo, nombre):
+    """Solo Autocull (local, sin Claude) sobre una fecha recien copiada a la notebook (18/10/2026: F4).
+    Queda en _para_publicar/<nombre>/autocull.json: con el nombre que tendra la fecha en el NAS, la
+    seleccion completa de despues lo reutiliza en vez de repetirlo."""
+    carpeta = SALIDA / nombre
+    carpeta.mkdir(parents=True, exist_ok=True)
+    log(f"=== solo Autocull: {trabajo}")
+    pasan = autocull(trabajo, carpeta)
+    avisar("Autocull listo", f"{nombre}: {len(pasan)} candidatas")
+    log(f"listo: {carpeta / 'autocull.json'}")
+
+
 def main():
     args = sys.argv[1:]
     if args == ["--prueba"]:
@@ -649,6 +662,8 @@ def main():
     # Que Windows no la vuelva a dormir a mitad de camino: despierta por temporizador y
     # se suspende sola a los pocos minutos si nadie la retiene.
     ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
+    if args[:1] == ["--solo-autocull"]:
+        return solo_autocull(Path(args[1]), args[2])
     base = raiz_trabajo()
     if not base:
         return log("no llego a Fotos\\Galeria\\Trabajo (fuera de casa o la Pi apagada), no hago nada")

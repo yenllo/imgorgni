@@ -185,6 +185,55 @@ local function tiene_mascaras(p)
 	return type(m) == "table" and next(m) ~= nil -- # da 0 si no es lista: asi la v2 apilo mascaras
 end
 
+-- 16/10/2026: Renzo rehizo el encuadre de todas porque no quedaban en 3:2. El recorte de la franja del
+-- denoise (borde derecho) se aplicaba aparte y rompia la proporcion, y el nivelado lo pisaba despues.
+-- Ahora va al final, sobre lo que haya: borde derecho fuera y la proporcion original (ancho = alto en
+-- coordenadas normalizadas) recortando parejo el lado que sobra, centrado.
+local BORDE_DERECHO = 0.984 -- 1 - 128/7952: la franja mide ~120 px
+local function encuadre_final(catalogo, fotos)
+	local n = 0
+	catalogo:withWriteAccessDo("IMGorgni: encuadre 3:2", function()
+		for _, p in ipairs(fotos) do
+			local s = p:getDevelopSettings()
+			local l, t, r, b = s.CropLeft or 0, s.CropTop or 0, s.CropRight or 1, s.CropBottom or 1
+			r = math.min(r, BORDE_DERECHO)
+			local w, h = r - l, b - t
+			if h > w then
+				t, b = t + (h - w) / 2, b - (h - w) / 2
+			elseif w > h then
+				l, r = l + (w - h) / 2, r - (w - h) / 2
+			end
+			p:applyDevelopSettings({ CropLeft = l, CropTop = t, CropRight = r, CropBottom = b, HasCrop = true },
+				"Encuadre 3:2")
+			n = n + 1
+		end
+	end, { timeout = 300 })
+	return n
+end
+
+-- Copia las mascaras de una foto de Renzo (mascaras_de = ruta) a otra: misma geometria; la parte de IA
+-- (sujeto, cielo) la recalcula updateAISettings para la foto nueva. Prueba del 16/10/2026.
+local function copiar_mascaras(catalogo, fotos, receta)
+	local n = 0
+	for _, p in ipairs(fotos) do
+		local r = receta[p:getRawMetadata("path"):lower()]
+		local origen = r and r.mascaras_de and catalogo:findPhotoByPath(r.mascaras_de)
+		if origen then
+			local m = origen:getDevelopSettings().MaskGroupBasedCorrections
+			local ok, err = LrTasks.pcall(function()
+				catalogo:withWriteAccessDo("IMGorgni: copiar mascaras", function()
+					p:applyDevelopSettings({ MaskGroupBasedCorrections = m }, "Mascaras de Renzo")
+				end, { timeout = 120 })
+			end)
+			local quedo = p:getDevelopSettings().MaskGroupBasedCorrections
+			log("copiar mascaras a " .. p:getFormattedMetadata("fileName") .. ": " .. tostring(ok) .. " " ..
+				tostring(err or "") .. " | quedaron " .. tostring(type(quedo) == "table" and next(quedo) ~= nil))
+			if ok then n = n + 1 end
+		end
+	end
+	return n
+end
+
 local function aplicar_mascaras(catalogo, fotos, receta)
 	local LrApplicationView = import "LrApplicationView"
 	local LrDevelopController = import "LrDevelopController"
@@ -313,6 +362,11 @@ local function trabajo(catalogo, c)
 		end, { timeout = 600 })
 	end
 	if con_nivelado then detalle = detalle .. ", " .. nivelar(catalogo, fotos, id) .. " niveladas" end
+	if receta then detalle = detalle .. ", encuadre 3:2 en " .. encuadre_final(catalogo, fotos) end
+	if receta then
+		local m = copiar_mascaras(catalogo, fotos, receta)
+		if m > 0 then detalle = detalle .. ", mascaras copiadas en " .. m end
+	end
 	if coleccion ~= "" then
 		catalogo:withWriteAccessDo("IMGorgni: coleccion " .. coleccion, function()
 			catalogo:createCollection(coleccion, nil, true):addPhotos(fotos) -- true: reusa si ya existe
