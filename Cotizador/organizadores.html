@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cotizador RB.Deportes</title>
+<!--
+  Cotizador para organizadores de ligas (esquema de 3 niveles, 19/10/2026).
+  Un solo archivo: se abre con doble click, no necesita servidor.
+  A la izquierda el formulario; a la derecha la cotizacion con formato de
+  boleta ("cuenta de luz"). "Imprimir / PDF" deja solo la boleta.
+
+  Reglas de cobro (acordadas con Renzo):
+  - Niveles por foto, precio de lista: Basica 200 / Completa 390 / Profesional 700.
+    Completa es la que se empuja (va marcada "Recomendada").
+  - Cobertura por hora. No existe "hora extra": la hora se cobra al precio acordado.
+  - Hora pasada: si se sigue fotografiando despues del termino, tolerancia de
+    15 min; despues se cobra cada bloque de 20 min iniciado a 1/3 de la hora.
+  - Pack Abierto (mas barato): galeria publica con venta individual posterior.
+    El organizador DEBE declarar si comparte con los jugadores las fotos que compro.
+    Pack Exclusivo: sin venta individual, recargo sobre las fotos.
+  - Add-ons: logo/marco del cliente (incluye exportacion para redes),
+    seleccion personal (Renzo elige N fotos por el organizador),
+    separacion por partidos con conteo de fotos.
+  - Boleta de honorarios: el total se brutea con la retencion (15,25 % en 2026),
+    asi el cliente transfiere el total y la retencion la declara Renzo.
+-->
+<style>
+:root{
+  --tinta:#16181d; --tenue:#5b616e; --linea:#e3e5ea; --fondo:#eef0f3; --papel:#fff;
+  --marca:#d98a2b; --marca-suave:#fdf3e6; --ok:#2f7d4f; --ok-suave:#e8f4ec; --alerta:#a4441c;
+  --c1:#2b4c7e; --c2:#d98a2b; --c3:#6a8f3f; --c4:#8a5a9e; --c5:#9aa1ad;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.45 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;color:var(--tinta);background:var(--fondo)}
+.app{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:24px;padding:20px;max-width:1400px;margin:0 auto}
+@media (max-width:900px){.app{grid-template-columns:1fr;padding:12px}}
+
+/* ---------- formulario ---------- */
+.form{background:var(--papel);border-radius:10px;padding:16px;align-self:start;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+@media (max-width:900px){.form{position:static;max-height:none}}
+.form h1{font-size:18px;margin-bottom:4px}
+.form .sub{color:var(--tenue);font-size:12px;margin-bottom:12px}
+.presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+button{font:inherit;border:1px solid var(--linea);background:#f7f8fa;border-radius:6px;padding:6px 10px;cursor:pointer}
+button:hover{background:#eceef2}
+button.prim{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+button.prim:hover{background:#333}
+fieldset{border:1px solid var(--linea);border-radius:8px;padding:10px 12px;margin-bottom:12px}
+legend{font-weight:600;padding:0 4px;font-size:13px}
+.f{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.f.tres{grid-template-columns:1fr 1fr 1fr}
+label{display:block;font-size:12px;color:var(--tenue)}
+label.chk{display:flex;gap:6px;align-items:center;color:var(--tinta);font-size:13px;margin-top:6px}
+input,select,textarea{font:inherit;width:100%;padding:5px 7px;border:1px solid #cfd3da;border-radius:5px;background:#fff;color:var(--tinta)}
+input[type=checkbox]{width:auto}
+.ayuda{font-size:11px;color:var(--tenue);margin-top:4px}
+.precios th,.precios td{font-size:12px;padding:2px 3px;text-align:left}
+.precios input{padding:3px 5px}
+.precios{width:100%;border-collapse:collapse}
+.acciones{display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:-16px;background:var(--papel);padding:10px 0 4px}
+
+/* ---------- boleta ---------- */
+.hoja{background:var(--papel);border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:28px 30px;max-width:820px;width:100%;margin:0 auto}
+@media (max-width:600px){.hoja{padding:16px}}
+.cab{display:flex;justify-content:space-between;gap:16px;border-bottom:3px solid var(--marca);padding-bottom:14px;flex-wrap:wrap}
+.marca{font-size:24px;font-weight:700;letter-spacing:-.02em}
+.marca span{color:var(--marca)}
+.cab .datos-emisor{font-size:12px;color:var(--tenue)}
+.cab .num{text-align:right;font-size:12px;color:var(--tenue)}
+.cab .num b{display:block;font-size:15px;color:var(--tinta)}
+.franja{display:grid;grid-template-columns:1.3fr 1fr;gap:14px;margin:16px 0}
+@media (max-width:600px){.franja{grid-template-columns:1fr}}
+.caja{border:1px solid var(--linea);border-radius:8px;padding:10px 12px}
+.caja h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--tenue);margin-bottom:6px}
+.caja dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px}
+.caja dt{color:var(--tenue)}
+.total-caja{background:var(--tinta);color:#fff;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;justify-content:center}
+.total-caja small{text-transform:uppercase;letter-spacing:.1em;font-size:11px;opacity:.7}
+.total-caja .monto{font-size:32px;font-weight:700;letter-spacing:-.02em;color:#ffc27a}
+.total-caja .linea{display:flex;justify-content:space-between;font-size:12px;opacity:.85;margin-top:2px}
+.ahorro{background:var(--ok-suave);color:var(--ok);border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.ahorro b{font-size:18px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--marca);margin:18px 0 8px}
+table.det{width:100%;border-collapse:collapse;font-size:13px}
+table.det th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--tenue);text-align:right;border-bottom:1px solid var(--tinta);padding:5px 6px;font-weight:600}
+table.det th:first-child{text-align:left}
+table.det td{padding:6px;border-bottom:1px solid var(--linea);text-align:right;vertical-align:top;white-space:nowrap}
+table.det td:first-child{text-align:left;white-space:normal}
+table.det td .d{display:block;font-size:11px;color:var(--tenue)}
+table.det tr.grupo td{background:#f6f7f9;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--tenue)}
+table.det tr.desc td{color:var(--ok)}
+table.det tr.sub td{font-weight:600;border-bottom:none}
+table.det tr.tot td{font-weight:700;font-size:15px;border-top:2px solid var(--tinta);border-bottom:none}
+s{color:var(--tenue)}
+.cortesia{color:var(--ok);font-weight:600}
+.barra{display:flex;height:16px;border-radius:4px;overflow:hidden;margin:6px 0}
+.barra div{height:100%}
+.leyenda{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--tenue)}
+.leyenda i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.niveles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media (max-width:600px){.niveles{grid-template-columns:1fr}}
+.nivel{border:1px solid var(--linea);border-radius:8px;padding:10px 12px;position:relative;font-size:12px}
+.nivel.reco{border:2px solid var(--marca);background:var(--marca-suave)}
+.nivel .tag{position:absolute;top:-9px;right:10px;background:var(--marca);color:#fff;font-size:10px;font-weight:700;letter-spacing:.08em;padding:1px 7px;border-radius:3px}
+.nivel h4{font-size:14px}
+.nivel .p{font-size:18px;font-weight:700;margin:2px 0 6px}
+.nivel .p small{font-size:11px;font-weight:400;color:var(--tenue)}
+.nivel ul{padding-left:14px}
+.nivel li{margin:1px 0}
+.cond{font-size:11.5px;color:#3a3f48}
+.cond li{margin:3px 0 3px 16px}
+.aviso{background:#fff4ef;border:1px solid #f1c8b3;color:var(--alerta);border-radius:6px;padding:6px 10px;font-size:12px;margin:8px 0}
+.pago{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:600px){.pago{grid-template-columns:1fr}}
+.pie{margin-top:18px;border-top:1px solid var(--linea);padding-top:8px;font-size:11px;color:var(--tenue);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+
+@media print{
+  @page{size:A4;margin:12mm}
+  body{background:#fff}
+  .form,.no-print{display:none!important}
+  .app{display:block;padding:0}
+  .hoja{box-shadow:none;border-radius:0;padding:0;max-width:none}
+  .total-caja,.ahorro,.nivel.reco,table.det tr.grupo td,.barra div{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  h2{break-after:avoid}
+  .niveles,.pago,table.det tr{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ===================== FORMULARIO ===================== -->
+<form class="form" id="form" onsubmit="return false">
+  <h1>Cotizador para organizadores</h1>
+  <p class="sub">Todo se recalcula al escribir y queda guardado en este navegador.</p>
+  <div class="presets">
+    <button type="button" data-preset="lista">Precio de lista</button>
+    <button type="button" data-preset="renato">Renato · Liga ExScuola</button>
+    <button type="button" id="limpiar">Nueva cotización</button>
+  </div>
+
+  <fieldset><legend>1. Cliente y evento</legend>
+    <div class="f">
+      <div><label>Organizador</label><input id="cliente" placeholder="Nombre"></div>
+      <div><label>Liga / evento</label><input id="evento" placeholder="Liga ExScuola 2026-2"></div>
+      <div><label>Fecha del evento</label><input id="fechaEvento" type="date"></div>
+      <div><label>Lugar</label><input id="lugar" placeholder="Recinto, comuna"></div>
+      <div><label>Inicio</label><input id="horaInicio" type="time" value="19:00"></div>
+      <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
+      <div><label>N° cotización</label><input id="numero"></div>
+      <div><label>Válida por (días)</label><input id="validez" type="number" min="1" value="15"></div>
+    </div>
+  </fieldset>
+
+  <fieldset><legend>2. Fotos seleccionadas</legend>
+    <div class="f tres">
+      <div><label>Básica</label><input id="qBasica" type="number" min="0" value="64"></div>
+      <div><label>Completa</label><input id="qCompleta" type="number" min="0" value="36"></div>
+      <div><label>Profesional</label><input id="qPro" type="number" min="0" value="0"></div>
+    </div>
+    <div class="f" style="margin-top:8px">
+      <div><label>Desc. por volumen (%)</label><input id="volumen" type="number" min="0" max="100" step="0.5" value="0"></div>
+      <div><label>&nbsp;</label><label class="chk" style="margin:0"><input type="checkbox" id="volAuto" checked> Automático</label></div>
+    </div>
+    <p class="ayuda">Automático: 8 % desde 260 fotos y 11 % desde 320 (los packs Liga y Full).</p>
+  </fieldset>
+
+  <fieldset><legend>3. Venta posterior</legend>
+    <label>Tipo de pack</label>
+    <select id="pack">
+      <option value="abierto">Abierto: galería pública a la venta después del evento</option>
+      <option value="exclusivo">Exclusivo: sin venta individual a jugadores</option>
+    </select>
+    <div id="bloqueAbierto" style="margin-top:8px">
+      <label>¿El organizador compartirá con los jugadores las fotos que compra?</label>
+      <select id="comparte">
+        <option value="">Debe indicarlo (obligatorio)</option>
+        <option value="si">Sí, las comparte</option>
+        <option value="no">No, no las comparte</option>
+      </select>
+    </div>
+    <div id="bloqueExclusivo" style="margin-top:8px">
+      <label>Recargo por exclusividad (% sobre las fotos)</label>
+      <input id="recargoExcl" type="number" min="0" step="1" value="15">
+    </div>
+  </fieldset>
+
+  <fieldset><legend>4. Add-ons</legend>
+    <label class="chk"><input type="checkbox" id="aLogo"> Logo/marco del cliente + exportación para redes</label>
+    <label class="chk"><input type="checkbox" id="aPartidos"> Separación por partidos con conteo de fotos</label>
+    <div class="f" style="margin-top:4px"><div><label>N° de partidos (opcional)</label><input id="nPartidos" type="number" min="0" value=""></div></div>
+    <label class="chk"><input type="checkbox" id="aSeleccion"> Selección personal (yo elijo por el organizador)</label>
+    <div class="f tres" style="margin-top:4px">
+      <div><label>Básicas que elijo</label><input id="sBasica" type="number" min="0" value="0"></div>
+      <div><label>Completas</label><input id="sCompleta" type="number" min="0" value="0"></div>
+      <div><label>Profesionales</label><input id="sPro" type="number" min="0" value="0"></div>
+    </div>
+  </fieldset>
+
+  <fieldset><legend>5. Precios: lista y cliente</legend>
+    <table class="precios">
+      <tr><th></th><th>Lista</th><th>Cliente</th><th title="Cortesía: precio 0">Cort.</th></tr>
+      <tr><td>Hora</td><td><input id="lHora" type="number" value="8000"></td><td><input id="cHora" type="number" value="8000"></td><td></td></tr>
+      <tr><td>Básica</td><td><input id="lBasica" type="number" value="200"></td><td><input id="cBasica" type="number" value="200"></td><td></td></tr>
+      <tr><td>Completa</td><td><input id="lCompleta" type="number" value="390"></td><td><input id="cCompleta" type="number" value="390"></td><td></td></tr>
+      <tr><td>Profesional</td><td><input id="lPro" type="number" value="700"></td><td><input id="cPro" type="number" value="700"></td><td></td></tr>
+      <tr><td>Logo/marco</td><td><input id="lLogo" type="number" value="10000"></td><td><input id="cLogo" type="number" value="10000"></td><td><input type="checkbox" id="gLogo"></td></tr>
+      <tr><td>Partidos</td><td><input id="lPartidos" type="number" value="3000"></td><td><input id="cPartidos" type="number" value="3000"></td><td><input type="checkbox" id="gPartidos"></td></tr>
+      <tr><td>Selección/foto</td><td><input id="lSel" type="number" value="40"></td><td><input id="cSel" type="number" value="40"></td><td><input type="checkbox" id="gSel"></td></tr>
+      <tr><td>Selección mín.</td><td><input id="lSelMin" type="number" value="2000"></td><td><input id="cSelMin" type="number" value="2000"></td><td></td></tr>
+    </table>
+    <p class="ayuda">Si el precio del cliente es menor que el de lista, la boleta muestra el descuento línea por línea y el ahorro total.</p>
+  </fieldset>
+
+  <fieldset><legend>6. Traslado, boleta y pago</legend>
+    <div class="f">
+      <div><label>Traslado y estacionamiento ($)</label><input id="traslado" type="number" min="0" value="0"></div>
+      <div><label>Anticipo para reservar (%)</label><input id="anticipo" type="number" min="0" max="100" value="30"></div>
+      <div><label>Boleta de honorarios</label><select id="boleta"><option value="si">Sí (bruteada)</option><option value="no">No</option></select></div>
+      <div><label>Retención (%)</label><input id="retencion" type="number" step="0.01" value="15.25"></div>
+      <div><label>Entrega (días hábiles)</label><input id="plazo" type="number" min="1" value="4"></div>
+      <div><label>Galería de selección (horas)</label><input id="plazoGaleria" type="number" min="1" value="48"></div>
+    </div>
+    <div class="f" style="margin-top:8px">
+      <div><label>Titular</label><input id="pTitular" placeholder="Nombre"></div>
+      <div><label>RUT</label><input id="pRut"></div>
+      <div><label>Banco</label><input id="pBanco" placeholder="BCI"></div>
+      <div><label>Tipo y N° cuenta</label><input id="pCuenta"></div>
+      <div style="grid-column:1/-1"><label>Correo para comprobante</label><input id="pMail" value="renzob.deportes@gmail.com"></div>
+    </div>
+  </fieldset>
+
+  <fieldset><legend>7. Liquidación final (después del evento)</legend>
+    <label>Hora real en que terminé de fotografiar</label>
+    <input id="horaReal" type="time">
+    <p class="ayuda">Tolerancia de 15 min. Después, cada bloque de 20 min iniciado cuesta 1/3 de la hora acordada. Déjalo vacío para la cotización previa.</p>
+  </fieldset>
+
+  <fieldset><legend>Notas para el cliente</legend>
+    <textarea id="notas" rows="2" placeholder="Opcional"></textarea>
+  </fieldset>
+
+  <div class="acciones">
+    <button type="button" class="prim" onclick="window.print()">Imprimir / PDF</button>
+    <button type="button" id="copiar">Copiar resumen WhatsApp</button>
+  </div>
+</form>
+
+<!-- ===================== BOLETA ===================== -->
+<main class="hoja" id="hoja"></main>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $ = id => document.getElementById(id);
+const CLAVE = "rbdeportes_cotizador_v1";
+const PAGO = ["pTitular","pRut","pBanco","pCuenta","pMail"];
+
+const NIVELES = {
+  basica: {nombre:"Edición básica", items:[
+    "Balance de blancos (temperatura y matiz)","Exposición y contraste",
+    "Iluminaciones, sombras, blancos y negros","Intensidad y saturación","Nivelado de imagen"]},
+  completa: {nombre:"Edición completa", items:[
+    "Todo lo de la edición básica","Eliminación de distracciones",
+    "Reducción de ruido manual","Encuadre al protagonista"]},
+  pro: {nombre:"Edición profesional", items:[
+    "Todo lo de la edición completa","Reducción de ruido adaptada",
+    "Calibración de colores","Color grading: mezcla y atenuación de colores",
+    "Máscaras por sujeto/fondo/campo para edición por zonas"]}
+};
+
+const PRESETS = {
+  lista: {lHora:8000,cHora:8000,lBasica:200,cBasica:200,lCompleta:390,cCompleta:390,lPro:700,cPro:700,
+          lLogo:10000,cLogo:10000,gLogo:false,lPartidos:3000,cPartidos:3000,gPartidos:false,
+          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volAuto:true,boleta:"si",anticipo:30,
+          aLogo:false,aPartidos:false,aSeleccion:false},
+  // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
+  // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
+  renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
+          lHora:8000,cHora:6000,lBasica:200,cBasica:110,lCompleta:390,cCompleta:250,lPro:700,cPro:420,
+          lLogo:10000,cLogo:10000,gLogo:true,aLogo:true,lPartidos:3000,cPartidos:3000,gPartidos:true,aPartidos:true,
+          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volAuto:false,volumen:0,
+          boleta:"no",anticipo:0,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
+};
+
+const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
+const ent = id => Math.max(0, Math.round(num(id)));
+const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function minutos(h){ if(!h) return null; const [a,b] = h.split(":").map(Number); return a*60+b; }
+function duracion(ini, fin){ // en minutos, cruza medianoche
+  const a = minutos(ini), b = minutos(fin); if(a===null||b===null) return 0;
+  let d = b - a; if(d <= 0) d += 1440; return d;
+}
+function fechaLarga(iso){
+  if(!iso) return "Por definir";
+  const [y,m,d] = iso.split("-").map(Number);
+  return new Date(y,m-1,d).toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+}
+function numeroNuevo(){
+  const d = new Date(), p = n => String(n).padStart(2,"0");
+  return "COT-" + d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes());
+}
+
+function calcular(){
+  const horas = duracion($("horaInicio").value, $("horaFin").value) / 60;
+  const q = {basica:ent("qBasica"), completa:ent("qCompleta"), pro:ent("qPro")};
+  const totalFotos = q.basica + q.completa + q.pro;
+  if($("volAuto").checked) $("volumen").value = totalFotos >= 320 ? 11 : totalFotos >= 260 ? 8 : 0;
+  const volPct = num("volumen");
+  const pack = $("pack").value;
+  const exclPct = pack === "exclusivo" ? num("recargoExcl") : 0;
+
+  // Cada linea: concepto, detalle, cantidad, unidad lista, unidad cliente, total lista, total cliente
+  const L = [];
+  const linea = (grupo, concepto, detalle, cant, uL, uC, cortesia) => {
+    const tC = cortesia ? 0 : cant * uC;
+    L.push({grupo, concepto, detalle, cant, uL, uC: cortesia ? 0 : uC, tL: cant*uL, tC, cortesia: !!cortesia});
+  };
+
+  const hTxt = (Math.round(horas*100)/100).toLocaleString("es-CL");
+  linea("Cobertura","Cobertura de la jornada",
+        `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`, horas, num("lHora"), num("cHora"));
+
+  if(q.basica)   linea("Fotos","Fotos con edición básica","", q.basica, num("lBasica"), num("cBasica"));
+  if(q.completa) linea("Fotos","Fotos con edición completa","Recomendada", q.completa, num("lCompleta"), num("cCompleta"));
+  if(q.pro)      linea("Fotos","Fotos con edición profesional","", q.pro, num("lPro"), num("cPro"));
+  const fotosL = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tL,0);
+  const fotosC = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tC,0);
+  const ajustes = [];
+  if(exclPct) ajustes.push({grupo:"Fotos",concepto:`Pack exclusivo (+${exclPct} %)`,detalle:"Sin venta individual posterior",
+                            cant:null,tL:fotosL*exclPct/100,tC:fotosC*exclPct/100});
+  if(volPct){
+    const baseL = fotosL*(1+exclPct/100), baseC = fotosC*(1+exclPct/100);
+    ajustes.push({grupo:"Fotos",concepto:`Descuento por volumen (${volPct} %)`,detalle:`${totalFotos} fotos`,
+                  cant:null,tL:-baseL*volPct/100,tC:-baseC*volPct/100,desc:true});
+  }
+  ajustes.forEach(a => L.push(a));
+
+  if($("aLogo").checked) linea("Add-ons","Logo/marco del cliente","Incluye exportación adaptada a redes sociales",
+                               1, num("lLogo"), num("cLogo"), $("gLogo").checked);
+  if($("aPartidos").checked){
+    const np = ent("nPartidos");
+    linea("Add-ons","Separación por partidos", (np ? np + " partidos · " : "") + "con conteo de fotos por partido",
+          1, num("lPartidos"), num("cPartidos"), $("gPartidos").checked);
+  }
+  if($("aSeleccion").checked){
+    const s = {b:ent("sBasica"), c:ent("sCompleta"), p:ent("sPro")}, n = s.b+s.c+s.p;
+    if(n){
+      const partes = [s.b && s.b+" básicas", s.c && s.c+" completas", s.p && s.p+" profesionales"].filter(Boolean).join(", ");
+      const tL = Math.max(num("lSelMin"), n*num("lSel"));
+      const tC = $("gSel").checked ? 0 : Math.max(num("cSelMin"), n*num("cSel"));
+      const minimo = n*num("cSel") < num("cSelMin") && !$("gSel").checked;
+      L.push({grupo:"Add-ons",concepto:"Selección personal",detalle:`Elijo ${partes} por el organizador` + (minimo ? " · aplica mínimo" : ""),
+              cant:n,uL:num("lSel"),uC:$("gSel").checked?0:num("cSel"),tL,tC,cortesia:$("gSel").checked});
+    }
+  }
+
+  const tras = num("traslado");
+  if(tras) L.push({grupo:"Otros",concepto:"Traslado y estacionamiento",detalle:"",cant:null,tL:tras,tC:tras});
+
+  // Hora pasada: tolerancia 15 min, despues bloques de 20 min iniciados a 1/3 de la hora
+  let pasada = null;
+  const real = $("horaReal").value;
+  if(real && $("horaFin").value){
+    let ex = minutos(real) - minutos($("horaFin").value);
+    if(ex < -720) ex += 1440;            // termino pasada la medianoche
+    const bloques = ex > 15 ? Math.ceil(ex/20) : 0;
+    pasada = {ex: Math.max(0,ex), bloques};
+    if(bloques) L.push({grupo:"Otros",concepto:"Hora pasada",detalle:`Terminé a las ${real} (${ex} min después) · bloques de 20 min a 1/3 de la hora`,
+                        cant:bloques,uL:num("lHora")/3,uC:num("cHora")/3,tL:bloques*num("lHora")/3,tC:bloques*num("cHora")/3});
+  }
+
+  const subL = L.reduce((s,x)=>s+x.tL,0), subC = L.reduce((s,x)=>s+x.tC,0);
+  const conBoleta = $("boleta").value === "si";
+  const ret = num("retencion")/100;
+  const total = conBoleta ? Math.round(subC/(1-ret)) : Math.round(subC);
+  const impuesto = total - Math.round(subC);
+  const anticipo = Math.round(total*num("anticipo")/100);
+  return {L, horas, q, totalFotos, pack, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
+          ahorro: subL - subC, conBoleta, ret, pasada};
+}
+
+function render(){
+  const r = calcular();
+  const v = id => esc($(id).value.trim());
+  $("bloqueAbierto").style.display = r.pack === "abierto" ? "" : "none";
+  $("bloqueExclusivo").style.display = r.pack === "exclusivo" ? "" : "none";
+
+  const valida = (() => { const d = new Date(); d.setDate(d.getDate()+ent("validez")); return d.toLocaleDateString("es-CL"); })();
+  const pct = r.subL ? Math.round(r.ahorro/r.subL*1000)/10 : 0;
+
+  // tabla de detalle
+  let filas = "", grupoAct = "";
+  r.L.forEach(x => {
+    if(x.grupo !== grupoAct){ grupoAct = x.grupo; filas += `<tr class="grupo"><td colspan="5">${x.grupo}</td></tr>`; }
+    const cant = x.cant == null ? "" : (Number.isInteger(x.cant) ? x.cant : x.cant.toLocaleString("es-CL"));
+    let unit = "", lista = x.tL !== x.tC ? `<s>${pesos(x.tL)}</s>` : "";
+    if(x.uL != null){
+      unit = x.cortesia ? `<span class="cortesia">Cortesía</span>`
+           : (x.uC < x.uL ? `<s>${pesos(x.uL)}</s> ${pesos(x.uC)}` : pesos(x.uC));
+    }
+    filas += `<tr class="${x.desc?'desc':''}"><td>${esc(x.concepto)}${x.detalle?`<span class="d">${esc(x.detalle)}</span>`:""}</td>
+      <td>${cant}</td><td>${unit}</td><td>${lista}</td><td>${x.tC<0?"−"+pesos(-x.tC):pesos(x.tC)}</td></tr>`;
+  });
+  filas += `<tr class="sub"><td>Subtotal</td><td></td><td></td><td>${r.ahorro>0?`<s>${pesos(r.subL)}</s>`:""}</td><td>${pesos(r.subC)}</td></tr>`;
+  if(r.conBoleta) filas += `<tr><td>Impuesto de segunda categoría (${(r.ret*100).toLocaleString("es-CL")} %)<span class="d">Emito boleta de honorarios: la retención la declaro y pago yo</span></td><td></td><td></td><td></td><td>${pesos(r.impuesto)}</td></tr>`;
+  filas += `<tr class="tot"><td>Total a pagar</td><td></td><td></td><td></td><td>${pesos(r.total)}</td></tr>`;
+
+  // composicion del cobro (como el grafico de consumo de la cuenta de luz)
+  const comp = [["Cobertura","var(--c1)"],["Fotos","var(--c2)"],["Add-ons","var(--c3)"],["Otros","var(--c4)"]]
+    .map(([g,c]) => [g, c, r.L.filter(x=>x.grupo===g).reduce((s,x)=>s+x.tC,0)]).filter(x=>x[2]>0);
+  if(r.impuesto>0) comp.push(["Impuesto","var(--c5)",r.impuesto]);
+  const compTot = comp.reduce((s,x)=>s+x[2],0) || 1;
+  const barra = comp.map(([g,c,m]) => `<div style="width:${m/compTot*100}%;background:${c}" title="${g}"></div>`).join("");
+  const leyenda = comp.map(([g,c,m]) => `<span><i style="background:${c}"></i>${g} ${pesos(m)} · ${Math.round(m/compTot*100)} %</span>`).join("");
+
+  // niveles de edicion (Completa marcada como recomendada)
+  const pu = (l,c) => c < l ? `<s>${pesos(l)}</s> ${pesos(c)}` : pesos(c);
+  const niveles = [["basica",num("lBasica"),num("cBasica")],["completa",num("lCompleta"),num("cCompleta")],["pro",num("lPro"),num("cPro")]]
+    .map(([k,l,c]) => `<div class="nivel ${k==='completa'?'reco':''}">${k==='completa'?'<span class="tag">RECOMENDADA</span>':''}
+      <h4>${NIVELES[k].nombre}</h4><p class="p">${pu(l,c)} <small>por foto</small></p>
+      <ul>${NIVELES[k].items.map(i=>`<li>${i}</li>`).join("")}</ul></div>`).join("");
+
+  // condiciones de venta posterior
+  let venta = "";
+  if(r.pack === "exclusivo"){
+    venta = `<li><b>Pack exclusivo:</b> no habrá venta individual de fotos de este evento a jugadores ni a terceros.</li>`;
+  } else {
+    const c = $("comparte").value;
+    venta = `<li><b>Pack abierto:</b> después de la entrega publicaré una galería con marca de agua donde los jugadores podrán comprar fotos de forma individual, a precios propios que no tienen relación con el organizador.</li>`;
+    if(c === "si") venta += `<li>El organizador indicó que <b>compartirá con los jugadores las fotos que compró</b>: esas fotos quedan fuera de la venta individual, para que nadie pague por una foto que ya tiene.</li>`;
+    else if(c === "no") venta += `<li>El organizador indicó que <b>no compartirá</b> las fotos que compró: todas las fotos del evento pueden quedar a la venta individual.</li>`;
+  }
+  const avisoComparte = r.pack === "abierto" && !$("comparte").value
+    ? `<div class="aviso">Pendiente: el organizador debe indicar si compartirá con los jugadores las fotos que compra. Es obligatorio, para no cobrarle a un jugador una foto que ya tiene.</div>` : "";
+  const avisoPasada = r.pasada && !r.pasada.bloques && r.pasada.ex > 0
+    ? `<li>Terminé ${r.pasada.ex} min después de la hora acordada, dentro de la tolerancia: sin cobro.</li>` : "";
+
+  const hayPago = PAGO.some(id => $(id).value.trim());
+
+  $("hoja").innerHTML = `
+  <div class="cab">
+    <div><div class="marca">RB.Deportes<span>_</span></div>
+      <div class="datos-emisor">Fotografía deportiva · Santiago de Chile<br>@rb.deportes_ · renzob.deportes@gmail.com · +569 7375 6165</div></div>
+    <div class="num">${r.pasada ? "Liquidación" : "Cotización"} N°<b>${v("numero") || "—"}</b>
+      Emitida ${new Date().toLocaleDateString("es-CL")}<br>Válida hasta ${valida}</div>
+  </div>
+
+  <div class="franja">
+    <div class="caja"><h3>Cliente y evento</h3><dl>
+      <dt>Organizador</dt><dd>${v("cliente") || "—"}</dd>
+      <dt>Evento</dt><dd>${v("evento") || "—"}</dd>
+      <dt>Fecha</dt><dd>${fechaLarga($("fechaEvento").value)}</dd>
+      <dt>Horario</dt><dd>${v("horaInicio") || "--:--"} a ${v("horaFin") || "--:--"} hrs</dd>
+      ${$("lugar").value.trim() ? `<dt>Lugar</dt><dd>${v("lugar")}</dd>` : ""}
+      <dt>Pack</dt><dd>${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas</dd>
+    </dl></div>
+    <div class="total-caja"><small>Total a pagar</small><div class="monto">${pesos(r.total)}</div>
+      ${num("anticipo") > 0 ? `<div class="linea"><span>Anticipo para reservar (${num("anticipo")} %)</span><span>${pesos(r.anticipo)}</span></div>
+      <div class="linea"><span>Saldo contra entrega</span><span>${pesos(r.saldo)}</span></div>` : `<div class="linea"><span>Pago contra entrega</span><span></span></div>`}
+    </div>
+  </div>
+
+  ${r.ahorro > 0 ? `<div class="ahorro"><span>Valor a precio de lista: <s style="color:inherit">${pesos(r.subL)}</s><br>Su tarifa preferente le ahorra</span>
+    <span><b>${pesos(r.ahorro)}</b> (${pct.toLocaleString("es-CL")} %)</span></div>` : ""}
+  ${avisoComparte}
+
+  <h2>Detalle de cargos</h2>
+  <table class="det"><thead><tr><th>Concepto</th><th>Cant.</th><th>Valor unit.</th><th>Lista</th><th>Total</th></tr></thead>
+  <tbody>${filas}</tbody></table>
+
+  <h2>Composición del cobro</h2>
+  <div class="barra">${barra}</div><div class="leyenda">${leyenda}</div>
+
+  <h2>Niveles de edición</h2>
+  <div class="niveles">${niveles}</div>
+
+  <h2>Cómo trabajo</h2>
+  <ul class="cond">
+    <li>Cubro la jornada completa sin límite de disparos. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
+    <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
+    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
+    ${avisoPasada}
+    ${venta}
+    <li>Derechos de uso para las redes del club y de los jugadores. No se permite su venta ni uso comercial sin acuerdo previo.</li>
+    ${num("anticipo") > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
+    ${$("notas").value.trim() ? `<li>${v("notas")}</li>` : ""}
+  </ul>
+
+  <h2>Datos de pago</h2>
+  <div class="pago">
+    <div class="caja"><h3>Transferencia</h3>${hayPago ? `<dl>
+      ${$("pTitular").value.trim() ? `<dt>Titular</dt><dd>${v("pTitular")}</dd>` : ""}
+      ${$("pRut").value.trim() ? `<dt>RUT</dt><dd>${v("pRut")}</dd>` : ""}
+      ${$("pBanco").value.trim() ? `<dt>Banco</dt><dd>${v("pBanco")}</dd>` : ""}
+      ${$("pCuenta").value.trim() ? `<dt>Cuenta</dt><dd>${v("pCuenta")}</dd>` : ""}
+      ${$("pMail").value.trim() ? `<dt>Comprobante</dt><dd>${v("pMail")}</dd>` : ""}</dl>`
+      : `<p class="cond">Se envían junto con la confirmación.</p>`}</div>
+    <div class="caja"><h3>Resumen</h3><dl>
+      <dt>Fotos</dt><dd>${r.q.basica} básicas · ${r.q.completa} completas · ${r.q.pro} profesionales</dd>
+      <dt>Boleta</dt><dd>${r.conBoleta ? "Sí, boleta de honorarios" : "No"}</dd>
+      <dt>Total</dt><dd><b>${pesos(r.total)}</b></dd></dl></div>
+  </div>
+
+  <div class="pie"><span>RB.Deportes_ · @rb.deportes_</span><span>Valores en pesos chilenos</span></div>`;
+
+  guardar();
+}
+
+function resumenWsp(){
+  const r = calcular();
+  const t = [];
+  t.push(`*Cotización ${$("numero").value}*`);
+  t.push(`${$("evento").value || "Evento"}: ${fechaLarga($("fechaEvento").value)}, ${$("horaInicio").value} a ${$("horaFin").value}`);
+  t.push("");
+  r.L.forEach(x => t.push(`• ${x.concepto}${x.cant!=null?` (${Number.isInteger(x.cant)?x.cant:x.cant.toLocaleString("es-CL")})`:""}: ${x.cortesia?"cortesía":(x.tC<0?"−"+pesos(-x.tC):pesos(x.tC))}`));
+  if(r.conBoleta) t.push(`• Impuesto boleta: ${pesos(r.impuesto)}`);
+  t.push("");
+  if(r.ahorro>0) t.push(`Precio de lista ${pesos(r.subL)}. Tu descuento: ${pesos(r.ahorro)}`);
+  t.push(`*Total: ${pesos(r.total)}*`);
+  if(num("anticipo")>0) t.push(`Anticipo ${num("anticipo")} %: ${pesos(r.anticipo)} · Saldo: ${pesos(r.saldo)}`);
+  return t.join("\n");
+}
+
+// ---------- persistencia (solo comodidad local) ----------
+function campos(){ return [...document.querySelectorAll("#form input, #form select, #form textarea")].filter(e=>e.id); }
+function guardar(){
+  const d = {}; campos().forEach(e => d[e.id] = e.type === "checkbox" ? e.checked : e.value);
+  try{ localStorage.setItem(CLAVE, JSON.stringify(d)); }catch(_){}
+}
+function aplicar(d){
+  Object.entries(d).forEach(([k,val]) => { const e = $(k); if(!e) return;
+    if(e.type === "checkbox") e.checked = !!val; else e.value = val; });
+}
+function cargar(){
+  try{ const d = JSON.parse(localStorage.getItem(CLAVE) || "null"); if(d){ aplicar(d); return true; } }catch(_){}
+  return false;
+}
+
+document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
+  aplicar(PRESETS[b.dataset.preset]); render();
+}));
+$("limpiar").addEventListener("click", () => {
+  const pago = {}; PAGO.forEach(id => pago[id] = $(id).value);   // los datos de pago se mantienen
+  $("form").reset(); aplicar(PRESETS.lista); aplicar(pago);
+  $("numero").value = numeroNuevo(); render();
+});
+$("copiar").addEventListener("click", async () => {
+  const txt = resumenWsp(), b = $("copiar");
+  try{ await navigator.clipboard.writeText(txt); b.textContent = "¡Copiado!"; }
+  catch(_){ prompt("Copia el resumen:", txt); }
+  setTimeout(() => b.textContent = "Copiar resumen WhatsApp", 1800);
+});
+$("form").addEventListener("input", render);
+$("form").addEventListener("change", render);
+
+if(!cargar()) $("numero").value = numeroNuevo();
+render();
+})();
+</script>
+</body>
+</html>
