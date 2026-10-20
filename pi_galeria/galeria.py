@@ -6476,9 +6476,9 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-calc{display:grid;gap:2rem;grid-template-columns:minmax(0,1fr) minmax(0,21rem);
   margin-top:2.2rem;align-items:start}
 .tf-form{display:grid;gap:1.2rem;margin:0}
-.tf-form label.tf-l{display:block;font-family:var(--mono);font-size:.66rem;
+.tf-form .tf-l{display:block;font-family:var(--mono);font-size:.66rem;
   letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem}
-.tf-form input[type=number],.tf-form select{width:100%;background:var(--panel);
+.tf-form input[type=number],.tf-form input[type=time],.tf-form select{width:100%;background:var(--panel);
   color:var(--cal);border:1px solid var(--linea2);border-radius:2px;
   padding:.7rem .75rem;font:inherit;font-size:16px}
 .tf-dos,.tf-tres{display:grid;gap:.8rem;grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -6499,6 +6499,52 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-cond{display:grid;gap:2rem 3rem;grid-template-columns:repeat(2,minmax(0,1fr));
   margin-top:2.2rem}
 .tf-cond h3{margin:0;font-size:1rem;color:var(--cal)}
+/* que lleva cada foto: tabla de checks, la columna recomendada encendida */
+.tf-tabla-wrap{margin-top:2.2rem;overflow-x:auto}
+.tf-tabla{width:100%;border-collapse:collapse;font-size:.95rem}
+.tf-tabla th,.tf-tabla td{padding:.75rem .6rem;border-bottom:1px solid var(--linea);
+  text-align:center}
+.tf-tabla tbody th{text-align:left;color:var(--humo);font-weight:400}
+.tf-tabla thead th{color:var(--cal);font-weight:600;vertical-align:bottom;
+  border-bottom-color:var(--linea2)}
+.tf-tabla thead th:first-child{text-align:left;font-family:var(--mono);
+  font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);
+  font-weight:500}
+.tf-tabla thead small{display:block;font-family:var(--mono);font-size:.58rem;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--cancha);font-weight:700;
+  margin-bottom:.3rem}
+.tf-tabla .reco{background:rgba(198,240,74,.06)}
+.tf-si{color:var(--cancha);font-weight:700;font-size:1.05rem}
+.tf-no{color:var(--linea2)}
+@media (max-width:560px){
+  .tf-tabla{font-size:.82rem}
+  .tf-tabla th,.tf-tabla td{padding:.6rem .2rem}
+  .tf-tabla thead th{font-size:.74rem}
+  .tf-tabla thead small{font-size:.5rem;letter-spacing:.08em}
+}
+/* calculadora: los packs en chico; el recomendado brilla, el elegido se pinta */
+.tf-mini{display:grid;gap:.6rem;grid-template-columns:repeat(4,minmax(0,1fr));
+  margin-top:.2rem}
+.tf-mp{position:relative;display:flex;flex-direction:column;gap:.1rem;
+  padding:.85rem .75rem .75rem;border:1px solid var(--linea2);background:var(--panel);
+  cursor:pointer;transition:border-color .2s,box-shadow .3s,background .2s}
+.tf-mp input{position:absolute;opacity:0;pointer-events:none}
+.tf-mp b{color:var(--cal);font-size:.98rem;font-weight:600}
+.tf-mp span{color:var(--humo);font-size:.8rem}
+.tf-mp em{font-style:normal;font-family:var(--mono);font-size:.78rem;
+  color:var(--cal);margin-top:.35rem}
+.tf-mp i{position:absolute;top:-.6rem;left:.6rem;font-style:normal;
+  font-family:var(--mono);font-size:.55rem;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--noche);background:var(--cancha);
+  padding:.15rem .45rem;opacity:0;transform:translateY(4px);
+  transition:opacity .25s,transform .25s}
+.tf-mp:hover{border-color:var(--humo)}
+.tf-mp.rec{box-shadow:0 0 0 1px rgba(198,240,74,.5),0 0 24px rgba(198,240,74,.2)}
+.tf-mp.rec i{opacity:1;transform:none}
+.tf-mp.on{border-color:var(--cancha);background:rgba(198,240,74,.08)}
+.tf-mp:focus-within{outline:2px solid var(--cancha);outline-offset:2px}
+@media (max-width:560px){.tf-mini{grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.9rem .6rem}}
 @media (max-width:860px){
   .tf-grid,.tf-calc,.tf-cond{grid-template-columns:1fr}
   .tf-grid{gap:1.6rem}
@@ -6560,15 +6606,15 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 {% if T.tar_niv_rot %}<p class="rotulo">{{ T.tar_niv_rot }}</p>{% endif %}
 <h2 class="tf-h2">{{ T.tar_niv_tit }}</h2>
 {% if T.tar_niv_sub %}<p class="tf-sub">{{ T.tar_niv_sub }}</p>{% endif %}
-<div class="tf-grid">
-{% for k in ("basica", "completa", "pro") %}{% set N = R.niveles[k] %}
-<div class="tf-card{{ ' reco' if k == 'completa' }}">
-{% if k == 'completa' and T.tar_niv_tag %}<span class="tf-tag">{{ T.tar_niv_tag }}</span>{% endif %}
-<h3>{{ N.nombre }}</h3>
-<ul class="tf-ul">{% for it in N["items"] %}<li>{{ it }}</li>{% endfor %}</ul>
-</div>
-{% endfor %}
-</div>
+<div class="tf-tabla-wrap"><table class="tf-tabla">
+<thead><tr><th scope="col">Qu&eacute; se hace</th>
+{% for k in ("basica", "completa", "pro") %}<th scope="col" class="{{ 'reco' if k == 'completa' }}">
+{% if k == 'completa' and T.tar_niv_tag %}<small>{{ T.tar_niv_tag }}</small>{% endif %}
+{{ R.niveles[k].nombre.replace("Edición ", "")|capitalize }}</th>{% endfor %}</tr></thead>
+<tbody>{% for fila in R.tabla_niveles %}<tr><th scope="row">{{ fila[0] }}</th>
+{% for si in fila[1:] %}<td class="{{ 'reco' if loop.index == 2 }}">{% if si %}<span class="tf-si" role="img" aria-label="Incluye">&#10003;</span>{% else %}<span class="tf-no" role="img" aria-label="No incluye">&mdash;</span>{% endif %}</td>{% endfor %}</tr>
+{% endfor %}</tbody>
+</table></div>
 </section>
 
 <section class="bloque" id="calcular">
@@ -6577,22 +6623,31 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 {% if T.tar_calc_sub %}<p class="tf-sub">{{ T.tar_calc_sub }}</p>{% endif %}
 <div class="tf-calc">
 <form class="tf-form" id="tf-form">
-  <div class="tf-dos">
-    <div><label class="tf-l" for="tf-h">Horas de cobertura</label>
-      <input id="tf-h" type="number" min="1" max="12" step="0.5" value="{{ L.horas }}" inputmode="decimal"></div>
-    <div><label class="tf-l" for="tf-c">Canchas al mismo tiempo</label>
-      <input id="tf-c" type="number" min="1" max="3" step="1" value="1" inputmode="numeric"></div>
+  <div class="tf-tres">
+    <div><label class="tf-l" for="tf-ini">Empieza el primer partido</label>
+      <input id="tf-ini" type="time" value="19:00"></div>
+    <div><label class="tf-l" for="tf-fin">Termina el &uacute;ltimo</label>
+      <input id="tf-fin" type="time" value="22:00"></div>
+    <div><label class="tf-l" for="tf-c">Partidos a la vez</label>
+      <input id="tf-c" type="number" min="1" max="4" step="1" value="1" inputmode="numeric"></div>
   </div>
-  <div><label class="tf-l" for="tf-p">Fotos editadas</label>
-    <select id="tf-p">
-    {% for k, P in R.packs.items() %}<option value="{{ k }}"{{ ' selected' if P.reco }}>Pack {{ P.nombre }} &middot; {{ P.q|sum }} fotos{{ ' (recomendado)' if P.reco }}</option>{% endfor %}
-    <option value="">A mi medida: elijo cu&aacute;ntas de cada nivel</option>
-    </select></div>
+  <p class="tf-ayuda" id="tf-hinfo" style="margin-top:-.6rem"></p>
+  <div><span class="tf-l">Fotos editadas</span>
+    <div class="tf-mini" role="radiogroup" aria-label="Pack de fotos">
+    {% for k, P in R.packs.items() %}
+      <label class="tf-mp"><input type="radio" name="tf-p" value="{{ k }}"{{ ' checked' if P.reco }}>
+        <i>Te lo recomiendo</i><b>{{ P.nombre }}</b><span>{{ P.q|sum }} fotos</span><em>{{ pesos(P.precio) }}</em></label>
+    {% endfor %}
+      <label class="tf-mp"><input type="radio" name="tf-p" value="">
+        <i>Te lo recomiendo</i><b>A tu medida</b><span>Eliges cu&aacute;ntas</span><em>por foto</em></label>
+    </div>
+    <p class="tf-ayuda" id="tf-reco"></p>
+  </div>
   <div id="tf-medida" hidden>
     <div class="tf-tres">
-      <div><label class="tf-l" for="tf-qb">B&aacute;sicas</label><input id="tf-qb" type="number" min="0" step="10" value="60" inputmode="numeric"></div>
-      <div><label class="tf-l" for="tf-qc">Completas</label><input id="tf-qc" type="number" min="0" step="10" value="40" inputmode="numeric"></div>
-      <div><label class="tf-l" for="tf-qp">Profesionales</label><input id="tf-qp" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
+      <div><label class="tf-l" for="tf-qb">B&aacute;sicas &middot; {{ pesos(F.basica) }}</label><input id="tf-qb" type="number" min="0" step="10" value="60" inputmode="numeric"></div>
+      <div><label class="tf-l" for="tf-qc">Completas &middot; {{ pesos(F.completa) }}</label><input id="tf-qc" type="number" min="0" step="10" value="40" inputmode="numeric"></div>
+      <div><label class="tf-l" for="tf-qp">Profesionales &middot; {{ pesos(F.pro) }}</label><input id="tf-qp" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
     </div>
   </div>
   <div><label class="tf-l" for="tf-x">Venta de fotos a jugadores</label>
@@ -6614,7 +6669,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
   <span class="tf-l" style="font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo)">Total de la fecha</span>
   <p class="tf-precio" id="tf-tot">&mdash;</p>
   <dl>
-    <dt>Cobertura</dt><dd id="tf-dc">&mdash;</dd>
+    <dt id="tf-dcl">Cobertura</dt><dd id="tf-dc">&mdash;</dd>
     <dt id="tf-dfl">Fotos</dt><dd id="tf-df">&mdash;</dd>
     <dt>Extras</dt><dd id="tf-de">&mdash;</dd>
     <dt>Para reservar (las horas)</dt><dd id="tf-da">&mdash;</dd>
@@ -6654,13 +6709,45 @@ function tramo(n, tr){
   return precio + Math.round((n - cant) * precio / cant / 100) * 100;
 }
 const n0 = (id, min) => Math.max(min || 0, parseFloat($(id).value) || 0);
+const minutos = t => { if(!t) return null; const [a, b] = t.split(":").map(Number); return a * 60 + b; };
+const radios = [...document.querySelectorAll('input[name="tf-p"]')];
+let aMano = false;          // si el visitante eligio un pack, la recomendacion ya no se lo cambia
+radios.forEach(r => r.addEventListener("input", () => { aMano = true; }));
+// el pack cuyo total de fotos queda mas cerca de lo que da la jornada
+function recomendar(h, c){
+  const n = h * R.fotos_por_hora * (1 + 0.5 * (c - 1));
+  let mejor = null, dif = Infinity;
+  for(const [k, P] of Object.entries(R.packs)){
+    const d = Math.abs(P.q[0] + P.q[1] + P.q[2] - n);
+    if(d < dif){ dif = d; mejor = k; }
+  }
+  return [mejor, Math.round(n / 10) * 10];
+}
 function calcular(){
-  const h = n0("tf-h"), c = Math.round(n0("tf-c", 1));
-  const P = R.packs[$("tf-p").value];
+  const a = minutos($("tf-ini").value), b = minutos($("tf-fin").value);
+  let dur = (a === null || b === null) ? 0 : b - a;
+  if(a !== null && b !== null && dur <= 0) dur += 1440;     // termina pasada la medianoche
+  const h = dur / 60, c = Math.round(n0("tf-c", 1));
+  const hTxt = (Math.round(h * 100) / 100).toLocaleString("es-CL");
+  const extra = Math.max(0, c - R.canchas_incluidas);
+  $("tf-hinfo").textContent = !h ? "Indica a qué hora empieza el primer partido y a qué hora termina el último."
+    : hTxt + " h de cobertura · " + (extra
+        ? "+" + R.cancha_extra_pct * extra + " % por " + extra + (extra > 1 ? " partidos extra" : " partido extra") + " a la vez"
+        : "hasta " + R.canchas_incluidas + " partidos a la vez sin recargo");
+  const [reco, nSug] = recomendar(h, c);
+  if(!aMano){ const r = radios.find(r => r.value === reco); if(r) r.checked = true; }
+  radios.forEach(r => {
+    const card = r.closest(".tf-mp");
+    card.classList.toggle("on", r.checked);
+    card.classList.toggle("rec", !!h && r.value === reco);
+  });
+  $("tf-reco").textContent = h ? "Para " + hTxt + " h con " + c + (c > 1 ? " partidos" : " partido")
+    + " a la vez salen unas " + nSug + " fotos que valen la pena: te recomiendo el pack " + R.packs[reco].nombre + "." : "";
+  const P = R.packs[(radios.find(r => r.checked) || {}).value];
   $("tf-medida").hidden = !!P;
   const q = P ? P.q : ["tf-qb", "tf-qc", "tf-qp"].map(id => Math.round(n0(id)));
   const n = q[0] + q[1] + q[2];
-  const cob = h * R.hora * (1 + R.cancha_extra_pct / 100 * Math.max(0, c - R.canchas_incluidas));
+  const cob = h * R.hora * (1 + R.cancha_extra_pct / 100 * extra);
   let fotos = P ? P.precio : q[0] * R.foto.basica + q[1] * R.foto.completa + q[2] * R.foto.pro;
   const excl = $("tf-x").value === "exclusivo";
   if(excl) fotos *= 1 + R.exclusivo_pct / 100;
@@ -6670,6 +6757,7 @@ function calcular(){
   if($("tf-xs").checked){ extras += tramo(n, R.seleccion); xs.push("que elijas tú las fotos"); }
   const total = b100(cob + fotos + extras);
   $("tf-tot").textContent = pesos(total);
+  $("tf-dcl").textContent = h ? "Cobertura (" + hTxt + " h)" : "Cobertura";
   $("tf-dc").textContent = pesos(b100(cob));
   $("tf-dfl").textContent = "Fotos (" + n + ")";
   $("tf-df").textContent = pesos(b100(fotos));
@@ -6677,8 +6765,8 @@ function calcular(){
   $("tf-da").textContent = pesos(cob);       // el anticipo son las horas
   const ir = $("tf-ir");
   if(ir){
-    const hTxt = h.toLocaleString("es-CL");
-    const msg = "Hola Renzo, quiero cotizar una fecha: " + hTxt + " h, " + c + (c > 1 ? " canchas" : " cancha") + ", "
+    const msg = "Hola Renzo, quiero cotizar una fecha: de " + $("tf-ini").value + " a " + $("tf-fin").value
+      + " (" + hTxt + " h), " + c + (c > 1 ? " partidos" : " partido") + " a la vez, "
       + (P ? "pack " + P.nombre + " (" + n + " fotos)"
            : "fotos a mi medida (" + q[0] + " básicas, " + q[1] + " completas, " + q[2] + " profesionales)")
       + ", venta " + (excl ? "exclusiva" : "abierta")
@@ -7988,6 +8076,10 @@ queda: el fondo blanco de un JPG se ve como un cuadrado.</p>
 TARIFAS_DEF = {
     "hora": 8000,
     "canchas_incluidas": 2, "cancha_extra_pct": 15,
+    # para recomendar pack en la calculadora: unas 50 fotos por hora (lo que
+    # dieron Renato, Babbo y Prime League) y la mitad mas por cada partido
+    # simultaneo extra
+    "fotos_por_hora": 50,
     # precio por foto DENTRO de un pack. El pedido a medida lleva medida_pct
     # encima y no tiene descuento: tarifas() lo deja en "foto".
     "foto_pack": {"basica": 200, "completa": 390, "pro": 700},
@@ -8036,7 +8128,8 @@ CAMPOS_TARIFAS = (
     ("Cobertura", (
         ("hora", "Valor de la hora ($)"),
         ("canchas_incluidas", "Canchas incluidas sin recargo"),
-        ("cancha_extra_pct", "Recargo por cada cancha extra (%)"))),
+        ("cancha_extra_pct", "Recargo por cada cancha extra (%)"),
+        ("fotos_por_hora", "Fotos por hora, para recomendar el pack"))),
     ("Precio por foto", (
         ("foto_pack.basica", "B\u00e1sica, dentro de un pack ($)"),
         ("foto_pack.completa", "Completa, dentro de un pack ($)"),
@@ -8096,6 +8189,13 @@ def tarifas():
         except (KeyError, IndexError, ValueError, TypeError):
             pass              # un campo que ya no existe en el codigo
     t["seleccion"] = sorted(t["seleccion"])     # precio_de los quiere en orden
+    # la tabla de /tarifas: una fila por tarea, con en que niveles va. Cada
+    # nivel incluye lo de los anteriores ("Todo lo de la edicion basica")
+    orden = ("basica", "completa", "pro")
+    t["tabla_niveles"] = [
+        [it] + [j >= i for j in range(len(orden))]
+        for i, k in enumerate(orden) for it in t["niveles"][k]["items"]
+        if not it.startswith("Todo lo de")]
     fp = t["foto_pack"]
     t["foto"] = {k: int(round(v * (1 + t["medida_pct"] / 100) / 10) * 10)
                  for k, v in fp.items()}
@@ -11107,6 +11207,12 @@ def test():
         assert (precio_de(50, sel), precio_de(51, sel), precio_de(160, sel)) == (4990, 7990, 13990)
         assert precio_de(330, sel) == 19990 + 2000
         assert "hasta 50, $4.990" in tar, "no se ven los tramos de la seleccion"
+        # la tabla de niveles: cada nivel suma los de antes (5 basicas en los
+        # tres, 3 completas en dos, 4 profesionales en uno) = 25 checks
+        assert tar.count('class="tf-si"') == 25, tar.count('class="tf-si"')
+        assert "Todo lo de" not in tar.split('class="tf-tabla"')[1].split("</table>")[0]
+        # la calculadora: un pack chico por pack, mas el de a tu medida
+        assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
         # un precio a mano como 3.990 sale tal cual, sin redondear a 4.000
         c.post("/panel/tarifas", data={"partidos": "3990"})
         assert "$3.990" in c.get("/tarifas").get_data(as_text=True), "redondeo el 990"
