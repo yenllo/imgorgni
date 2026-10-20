@@ -7399,6 +7399,8 @@ queda: el fondo blanco de un JPG se ve como un cuadrado.</p>
 # - La cobertura se cobra por hora. No hay "hora extra": la hora vale lo
 #   acordado. Hora pasada: si se sigue fotografiando despues del termino, 15 min
 #   de tolerancia y despues cada bloque de 20 min iniciado a 1/3 de la hora.
+# - Canchas simultaneas: siempre son contiguas, asi que hasta 2 van incluidas;
+#   desde la tercera, +15 % de la cobertura por cancha (19/10/2026).
 # - Pack Abierto (mas barato): galeria publica con venta individual posterior;
 #   el organizador DEBE declarar si comparte con los jugadores las fotos que
 #   compro. Pack Exclusivo: sin venta individual, recargo sobre las fotos.
@@ -7539,6 +7541,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
       <div><label>Lugar</label><input id="lugar" placeholder="Recinto, comuna"></div>
       <div><label>Inicio</label><input id="horaInicio" type="time" value="19:00"></div>
       <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
+      <div><label>Canchas simultáneas</label><input id="canchas" type="number" min="1" value="1"></div>
       <div><label>N° cotización</label><input id="numero"></div>
       <div><label>Válida por (días)</label><input id="validez" type="number" min="1" value="15"></div>
     </div>
@@ -7663,14 +7666,14 @@ const NIVELES = {
 };
 
 const PRESETS = {
-  lista: {lHora:8000,cHora:8000,lBasica:200,cBasica:200,lCompleta:390,cCompleta:390,lPro:700,cPro:700,
+  lista: {canchas:1,lHora:8000,cHora:8000,lBasica:200,cBasica:200,lCompleta:390,cCompleta:390,lPro:700,cPro:700,
           lLogo:10000,cLogo:10000,gLogo:false,lPartidos:3000,cPartidos:3000,gPartidos:false,
           lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volAuto:true,boleta:"si",anticipo:30,
           aLogo:false,aPartidos:false,aSeleccion:false},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
   // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
-          lHora:8000,cHora:6000,lBasica:200,cBasica:110,lCompleta:390,cCompleta:250,lPro:700,cPro:420,
+          canchas:1,lHora:8000,cHora:6000,lBasica:200,cBasica:110,lCompleta:390,cCompleta:250,lPro:700,cPro:420,
           lLogo:10000,cLogo:10000,gLogo:true,aLogo:true,lPartidos:3000,cPartidos:3000,gPartidos:true,aPartidos:true,
           lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volAuto:false,volumen:0,
           boleta:"no",anticipo:0,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
@@ -7715,6 +7718,10 @@ function calcular(){
   const hTxt = (Math.round(horas*100)/100).toLocaleString("es-CL");
   linea("Cobertura","Cobertura de la jornada",
         `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`, horas, num("lHora"), num("cHora"));
+  // hasta 2 canchas contiguas van incluidas; desde la tercera, +15 % de la cobertura por cancha
+  const extra = Math.max(0, ent("canchas") - 2);
+  if(extra) L.push({grupo:"Cobertura",concepto:`Canchas simultáneas (${ent("canchas")})`,detalle:"2 incluidas · +15 % por cancha desde la tercera",
+                    cant:null,tL:L[0].tL*0.15*extra,tC:L[0].tC*0.15*extra});
 
   if(q.basica)   linea("Fotos","Fotos con edición básica","", q.basica, num("lBasica"), num("cBasica"));
   if(q.completa) linea("Fotos","Fotos con edición completa","Recomendada", q.completa, num("lCompleta"), num("cCompleta"));
@@ -7872,7 +7879,7 @@ function render(){
 
   <h2>Cómo trabajo</h2>
   <ul class="cz-cond">
-    <li>Cubro la jornada completa sin límite de disparos. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
+    <li>Cubro la jornada completa sin límite de disparos, hasta 2 canchas contiguas en simultáneo sin recargo; desde la tercera, +15 % de la cobertura por cada cancha. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
     <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
     <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
     ${avisoPasada}
