@@ -1415,10 +1415,10 @@ CAMPOS = (
          "Entrega por galer\u00eda privada o Google Drive"),
         ("tar_letra_tit", "Letra chica, titulo", 1, "Letra chica"),
         ("tar_letra", "Letra chica: una linea por vi\u00f1eta, lo de antes "
-         "de los dos puntos va en negrita ({anticipo} {canchas} {cancha_pct} "
+         "de los dos puntos va en negrita ({hora} {canchas} {cancha_pct} "
          "{media_hora})", 8,
-         "Reserva: {anticipo} % al confirmar la fecha, el resto contra "
-         "entrega.\n"
+         "Reserva: al confirmar la fecha se paga la cobertura ({hora} por "
+         "hora); las fotos, contra entrega.\n"
          "Canchas: hasta {canchas} contiguas sin recargo; desde la siguiente, "
          "+{cancha_pct} % de la cobertura por cancha.\n"
          "Si la jornada se alarga: los primeros 15 minutos no se cobran. "
@@ -4048,7 +4048,7 @@ def guardar_tarifas():
             except ValueError:
                 malos.append(etiqueta)
                 continue
-            es_pct = ruta.endswith("_pct") or ruta in ("retencion", "anticipo")
+            es_pct = ruta.endswith("_pct") or ruta == "retencion"
             if v < 0 or v != v or (es_pct and v >= 100):
                 malos.append(etiqueta)
                 continue
@@ -6515,7 +6515,7 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 <h1 class="tit">{{ T.tar_titulo }}</h1>
 <p class="bajada">{{ T.tar_bajada }}</p>
 {% if T.tar_ancla %}<p class="tf-ancla">{{ tx('tar_ancla', horas=L.horas, pack=L.nombre, fotos=L.q|sum,
-  total=fuerte(pesos(redondo(L.horas * R.hora + L.precio, 100)))) }}</p>{% endif %}
+  total=fuerte(pesos(L.horas * R.hora + L.precio))) }}</p>{% endif %}
 <p class="botones"><a class="wsp" href="#calcular">{{ T.tar_boton_calc }}</a>
 <a class="wsp hueco" href="#packs">{{ T.tar_boton_packs }}</a></p>
 </section>
@@ -6523,7 +6523,7 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 <section class="bloque">
 <div class="como">
 <h2>{{ T.tar_como_tit }}</h2>
-<div class="paso"><b>{{ T.tar_paso1_t }}</b><p>{{ tx('tar_paso1', hora=pesos(redondo(R.hora, 10)),
+<div class="paso"><b>{{ T.tar_paso1_t }}</b><p>{{ tx('tar_paso1', hora=pesos(R.hora),
   canchas=R.canchas_incluidas) }}</p></div>
 <div class="paso"><b>{{ T.tar_paso2_t }}</b><p>{{ T.tar_paso2 }}</p></div>
 <div class="paso"><b>{{ T.tar_paso3_t }}</b><p>{{ T.tar_paso3 }}</p></div>
@@ -6540,7 +6540,7 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 <div class="tf-card{{ ' reco' if P.reco }}">
 {% if P.reco and T.tar_reco %}<span class="tf-tag">{{ T.tar_reco }}</span>{% endif %}
 <h3>{{ P.nombre }}</h3>
-<p class="tf-precio">{{ pesos(redondo(P.precio, 100)) }}<small>{{ P.q|sum }} fotos editadas + la cobertura</small></p>
+<p class="tf-precio">{{ pesos(P.precio) }}<small>{{ P.q|sum }} fotos editadas + la cobertura</small></p>
 <ul class="tf-ul">
 <li><b>{{ P.q[0] }}</b> con edici&oacute;n b&aacute;sica</li>
 <li><b>{{ P.q[1] }}</b> con edici&oacute;n completa</li>
@@ -6603,9 +6603,9 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
     {% if T.tar_venta_nota %}<p class="tf-ayuda">{{ T.tar_venta_nota }}</p>{% endif %}</div>
   <div>
     <span class="tf-l" style="display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem">Extras</span>
-    <label class="tf-chk"><input type="checkbox" id="tf-xl"><span>Logo o marco de la liga &middot; {{ pesos(redondo(R.logo, 100)) }}<small>En todas las fotos, con versi&oacute;n para redes</small></span></label>
-    <label class="tf-chk"><input type="checkbox" id="tf-xp"><span>Separaci&oacute;n por partidos &middot; {{ pesos(redondo(R.partidos, 100)) }}<small>Una carpeta por partido, con conteo de fotos</small></span></label>
-    <label class="tf-chk"><input type="checkbox" id="tf-xs"><span>Yo elijo las fotos por ti &middot; {{ pesos(redondo(R.sel_foto, 10)) }} por foto<small>M&iacute;nimo {{ pesos(redondo(R.sel_min, 100)) }}. Te ahorras revisar la galer&iacute;a</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xl"><span>Logo o marco de la liga &middot; {{ pesos(R.logo) }}<small>En todas las fotos, con versi&oacute;n para redes</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xp"><span>Separaci&oacute;n por partidos &middot; {{ pesos(R.partidos) }}<small>Una carpeta por partido, con conteo de fotos</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xs"><span>Yo elijo las fotos por ti &middot; {{ pesos(R.sel_foto) }} por foto<small>M&iacute;nimo {{ pesos(R.sel_min) }}. Te ahorras revisar la galer&iacute;a</small></span></label>
   </div>
 </form>
 <aside class="tf-res" aria-live="polite">
@@ -6615,7 +6615,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
     <dt>Cobertura</dt><dd id="tf-dc">&mdash;</dd>
     <dt id="tf-dfl">Fotos</dt><dd id="tf-df">&mdash;</dd>
     <dt>Extras</dt><dd id="tf-de">&mdash;</dd>
-    <dt>Para reservar ({{ R.anticipo }} %)</dt><dd id="tf-da">&mdash;</dd>
+    <dt>Para reservar (las horas)</dt><dd id="tf-da">&mdash;</dd>
   </dl>
   {% if T.tar_traslado %}<p class="tf-ayuda">{{ T.tar_traslado }}</p>{% endif %}
   {% if wsp %}<a class="wsp" id="tf-ir" href="https://wa.me/{{ wsp }}" rel="noopener">{{ T.tar_boton_wsp }}</a>{% endif %}
@@ -6631,7 +6631,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 {% for l in txl('tar_incl', galeria_horas=R.galeria_horas, entrega_dias=R.entrega_dias) %}<li>{{ l }}</li>{% endfor %}
 </ul></div>
 <div><h3>{{ T.tar_letra_tit }}</h3><ul class="tf-ul">
-{% for l in txl('tar_letra', negrita=True, anticipo=R.anticipo, canchas=R.canchas_incluidas,
+{% for l in txl('tar_letra', negrita=True, hora=pesos(R.hora), canchas=R.canchas_incluidas,
    cancha_pct=R.cancha_extra_pct, media_hora=pesos(redondo(2 * R.hora / 3, 10))) %}<li>{{ l }}</li>{% endfor %}
 </ul></div>
 </div>
@@ -6642,7 +6642,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 const R = {{ tarifas|tojson }}, WSP = {{ wsp|tojson }};
 const $ = id => document.getElementById(id);
 const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
-const b100 = n => Math.round(n / 100) * 100;
+const b100 = n => Math.round(n);
 const n0 = (id, min) => Math.max(min || 0, parseFloat($(id).value) || 0);
 function calcular(){
   const h = n0("tf-h"), c = Math.round(n0("tf-c", 1));
@@ -6664,7 +6664,7 @@ function calcular(){
   $("tf-dfl").textContent = "Fotos (" + n + ")";
   $("tf-df").textContent = pesos(b100(fotos));
   $("tf-de").textContent = extras ? pesos(b100(extras)) : "—";
-  $("tf-da").textContent = pesos(Math.round(total * R.anticipo / 100 / 100) * 100);
+  $("tf-da").textContent = pesos(cob);       // el anticipo son las horas
   const ir = $("tf-ir");
   if(ir){
     const hTxt = h.toLocaleString("es-CL");
@@ -8010,7 +8010,9 @@ TARIFAS_DEF = {
     "logo": 10000, "partidos": 3000, "exclusivo_pct": 15,
     "sel_foto": 40, "sel_min": 2000,
     "retencion": 15.25,   # boleta de honorarios 2026: sube cada enero
-    "anticipo": 30, "entrega_dias": 4, "galeria_horas": 48,
+    # el anticipo no es un %: es la cobertura (las horas, con el recargo de
+    # canchas), sea cual sea el pack (20/10/2026)
+    "entrega_dias": 4, "galeria_horas": 48,
 }
 
 # Lo que se edita en /panel/tarifas, por seccion: (ruta en TARIFAS_DEF, etiqueta).
@@ -8044,7 +8046,6 @@ CAMPOS_TARIFAS = (
         ("sel_min", "Selecci\u00f3n personal, m\u00ednimo ($)"))),
     ("Pago y entrega", (
         ("retencion", "Retenci\u00f3n de la boleta de honorarios (%)"),
-        ("anticipo", "Anticipo para reservar (%)"),
         ("entrega_dias", "Entrega, d\u00edas h\u00e1biles desde la selecci\u00f3n"),
         ("galeria_horas", "Galer\u00eda con marca de agua, horas"))),
 )
@@ -8378,7 +8379,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
   <fieldset><legend>6. Traslado, boleta y pago</legend>
     <div class="cz-f">
       <div><label>Traslado y estacionamiento ($)</label><input id="traslado" type="number" min="0" value="0"></div>
-      <div><label>Anticipo para reservar (%)</label><input id="anticipo" type="number" min="0" max="100" value="30"></div>
+      <div><label>&nbsp;</label><label class="cz-chk" style="margin:0"><input type="checkbox" id="anticipo" checked> Anticipo: la cobertura</label></div>
       <div><label>Boleta de honorarios</label><select id="boleta"><option value="si">Sí (bruteada)</option><option value="no">No</option></select></div>
       <div><label>Retención (%)</label><input id="retencion" type="number" step="0.01" value="15.25"></div>
       <div><label>Entrega (días hábiles)</label><input id="plazo" type="number" min="1" value="4"></div>
@@ -8430,7 +8431,7 @@ const PRESETS = {
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
           lSel:T.sel_foto,cSel:T.sel_foto,gSel:false,lSelMin:T.sel_min,cSelMin:T.sel_min,volumen:0,boleta:"si",
-          anticipo:T.anticipo,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
+          anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
   // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
@@ -8438,7 +8439,7 @@ const PRESETS = {
           packFotos:"",canchas:1,lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
           lSel:T.sel_foto,cSel:T.sel_foto,gSel:false,lSelMin:T.sel_min,cSelMin:T.sel_min,volumen:0,
-          boleta:"no",anticipo:0,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
+          boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
 };
 
 // Packs cerrados (19/10/2026). Liga es el que se empuja. Su "lista" en la boleta
@@ -8556,7 +8557,10 @@ function calcular(){
   const ret = num("retencion")/100;
   const total = conBoleta ? Math.round(subC/(1-ret)) : Math.round(subC);
   const impuesto = total - Math.round(subC);
-  const anticipo = Math.round(total*num("anticipo")/100);
+  // el anticipo son las horas (con el recargo de canchas), no un % del total;
+  // con boleta va bruteado igual que el total
+  const cob = L.filter(x=>x.grupo==="Cobertura").reduce((s,x)=>s+x.tC,0);
+  const anticipo = $("anticipo").checked ? Math.min(total, Math.round(conBoleta ? cob/(1-ret) : cob)) : 0;
   return {L, horas, q, totalFotos, pack, P, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
           ahorro: subL - subC, conBoleta, ret, pasada};
 }
@@ -8637,7 +8641,7 @@ function render(){
       <dt>Pack</dt><dd>${r.P ? r.P.nombre + " · " : ""}${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas</dd>
     </dl></div>
     <div class="cz-total-caja"><small>Total a pagar</small><div class="cz-monto">${pesos(r.total)}</div>
-      ${num("anticipo") > 0 ? `<div class="cz-linea"><span>Anticipo para reservar (${num("anticipo")} %)</span><span>${pesos(r.anticipo)}</span></div>
+      ${r.anticipo > 0 ? `<div class="cz-linea"><span>Anticipo para reservar (la cobertura)</span><span>${pesos(r.anticipo)}</span></div>
       <div class="cz-linea"><span>Saldo contra entrega</span><span>${pesos(r.saldo)}</span></div>` : `<div class="cz-linea"><span>Pago contra entrega</span><span></span></div>`}
     </div>
   </div>
@@ -8664,7 +8668,7 @@ function render(){
     ${avisoPasada}
     ${venta}
     <li>Derechos de uso para las redes del club y de los jugadores. No se permite su venta ni uso comercial sin acuerdo previo.</li>
-    ${num("anticipo") > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
+    ${r.anticipo > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
     ${$("notas").value.trim() ? `<li>${v("notas")}</li>` : ""}
   </ul>
 
@@ -8699,7 +8703,7 @@ function resumenWsp(){
   t.push("");
   if(r.ahorro>0) t.push(`Precio de lista ${pesos(r.subL)}. Tu descuento: ${pesos(r.ahorro)}`);
   t.push(`*Total: ${pesos(r.total)}*`);
-  if(num("anticipo")>0) t.push(`Anticipo ${num("anticipo")} %: ${pesos(r.anticipo)} · Saldo: ${pesos(r.saldo)}`);
+  if(r.anticipo>0) t.push(`Anticipo (la cobertura): ${pesos(r.anticipo)} · Saldo: ${pesos(r.saldo)}`);
   return t.join("\n");
 }
 
@@ -11085,6 +11089,10 @@ def test():
         assert "$8.000" in tar and "$9.440" not in tar, "se publico con boleta"
         assert "boleta" not in tar.lower(), "la pagina publica menciona la boleta"
         assert "$43.000" in tar, "el pack Liga no salio de 43.000"
+        # un precio a mano como 3.990 sale tal cual, sin redondear a 4.000
+        c.post("/panel/tarifas", data={"partidos": "3990"})
+        assert "$3.990" in c.get("/tarifas").get_data(as_text=True), "redondeo el 990"
+        c.post("/panel/tarifas/restaurar")
         assert "{hora}" not in tar and 'data-t="' not in tar, "quedo una marca o el editor"
         # el editor del sitio: la misma pagina con los textos editables, sin
         # indexar; guardar cambia la publica y una clave inventada se ignora
@@ -11106,8 +11114,8 @@ def test():
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
         assert c.get("/panel/tarifas").status_code == 200
-        r = c.post("/panel/tarifas", data={"hora": "9000", "anticipo": "abc"})
-        assert "abc" not in r.headers["Location"] and "Anticipo" in \
+        r = c.post("/panel/tarifas", data={"hora": "9000", "logo": "abc"})
+        assert "abc" not in r.headers["Location"] and "Logo" in \
             urllib.parse.unquote_plus(r.headers["Location"]), r.headers["Location"]
         tar = c.get("/tarifas").get_data(as_text=True)
         assert "$9.000" in tar and "$8.000" not in tar, "la hora no se movio"
