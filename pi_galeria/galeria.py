@@ -4031,6 +4031,7 @@ def tarifas_form():
     return render_template_string(BASE_HTML, titulo="Tarifas \u00b7 panel",
         cuerpo=render_template_string(
             PANEL_TARIFAS, CAMPOS=CAMPOS_TARIFAS, t=t, val=val, pesos=pesos,
+            ver=TARIFAS_VER,
             B=lambda n, a=1: bruto(n, t["retencion"], a),
             aviso=request.args.get("aviso", "")))
 
@@ -4039,6 +4040,8 @@ def tarifas_form():
 def guardar_tarifas():
     """Guarda solo lo que difiere del default, como los textos: asi un precio
     que nunca tocaste sigue al codigo. Un campo invalido conserva lo de antes."""
+    if request.form.get("_ver") != TARIFAS_VER:
+        return redirect(url_for("tarifas_form", aviso="viejo"))
     editadas, malos = _tarifas_editadas(), []
     for _grupo, campos in CAMPOS_TARIFAS:
         for ruta, etiqueta in campos:
@@ -6558,7 +6561,9 @@ TARIFAS_PUB = BARRA + """<main class="viz">
   border:1px solid var(--linea2);background:var(--panel)}
 .tf-bq span{font-family:var(--mono);font-size:.7rem;color:var(--cal);letter-spacing:.04em}
 .tf-bq input[type=number]{padding:.45rem .5rem}
-.tf-bq.mas{border-color:rgba(255,206,123,.55)}
+/* tf-mas y no "mas": .mas es el link "Ver todos los eventos" y le metia
+   margen, letra chica e inline-flex al cuadrito */
+.tf-bq.tf-mas{border-color:rgba(255,206,123,.55)}
 @media (max-width:860px){
   .tf-grid,.tf-calc,.tf-cond{grid-template-columns:1fr}
   .tf-grid{gap:1.6rem}
@@ -6784,14 +6789,14 @@ function calcular(){
   cob *= 1 + pctDur / 100;
   nSug = Math.round(nSug / 10) * 10;
   document.querySelectorAll(".tf-bq").forEach(el => {
-    el.classList.toggle("mas", +el.querySelector("input").value > R.canchas_incluidas);
+    el.classList.toggle("tf-mas", +el.querySelector("input").value > R.canchas_incluidas);
   });
   const hTxt = (Math.round(h * 100) / 100).toLocaleString("es-CL");
   const notas = [];
   if(conRecargo) notas.push("+" + R.cancha_extra_pct + " % por cada partido sobre " + R.canchas_incluidas + " a la vez");
   if(pctDur) notas.push("+" + pctDur + " % por partidos de " + dur + " minutos");
   $("tf-hinfo").textContent = !h ? "Indica a qué hora empieza el primer partido y a qué hora termina el último."
-    : hTxt + " h de cobertura · " + partidos + (partidos > 1 ? " partidos" : " partido") + " en total"
+    : hTxt + " h de cobertura a " + pesos(R.hora) + " la hora · " + partidos + (partidos > 1 ? " partidos" : " partido") + " en total"
       + (notas.length ? " · " + notas.join(" · ") : " · hasta " + R.canchas_incluidas + " a la vez sin recargo");
   const reco = recomendar(nSug);
   if(!aMano){ const r = radios.find(r => r.value === reco); if(r) r.checked = true; }
@@ -6815,7 +6820,7 @@ function calcular(){
   if($("tf-xs").checked){ extras += tramo(n, R.seleccion); xs.push("que elijas tú las fotos"); }
   const total = b100(cob + fotos + extras);
   $("tf-tot").textContent = pesos(total);
-  $("tf-dcl").textContent = h ? "Cobertura (" + hTxt + " h)" : "Cobertura";
+  $("tf-dcl").textContent = h ? "Cobertura (" + hTxt + " h × " + pesos(R.hora) + ")" : "Cobertura";
   $("tf-dc").textContent = pesos(b100(cob));
   $("tf-dfl").textContent = "Fotos (" + n + ")";
   $("tf-df").textContent = pesos(b100(fotos));
@@ -8226,6 +8231,13 @@ CAMPOS_TARIFAS = (
 )
 
 
+# la "version" de los defaults: el formulario la lleva escondida y, si al
+# guardar ya no calza, no se guarda nada (lo editado se guarda como diferencia
+# con el default; con un default nuevo, un formulario viejo pisa a ciegas)
+TARIFAS_VER = hashlib.sha1(json.dumps(TARIFAS_DEF, sort_keys=True).encode()
+                           ).hexdigest()[:12]
+
+
 def _ruta(d, ruta):
     """'packs.liga.q.0' -> (la lista q de liga, 0): el contenedor y la clave."""
     partes = ruta.split(".")
@@ -8300,10 +8312,12 @@ publican: la boleta se conversa aparte con cada organizador. La columna "con bol
 pack, menos su descuento. El pedido a medida es el precio dentro de pack m&aacute;s su recargo. Al guardar
 cambian la p&aacute;gina <a href="/tarifas" target="_blank" rel="noopener">/tarifas</a> y el
 <a href="/panel/cotizador">cotizador</a>.</p>
-{% if aviso == 'ok' %}<p class="ok">Guardado.</p>{% elif aviso %}<p class="malo">No guard&eacute;
+{% if aviso == 'ok' %}<p class="ok">Guardado.</p>{% elif aviso == 'viejo' %}<p class="malo">No guard&eacute;
+nada: las tarifas cambiaron desde que abriste esta p&aacute;gina. Ya est&aacute; recargada; vuelve a hacer tus cambios.</p>{% elif aviso %}<p class="malo">No guard&eacute;
 estos campos (n&uacute;mero inv&aacute;lido, negativo o un porcentaje de 100 o m&aacute;s): {{ aviso }}</p>{% endif %}
 <div class="tfz">
 <form method="post" action="/panel/tarifas">
+<input type="hidden" name="_ver" value="{{ ver }}">
 {% for grupo, campos in CAMPOS %}<fieldset><legend>{{ grupo }}</legend><div class="cols">
 {% for ruta, etiqueta in campos %}
 <label class="campo"><span>{{ etiqueta }}</span>
@@ -8438,6 +8452,10 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 .cotz table.cz-det tr.cz-tot td{font-weight:700;font-size:15px;border-top:2px solid var(--cz-tinta);border-bottom:none}
 .cotz .cz-hoja s{color:var(--cz-tenue)}
 .cotz .cz-cortesia{color:var(--cz-ok);font-weight:600}
+.cotz .cz-bloques{display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(5.6rem,1fr))}
+.cotz .cz-bq{display:flex;flex-direction:column;gap:2px;font-size:.72rem;opacity:.85}
+.cotz .cz-bq input{padding:.25rem .4rem}
+.cotz .cz-bq.cz-mas input{border-color:#e0a84a}
 .cotz .cz-barra{display:flex;height:16px;border-radius:4px;overflow:hidden;margin:6px 0}
 .cotz .cz-barra div{height:100%}
 .cotz .cz-leyenda{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--cz-tenue)}
@@ -8492,10 +8510,14 @@ PANEL_COTIZADOR = r"""<main class="cotz">
       <div><label>Lugar</label><input id="lugar" placeholder="Recinto, comuna"></div>
       <div><label>Inicio</label><input id="horaInicio" type="time" value="19:00"></div>
       <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
-      <div><label>Canchas simultáneas</label><input id="canchas" type="number" min="1" value="1"></div>
+      <div><label>Cada partido dura</label><select id="durPartido"><option value="20">20 min</option>
+        <option value="30">30 min</option><option value="60" selected>60 min</option></select></div>
       <div><label>N° cotización</label><input id="numero"></div>
       <div><label>Válida por (días)</label><input id="validez" type="number" min="1" value="15"></div>
     </div>
+    <label style="margin-top:8px">Partidos a la vez en cada horario</label>
+    <div class="cz-bloques" id="czBloques"></div>
+    <input type="hidden" id="simult" value="{}">
   </fieldset>
 
   <fieldset><legend>2. Fotos seleccionadas</legend>
@@ -8604,7 +8626,7 @@ const T = TARIFAS;
 const PRESETS = {
   // Los precios por foto de lista son los del pack Personalizado; los packs
   // cerrados tienen su precio en TARIFAS.packs. Todo sale de TARIFAS (Python).
-  lista: {packFotos:"liga",canchas:1,lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
+  lista: {packFotos:"liga",durPartido:"60",simult:"{}",lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
           gSel:false,volumen:0,boleta:"si",
@@ -8613,7 +8635,7 @@ const PRESETS = {
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
   // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
-          packFotos:"",canchas:1,lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
+          packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
           gSel:false,volumen:0,
           boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
@@ -8637,6 +8659,33 @@ function duracion(ini, fin){ // en minutos, cruza medianoche
   const a = minutos(ini), b = minutos(fin); if(a===null||b===null) return 0;
   let d = b - a; if(d <= 0) d += 1440; return d;
 }
+// los horarios de la jornada, de a un partido (como en /tarifas). Cuantos
+// partidos hay a la vez en cada uno va en el input escondido #simult, asi se
+// guarda con el resto del formulario
+const hhmm = m => String(Math.floor(m/60)%24).padStart(2,"0") + ":" + String(m%60).padStart(2,"0");
+function bloquesCz(){
+  const a = minutos($("horaInicio").value), b0 = minutos($("horaFin").value), dur = +$("durPartido").value;
+  if(a===null || b0===null) return [];
+  const b = b0 <= a ? b0 + 1440 : b0, out = [];
+  for(let t = a; t < b && out.length < 36; t += dur) out.push([t, Math.min(t + dur, b)]);
+  return out;
+}
+const simult = () => { try{ return JSON.parse($("simult").value || "{}") || {}; }catch(_){ return {}; } };
+let firmaCz = "";
+function pintarBloquesCz(bs){
+  const f = bs.map(([a,b]) => a + "-" + b).join(",");
+  if(f === firmaCz) return;           // no rehacer mientras se escribe en uno
+  firmaCz = f;
+  const S = simult();
+  $("czBloques").innerHTML = bs.map(([t0,t1]) => { const k = hhmm(t0);
+    return `<label class="cz-bq"><span>${k}–${hhmm(t1)}</span><input type="number" min="1" max="4" value="${S[k]||1}" data-ini="${k}"></label>`; }).join("");
+}
+$("czBloques").addEventListener("input", e => {
+  const i = e.target.closest("input[data-ini]"); if(!i) return;
+  const S = simult(); S[i.dataset.ini] = Math.min(4, Math.max(1, Math.round(+i.value || 1)));
+  $("simult").value = JSON.stringify(S);
+});
+
 function fechaLarga(iso){
   if(!iso) return "Por definir";
   const [y,m,d] = iso.split("-").map(Number);
@@ -8668,11 +8717,27 @@ function calcular(){
   const hTxt = (Math.round(horas*100)/100).toLocaleString("es-CL");
   linea("Cobertura","Cobertura de la jornada",
         `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`, horas, num("lHora"), num("cHora"));
-  // hasta 2 canchas contiguas van incluidas; desde la tercera, +15 % de la cobertura por cancha
-  const extra = Math.max(0, ent("canchas") - T.canchas_incluidas), cpct = T.cancha_extra_pct;
-  if(extra) L.push({grupo:"Cobertura",concepto:`Canchas simultáneas (${ent("canchas")})`,
-                    detalle:`${T.canchas_incluidas} incluidas · +${cpct} % por cancha desde la siguiente`,
-                    cant:null,tL:L[0].tL*cpct/100*extra,tC:L[0].tC*cpct/100*extra});
+  // partidos a la vez, horario por horario: hasta 2 incluidos; cada uno extra
+  // suma cancha_extra_pct de la hora, solo en los horarios que lo tienen
+  const bs = bloquesCz(); pintarBloquesCz(bs);
+  const S = simult(), dur = +$("durPartido").value, cpct = T.cancha_extra_pct;
+  let hExtra = 0, partidos = 0, maxC = 1;
+  for(const [t0,t1] of bs){
+    const c = S[hhmm(t0)] || 1;
+    partidos += c; maxC = Math.max(maxC, c);
+    hExtra += (t1 - t0) / 60 * Math.max(0, c - T.canchas_incluidas);
+  }
+  document.querySelectorAll(".cz-bq").forEach(el => el.classList.toggle("cz-mas", +el.querySelector("input").value > T.canchas_incluidas));
+  if(hExtra) L.push({grupo:"Cobertura",concepto:`Partidos simultáneos (hasta ${maxC} a la vez)`,
+                     detalle:`${T.canchas_incluidas} incluidos · +${cpct} % de la hora por cada uno extra, en su horario`,
+                     cant:null,tL:hExtra*num("lHora")*cpct/100,tC:hExtra*num("cHora")*cpct/100});
+  // partidos cortos: recargo sobre toda la cobertura
+  const dpct = T.duracion_pct[String(dur)] || 0;
+  if(dpct){
+    const cob = L.filter(x=>x.grupo==="Cobertura");
+    L.push({grupo:"Cobertura",concepto:`Partidos de ${dur} minutos (+${dpct} %)`,detalle:`${partidos} partidos en total`,
+            cant:null,tL:cob.reduce((s,x)=>s+x.tL,0)*dpct/100,tC:cob.reduce((s,x)=>s+x.tC,0)*dpct/100});
+  }
 
   if(P){
     const armado = q.basica*num("lBasica") + q.completa*num("lCompleta") + q.pro*num("lPro");
@@ -8812,7 +8877,7 @@ function render(){
       <dt>Organizador</dt><dd>${v("cliente") || "—"}</dd>
       <dt>Evento</dt><dd>${v("evento") || "—"}</dd>
       <dt>Fecha</dt><dd>${fechaLarga($("fechaEvento").value)}</dd>
-      <dt>Horario</dt><dd>${v("horaInicio") || "--:--"} a ${v("horaFin") || "--:--"} hrs</dd>
+      <dt>Horario</dt><dd>${v("horaInicio") || "--:--"} a ${v("horaFin") || "--:--"} hrs · partidos de ${$("durPartido").value} min</dd>
       ${$("lugar").value.trim() ? `<dt>Lugar</dt><dd>${v("lugar")}</dd>` : ""}
       <dt>Pack</dt><dd>${r.P ? r.P.nombre + " · " : ""}${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas</dd>
     </dl></div>
@@ -8838,7 +8903,7 @@ function render(){
 
   <h2>Cómo trabajo</h2>
   <ul class="cz-cond">
-    <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} canchas contiguas en simultáneo sin recargo; desde la siguiente, +${T.cancha_extra_pct} % de la cobertura por cada cancha. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
+    <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} partidos a la vez sin recargo; desde el siguiente, +${T.cancha_extra_pct} % de la hora por cada uno, en el horario que lo tiene. Partidos de 30 minutos: +${T.duracion_pct["30"]} % de la cobertura; de 20 minutos: +${T.duracion_pct["20"]} %. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
     <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
     <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
     ${avisoPasada}
@@ -8872,7 +8937,7 @@ function resumenWsp(){
   const r = calcular();
   const t = [];
   t.push(`*Cotización ${$("numero").value}*`);
-  t.push(`${$("evento").value || "Evento"}: ${fechaLarga($("fechaEvento").value)}, ${$("horaInicio").value} a ${$("horaFin").value}`);
+  t.push(`${$("evento").value || "Evento"}: ${fechaLarga($("fechaEvento").value)}, ${$("horaInicio").value} a ${$("horaFin").value}, partidos de ${$("durPartido").value} min`);
   t.push("");
   r.L.forEach(x => t.push(`• ${x.concepto}${x.cant!=null?` (${Number.isInteger(x.cant)?x.cant:x.cant.toLocaleString("es-CL")})`:""}: ${x.cortesia?"cortesía":(x.tC<0?"−"+pesos(-x.tC):pesos(x.tC))}`));
   if(r.conBoleta) t.push(`• Impuesto boleta: ${pesos(r.impuesto)}`);
@@ -8890,6 +8955,7 @@ function guardar(){
   try{ localStorage.setItem(CLAVE, JSON.stringify(d)); }catch(_){}
 }
 function aplicar(d){
+  firmaCz = "";
   Object.entries(d).forEach(([k,val]) => { const e = $(k); if(!e) return;
     if(e.type === "checkbox") e.checked = !!val; else e.value = val; });
 }
@@ -11279,8 +11345,9 @@ def test():
         assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
         assert "{pct30}" not in tar and "Partidos cortos:" in tar
         assert 'id="tf-dur"' in tar and 'id="tf-bloques"' in tar
+        assert 'toggle("mas"' not in tar, "la clase mas choca con el link de eventos"
         # un precio a mano como 3.990 sale tal cual, sin redondear a 4.000
-        c.post("/panel/tarifas", data={"partidos": "3990"})
+        c.post("/panel/tarifas", data={"_ver": TARIFAS_VER, "partidos": "3990"})
         assert "$3.990" in c.get("/tarifas").get_data(as_text=True), "redondeo el 990"
         c.post("/panel/tarifas/restaurar")
         assert "{hora}" not in tar and 'data-t="' not in tar, "quedo una marca o el editor"
@@ -11300,11 +11367,16 @@ def test():
         assert db().execute("SELECT 1 FROM texto WHERE clave = 'tar_paso2_t'"
                             ).fetchone() is None
         assert c.post("/panel/editar/guardar", data="x").status_code == 400
-        assert "const TARIFAS" in c.get("/panel/cotizador").get_data(as_text=True)
+        cz_ = c.get("/panel/cotizador").get_data(as_text=True)
+        assert "const TARIFAS" in cz_ and 'id="durPartido"' in cz_ and 'id="czBloques"' in cz_
+        assert 'id="canchas"' not in cz_
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
         assert c.get("/panel/tarifas").status_code == 200
-        r = c.post("/panel/tarifas", data={"hora": "9000", "logo": "abc"})
+        r = c.post("/panel/tarifas", data={"hora": "7777"})       # formulario viejo
+        assert "viejo" in r.headers["Location"]
+        assert "$7.777" not in c.get("/tarifas").get_data(as_text=True)
+        r = c.post("/panel/tarifas", data={"_ver": TARIFAS_VER, "hora": "9000", "logo": "abc"})
         assert "abc" not in r.headers["Location"] and "Logo" in \
             urllib.parse.unquote_plus(r.headers["Location"]), r.headers["Location"]
         tar = c.get("/tarifas").get_data(as_text=True)
@@ -11312,10 +11384,10 @@ def test():
         c.post("/panel/textos/restaurar")
         assert "$9.000" in c.get("/tarifas").get_data(as_text=True), \
             "restaurar los textos se llevo las tarifas"
-        c.post("/panel/tarifas", data={"hora": "8000"})
+        c.post("/panel/tarifas", data={"_ver": TARIFAS_VER, "hora": "8000"})
         assert db().execute("SELECT 1 FROM texto WHERE clave = 'tarifas'"
                             ).fetchone() is None, "quedo guardado un valor igual al default"
-        c.post("/panel/tarifas", data={"foto_pack.completa": "450"})
+        c.post("/panel/tarifas", data={"_ver": TARIFAS_VER, "foto_pack.completa": "450"})
         assert "$43.000" not in c.get("/tarifas").get_data(as_text=True), \
             "subir la completa no movio el pack Liga"
         c.post("/panel/tarifas/restaurar")
