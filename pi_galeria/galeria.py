@@ -8021,7 +8021,9 @@ TARIFAS_DEF = {
     # seleccion personal por tramos (20/10/2026): [hasta N fotos, precio]. Se
     # cobra el tramo mas chico que cubra las fotos del pedido, con la misma
     # regla que los tramos de una galeria (precio_de)
-    "seleccion": [[75, 8500], [125, 12500], [200, 18000], [300, 24000]],
+    # De a 50 fotos; por foto baja de $100 a $67 (20/10/2026)
+    "seleccion": [[50, 4990], [100, 7990], [150, 10990], [200, 13990],
+                  [250, 16990], [300, 19990]],
     "retencion": 15.25,   # boleta de honorarios 2026: sube cada enero
     # el anticipo no es un %: es la cobertura (las horas, con el recargo de
     # canchas), sea cual sea el pack (20/10/2026)
@@ -11102,9 +11104,9 @@ def test():
         # seleccion por tramos: el mas chico que cubre; sobre el ultimo, a su
         # precio por foto. La pagina muestra los tramos.
         sel = TARIFAS_DEF["seleccion"]
-        assert (precio_de(75, sel), precio_de(76, sel), precio_de(160, sel)) == (8500, 12500, 18000)
-        assert precio_de(330, sel) == 24000 + 2400
-        assert "hasta 75, $8.500" in tar, "no se ven los tramos de la seleccion"
+        assert (precio_de(50, sel), precio_de(51, sel), precio_de(160, sel)) == (4990, 7990, 13990)
+        assert precio_de(330, sel) == 19990 + 2000
+        assert "hasta 50, $4.990" in tar, "no se ven los tramos de la seleccion"
         # un precio a mano como 3.990 sale tal cual, sin redondear a 4.000
         c.post("/panel/tarifas", data={"partidos": "3990"})
         assert "$3.990" in c.get("/tarifas").get_data(as_text=True), "redondeo el 990"
