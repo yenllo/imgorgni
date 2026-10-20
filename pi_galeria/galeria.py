@@ -42,7 +42,7 @@ from pathlib import Path
 
 from flask import (Flask, g, session, request, redirect, url_for, abort,
                    send_file, render_template_string, jsonify, Response)
-from markupsafe import Markup
+from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps, features
 
@@ -1342,11 +1342,94 @@ CAMPOS = (
          "Ver todos los eventos"),
         ("rotulo_trabajos", "Rotulo de la tira de trabajos", 1, "Trabajos"),
     )),
+    # Lo que va entre llaves, como {hora}, lo rellena la pagina con las
+    # tarifas del panel: el texto se edita, el numero sale de /panel/tarifas.
     ("Tarifas (/tarifas)", (
+        ("tar_rotulo", "Rotulo de arriba", 1, "Ligas y torneos"),
         ("tar_titulo", "Titulo de la pagina", 1, "Tarifas para ligas"),
         ("tar_bajada", "Bajada", 3,
          "Cubro la jornada completa y t\u00fa eliges qu\u00e9 fotos se editan. "
          "Aqu\u00ed est\u00e1 lo que cobro y lo que entrego, sin letra escondida."),
+        ("tar_ancla", "Fecha tipica ({horas} {pack} {fotos} {total})", 2,
+         "Una fecha t\u00edpica, {horas} horas de cobertura con el pack {pack} "
+         "({fotos} fotos editadas): {total} en total."),
+        ("tar_boton_calc", "Boton a la calculadora", 1, "Calcular mi fecha"),
+        ("tar_boton_packs", "Boton a los packs", 1, "Ver los packs"),
+        ("tar_como_tit", "Como se arma el precio, titulo", 1,
+         "C\u00f3mo se arma el precio"),
+        ("tar_paso1_t", "Paso 1, titulo", 1, "Cobertura por hora"),
+        ("tar_paso1", "Paso 1, texto ({hora} {canchas})", 3,
+         "{hora} por hora en cancha, sin l\u00edmite de disparos. Hasta "
+         "{canchas} canchas contiguas al mismo tiempo sin recargo."),
+        ("tar_paso2_t", "Paso 2, titulo", 1, "Fotos editadas"),
+        ("tar_paso2", "Paso 2, texto", 3,
+         "Recibes la galer\u00eda completa con marca de agua y eliges "
+         "cu\u00e1les se editan. Puedes tomar un pack o armar el tuyo."),
+        ("tar_paso3_t", "Paso 3, titulo", 1, "Extras si los necesitas"),
+        ("tar_paso3", "Paso 3, texto", 3,
+         "Logo de la liga en las fotos, fotos separadas por partido, "
+         "exclusividad o que yo elija las fotos por ti."),
+        ("tar_packs_rot", "Packs, rotulo", 1, "Packs de fotos"),
+        ("tar_packs_tit", "Packs, titulo", 1, "Tres packs cerrados"),
+        ("tar_packs_sub", "Packs, bajada", 2,
+         "Cada pack se suma a las horas de cobertura. Salen m\u00e1s baratos "
+         "que pedir las mismas fotos una por una."),
+        ("tar_reco", "Etiqueta del pack recomendado", 1, "Recomendado"),
+        ("tar_nota", "Nota bajo los packs ({basica} {completa} {pro})", 2,
+         "\u00bfNinguno te calza? Arma tu propia combinaci\u00f3n a precio "
+         "por foto: {basica} la b\u00e1sica, {completa} la completa y {pro} "
+         "la profesional."),
+        ("tar_niv_rot", "Niveles, rotulo", 1, "Niveles de edici\u00f3n"),
+        ("tar_niv_tit", "Niveles, titulo", 1, "Qu\u00e9 lleva cada foto"),
+        ("tar_niv_sub", "Niveles, bajada", 2,
+         "De noche, bajo focos, la edici\u00f3n es la mitad del resultado. La "
+         "diferencia entre niveles est\u00e1 en cu\u00e1nto trabajo lleva "
+         "encima cada foto."),
+        ("tar_niv_tag", "Etiqueta de la edicion completa", 1,
+         "La m\u00e1s pedida"),
+        ("tar_calc_rot", "Calculadora, rotulo", 1, "Calculadora"),
+        ("tar_calc_tit", "Calculadora, titulo", 1, "Calcula tu fecha"),
+        ("tar_calc_sub", "Calculadora, bajada", 2,
+         "Arma la jornada y te muestro el total. El bot\u00f3n de abajo me "
+         "manda el pedido por WhatsApp ya escrito."),
+        ("tar_venta_nota", "Nota de la venta abierta", 2,
+         "En la abierta, si compartes con los jugadores las fotos que "
+         "compraste, esas quedan fuera de la venta: nadie paga por una foto "
+         "que ya tiene."),
+        ("tar_traslado", "Nota bajo el total", 1,
+         "El traslado se cotiza seg\u00fan el lugar."),
+        ("tar_boton_wsp", "Boton de WhatsApp de la calculadora", 1,
+         "Pedir esta fecha"),
+        ("tar_cond_rot", "Condiciones, rotulo", 1, "Condiciones"),
+        ("tar_cond_tit", "Condiciones, titulo", 1,
+         "Lo que siempre va incluido, y la letra chica"),
+        ("tar_incl_tit", "Incluido, titulo", 1, "Siempre incluido"),
+        ("tar_incl", "Incluido: una linea por vi\u00f1eta "
+         "({galeria_horas} {entrega_dias})", 6,
+         "La jornada completa, sin l\u00edmite de disparos\n"
+         "Galer\u00eda completa con marca de agua dentro de {galeria_horas} "
+         "horas, para elegir con calma\n"
+         "Las elegidas, editadas y en alta resoluci\u00f3n, {entrega_dias} "
+         "d\u00edas h\u00e1biles despu\u00e9s de tu selecci\u00f3n\n"
+         "Uso libre en las redes de la liga y de cada equipo\n"
+         "Entrega por galer\u00eda privada o Google Drive"),
+        ("tar_letra_tit", "Letra chica, titulo", 1, "Letra chica"),
+        ("tar_letra", "Letra chica: una linea por vi\u00f1eta, lo de antes "
+         "de los dos puntos va en negrita ({anticipo} {canchas} {cancha_pct} "
+         "{media_hora})", 8,
+         "Reserva: {anticipo} % al confirmar la fecha, el resto contra "
+         "entrega.\n"
+         "Canchas: hasta {canchas} contiguas sin recargo; desde la siguiente, "
+         "+{cancha_pct} % de la cobertura por cancha.\n"
+         "Si la jornada se alarga: los primeros 15 minutos no se cobran. "
+         "Despu\u00e9s, cada bloque de 20 minutos iniciado vale un tercio de "
+         "la hora. Si se alarga media hora, son 2 bloques: {media_hora}.\n"
+         "Lluvia o suspensi\u00f3n: si se suspende antes de empezar, se "
+         "reprograma sin costo. Si se suspende a mitad, se cobra el tiempo "
+         "trabajado.\n"
+         "Cancelaci\u00f3n: con 48 horas de aviso se reprograma sin costo. Con "
+         "menos, se retiene el anticipo.\n"
+         "Traslado y estacionamiento: se cotizan seg\u00fan el lugar."),
     )),
     ("Como recibis tus fotos", (
         ("como_titulo", "Titulo (vacio = no se muestra la seccion)", 1,
@@ -1467,14 +1550,69 @@ def textos():
     return vals
 
 
+# los textos de varias lineas: en el editor se editan como un bloque
+_MULTI = {c[0] for c in TODOS if c[2] > 1}
+
+
+class _Ed(str):
+    """Un texto en el editor del sitio (/panel/editar): se compara y se corta
+    como el texto de siempre, pero al pintarse sale envuelto en un <span
+    data-t> que el script del editor vuelve editable. Asi las plantillas no
+    cambian: {{ T.x }} sirve igual en la pagina publica y en el editor."""
+
+    def __new__(cls, clave, valor):
+        o = super().__new__(cls, valor)
+        o.clave = clave
+        return o
+
+    def __html__(self):
+        return Markup('<span class="ed%s" data-t="%s">%s</span>') % (
+            " multi" if self.clave in _MULTI else "", self.clave, str(self))
+
+
 def lineas(s):
     """Una vi\u00f1eta por linea, sin las vacias."""
+    if isinstance(s, _Ed):
+        return [s]              # en el editor, todas juntas en un bloque
     return [l.strip() for l in (s or "").splitlines() if l.strip()]
 
 
 def parrafos(s):
     """Una linea en blanco separa parrafos."""
+    if isinstance(s, _Ed):
+        return [s]
     return [p.strip() for p in (s or "").split("\n\n") if p.strip()]
+
+
+def fuerte(x):
+    return Markup("<b>%s</b>") % x
+
+
+def _tx(T, clave, **vals):
+    """El texto `clave` con sus {marcas} rellenas. En el editor va crudo, con
+    las marcas a la vista, para que se edite el texto y no el numero."""
+    v = T[clave]
+    if isinstance(v, _Ed):
+        return v
+    out = escape(v)
+    for k, x in vals.items():
+        out = out.replace("{%s}" % k, escape(x))
+    return Markup(out)
+
+
+def _txl(T, clave, negrita=False, **vals):
+    """Como _tx, una vi\u00f1eta por linea. Con negrita, lo de antes de los
+    dos puntos va en <b> ("Reserva: 30 % al confirmar...")."""
+    if isinstance(T[clave], _Ed):
+        return [T[clave]]
+    res = []
+    for l in lineas(T[clave]):
+        m = _tx({clave: l}, clave, **vals)
+        if negrita and ":" in m[:60]:
+            a, b = m.split(":", 1)
+            m = Markup("<b>%s:</b>%s") % (Markup(a), Markup(b))
+        res.append(m)
+    return res
 
 
 def tramos(gal=None):
@@ -1833,15 +1971,24 @@ def _viz(plantilla, titulo=None, desc=None, og_img=None, indexar=False,
     """Todas las paginas publicas comparten los mismos datos de cabecera."""
     kw.setdefault("seccion", "")
     T0 = textos()
+    # en /panel/editar la misma pagina sale con los textos editables
+    ed = g.get("editando", False)
+    T = {k: _Ed(k, v) for k, v in T0.items()} if ed else T0
+    cuerpo = render_template_string(
+        plantilla, wsp=WHATSAPP, fecha_corta=fecha_corta, T=T,
+        tx=lambda c, **v: _tx(T, c, **v),
+        txl=lambda c, negrita=False, **v: _txl(T, c, negrita, **v),
+        fuerte=fuerte, lineas=lineas, parrafos=parrafos, tramos=tramos,
+        precio_de=precio_de, pesos=pesos, **kw)
+    if ed:
+        cuerpo += render_template_string(EDITOR_SITIO,
+                                         pagina=g.get("ed_pagina", ""))
     return render_template_string(
         BASE_HTML,
         titulo=titulo or ("rb.fotos \u00b7 " + T0["hero_titulo"]),
         desc=desc or T0["hero_bajada"], og_img=og_img,
-        indexar=indexar, canonical=SITIO + request.path, precarga=precarga,
-        cuerpo=render_template_string(
-        plantilla, wsp=WHATSAPP, fecha_corta=fecha_corta, T=textos(),
-        lineas=lineas, parrafos=parrafos, tramos=tramos, precio_de=precio_de,
-        pesos=pesos, **kw))
+        indexar=indexar and not ed, canonical=SITIO + request.path,
+        precarga=precarga, cuerpo=cuerpo)
 
 
 # --------------------------------------------------------------------- vistas
@@ -3949,18 +4096,52 @@ def guardar_textos():
     """Guarda solo lo que difiere del default: asi un texto que nunca tocaste
     sigue mejorando cuando cambia el codigo, en vez de quedar congelado."""
     cx = db()
-    for clave, _et, _fi, defecto in TODOS:
-        if clave not in request.form:
-            continue                      # campo que el formulario no mando
-        v = (request.form[clave] or "").replace("\r\n", "\n").strip()
-        if v == defecto.strip():
-            cx.execute("DELETE FROM texto WHERE clave = ?", (clave,))
-        else:
-            cx.execute("INSERT INTO texto (clave, valor) VALUES (?, ?) "
-                       "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
-                       (clave, v))
+    for clave, _et, _fi, _defecto in TODOS:
+        if clave in request.form:         # si no, el formulario no lo mando
+            _guardar_texto(cx, clave, request.form[clave])
     cx.commit()
     return redirect(url_for("textos_form"))
+
+
+def _guardar_texto(cx, clave, v):
+    v = (v or "").replace("\r\n", "\n").strip()
+    if v == DEFAULTS[clave].strip():
+        cx.execute("DELETE FROM texto WHERE clave = ?", (clave,))
+    else:
+        cx.execute("INSERT INTO texto (clave, valor) VALUES (?, ?) "
+                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                   (clave, v))
+
+
+# El editor del sitio: la pagina publica tal cual, con sus textos editables en
+# el lugar. Vive bajo /panel, asi que Caddy lo protege con la clave del panel.
+EDITABLES = {"": home, "eventos": eventos_publicos,
+             "tarifas": tarifas_publicas, "sobre-mi": sobre_mi}
+
+
+@app.get("/panel/editar/", defaults={"pagina": ""})
+@app.get("/panel/editar/<pagina>")
+def editar_sitio(pagina):
+    if pagina not in EDITABLES:
+        abort(404)
+    g.editando, g.ed_pagina = True, pagina
+    return EDITABLES[pagina]()
+
+
+@app.post("/panel/editar/guardar")
+def guardar_editados():
+    """Recibe {clave: texto} del editor. Una clave que no es un texto conocido
+    se ignora: el JSON lo arma el navegador y no se confia en el."""
+    datos = request.get_json(silent=True)
+    if not isinstance(datos, dict):
+        abort(400)
+    cx, n = db(), 0
+    for clave, v in datos.items():
+        if clave in DEFAULTS and isinstance(v, str):
+            _guardar_texto(cx, clave, v)
+            n += 1
+    cx.commit()
+    return {"ok": True, "guardados": n}
 
 
 @app.post("/panel/textos/restaurar")
@@ -4151,12 +4332,13 @@ PANEL_BARRA = """<nav class="pbarra">
 {% set sec = request.path.split('/')[2] if request.path.count('/') > 1 else '' %}
 <a class="logo" href="/panel">rb<span>.</span>fotos</a>
 <div class="links">
-<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas','revision','revision-foto','cotizador','tarifas') }}"
+<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas','revision','revision-foto','cotizador','tarifas','editar') }}"
   >Galerias</a>
 <a href="/panel/revision" class="{{ 'on' if sec in ('revision','revision-foto') }}">Revision</a>
 <a href="/panel/carpetas" class="{{ 'on' if sec == 'carpetas' }}">Carpetas</a>
 <a href="/panel/subir" class="{{ 'on' if sec == 'subir' }}">Subir</a>
 <a href="/panel/eventos" class="{{ 'on' if sec == 'eventos' }}">Eventos</a>
+<a href="/panel/editar/" class="{{ 'on' if sec == 'editar' }}">Editar sitio</a>
 <a href="/panel/textos" class="{{ 'on' if sec == 'textos' }}">Textos</a>
 <a href="/panel/logos" class="{{ 'on' if sec == 'logos' }}">Logos</a>
 <a href="/panel/cotizador" class="{{ 'on' if sec == 'cotizador' }}">Cotizador</a>
@@ -6156,6 +6338,108 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 </main>
 <div class="viz">""" + PIE + """</div>"""
 
+# El editor del sitio (20/10/2026): se pega al final de una pagina publica
+# cuando se abre por /panel/editar. Los textos salen como <span class="ed"
+# data-t="clave"> (ver _Ed); este script los vuelve editables, junta los
+# cambios y los manda a /panel/editar/guardar. Los links no navegan mientras
+# se edita, salvo los de las paginas publicas, que abren su version editable.
+EDITOR_SITIO = r"""<style>
+/* font-size y opacity explicitos: "header span" (de las galerias) achicaba
+   el titulo de la portada, que vive en un <header class="capa"> */
+.ed{outline:1px dashed rgba(198,240,74,.5);outline-offset:3px;border-radius:2px;
+  cursor:text;min-width:1ch;font-size:inherit;opacity:1}
+.ed.multi{white-space:pre-wrap;display:block}
+.ed:hover{outline-color:var(--cancha);background:rgba(198,240,74,.06)}
+.ed:focus{outline:2px solid var(--cancha);background:rgba(198,240,74,.08)}
+.ed.cambiado{outline-style:solid;outline-color:var(--foco)}
+#ed-bar{position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);z-index:200;
+  display:flex;gap:.35rem .5rem;align-items:center;flex-wrap:wrap;justify-content:center;
+  background:rgba(9,12,10,.95);border:1px solid var(--linea2);padding:.55rem .7rem;
+  border-radius:6px;font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;
+  width:max-content;max-width:calc(100vw - 2rem);box-shadow:0 10px 40px rgba(0,0,0,.6)}
+#ed-bar a{color:var(--humo);text-decoration:none;padding:.3rem .45rem}
+#ed-bar a:hover{color:var(--cal)}
+#ed-bar a.on{color:var(--cal);border-bottom:2px solid var(--cancha)}
+#ed-bar .modo{color:var(--cancha);font-weight:700;letter-spacing:.14em}
+#ed-bar button{font:inherit;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  background:var(--cancha);color:var(--noche);border:0;padding:.55rem .95rem;
+  border-radius:2px;cursor:pointer}
+#ed-bar button:disabled{opacity:.35;cursor:default}
+#ed-msg{color:var(--humo);padding:0 .3rem}
+body{padding-bottom:6rem}
+</style>
+<div id="ed-bar" role="toolbar" aria-label="Editor de textos del sitio">
+<span class="modo">EDITANDO</span>
+{% for p, n in (("", "Inicio"), ("eventos", "Eventos"), ("tarifas", "Tarifas"), ("sobre-mi", "Sobre mí")) %}
+<a href="/panel/editar/{{ p }}" class="{{ 'on' if pagina == p }}">{{ n }}</a>{% endfor %}
+<span id="ed-msg">Haz clic en un texto para cambiarlo</span>
+<button type="button" id="ed-guardar" disabled>Guardar</button>
+<a href="/panel/textos" title="Los textos vacíos no se ven aquí: búscalos en Textos">Textos</a>
+<a href="/panel">Salir</a>
+</div>
+<script>
+(function(){
+const cambios = {}, msg = document.getElementById("ed-msg"), btn = document.getElementById("ed-guardar");
+const PUBLICAS = {"/": "", "/eventos": "eventos", "/tarifas": "tarifas",
+                  "/calculadora": "tarifas", "/sobre-mi": "sobre-mi"};
+const AYUDA = "Haz clic en un texto para cambiarlo. Lo que va entre llaves, como {hora}, lo rellenan tus tarifas.";
+function estado(){
+  const n = Object.keys(cambios).length;
+  btn.disabled = !n;
+  msg.textContent = n ? n + (n > 1 ? " textos cambiados" : " texto cambiado") + ", sin guardar" : AYUDA;
+}
+document.querySelectorAll("[data-t]").forEach(el => {
+  el.contentEditable = "plaintext-only";
+  if(el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+  el.addEventListener("input", () => {
+    const k = el.dataset.t;
+    cambios[k] = el.innerText.replace(/ /g, " ").trim();
+    el.classList.add("cambiado");
+    // el mismo texto puede salir dos veces (la etiqueta de cada pack)
+    document.querySelectorAll('[data-t="' + k + '"]').forEach(o => {
+      if(o !== el){ o.innerText = el.innerText; o.classList.add("cambiado"); }
+    });
+    estado();
+  });
+  el.addEventListener("keydown", e => {
+    if(e.key === "Enter" && !el.classList.contains("multi")){ e.preventDefault(); el.blur(); }
+  });
+});
+document.addEventListener("click", e => {
+  const a = e.target.closest("a");
+  if(!a || a.closest("#ed-bar")) return;
+  if((a.getAttribute("href") || "").startsWith("#")) return;
+  e.preventDefault();
+  if(e.target.closest("[data-t]")) return;        // clic para editar el texto de un boton
+  const u = new URL(a.href, location.href);
+  if(u.origin === location.origin && u.pathname in PUBLICAS)
+    location.href = "/panel/editar/" + PUBLICAS[u.pathname];
+}, true);
+document.addEventListener("submit", e => e.preventDefault(), true);
+window.addEventListener("beforeunload", e => {
+  if(Object.keys(cambios).length){ e.preventDefault(); e.returnValue = ""; }
+});
+btn.addEventListener("click", async () => {
+  btn.disabled = true;
+  msg.textContent = "Guardando...";
+  try{
+    const r = await fetch("/panel/editar/guardar", {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(cambios)});
+    const j = await r.json();
+    if(!r.ok || !j.ok) throw new Error();
+    Object.keys(cambios).forEach(k => delete cambios[k]);
+    document.querySelectorAll(".ed.cambiado").forEach(el => el.classList.remove("cambiado"));
+    msg.textContent = "Guardado: ya se ve así en el sitio.";
+  }catch(_){
+    msg.textContent = "No se pudo guardar. Revisa la conexión e intenta otra vez.";
+    btn.disabled = false;
+  }
+});
+estado();
+})();
+</script>"""
+
+
 # La pagina publica de tarifas (20/10/2026). Todo precio sale de tarifas() y se
 # muestra NETO, sin la boleta de honorarios: eso Renzo lo conversa aparte con
 # cada organizador (20/10/2026). Por foto se redondea a $10 y lo demas a $100.
@@ -6227,37 +6511,34 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 {% set L = R.packs.liga %}
 
 <section class="bloque" style="max-width:52rem">
-<p class="rotulo">Ligas y torneos</p>
+{% if T.tar_rotulo %}<p class="rotulo">{{ T.tar_rotulo }}</p>{% endif %}
 <h1 class="tit">{{ T.tar_titulo }}</h1>
 <p class="bajada">{{ T.tar_bajada }}</p>
-<p class="tf-ancla">Una fecha t&iacute;pica, {{ L.horas }} horas de cobertura con el pack {{ L.nombre }}
-({{ L.q|sum }} fotos editadas): <b>{{ pesos(redondo(L.horas * R.hora + L.precio, 100)) }}</b> en total.</p>
-<p class="botones"><a class="wsp" href="#calcular">Calcular mi fecha</a>
-<a class="wsp hueco" href="#packs">Ver los packs</a></p>
+{% if T.tar_ancla %}<p class="tf-ancla">{{ tx('tar_ancla', horas=L.horas, pack=L.nombre, fotos=L.q|sum,
+  total=fuerte(pesos(redondo(L.horas * R.hora + L.precio, 100)))) }}</p>{% endif %}
+<p class="botones"><a class="wsp" href="#calcular">{{ T.tar_boton_calc }}</a>
+<a class="wsp hueco" href="#packs">{{ T.tar_boton_packs }}</a></p>
 </section>
 
 <section class="bloque">
 <div class="como">
-<h2>C&oacute;mo se arma el precio</h2>
-<div class="paso"><b>Cobertura por hora</b><p>{{ pesos(redondo(R.hora, 10)) }} por hora en cancha,
-sin l&iacute;mite de disparos. Hasta {{ R.canchas_incluidas }} canchas contiguas al mismo tiempo sin recargo.</p></div>
-<div class="paso"><b>Fotos editadas</b><p>Recibes la galer&iacute;a completa con marca de agua y
-eliges cu&aacute;les se editan. Puedes tomar un pack o armar el tuyo.</p></div>
-<div class="paso"><b>Extras si los necesitas</b><p>Logo de la liga en las fotos, fotos separadas
-por partido, exclusividad o que yo elija las fotos por ti.</p></div>
+<h2>{{ T.tar_como_tit }}</h2>
+<div class="paso"><b>{{ T.tar_paso1_t }}</b><p>{{ tx('tar_paso1', hora=pesos(redondo(R.hora, 10)),
+  canchas=R.canchas_incluidas) }}</p></div>
+<div class="paso"><b>{{ T.tar_paso2_t }}</b><p>{{ T.tar_paso2 }}</p></div>
+<div class="paso"><b>{{ T.tar_paso3_t }}</b><p>{{ T.tar_paso3 }}</p></div>
 </div>
 </section>
 
 <section class="bloque" id="packs">
-<p class="rotulo">Packs de fotos</p>
-<h2 class="tf-h2">Tres packs cerrados</h2>
-<p class="tf-sub">Cada pack se suma a las horas de cobertura. Salen m&aacute;s baratos que pedir
-las mismas fotos una por una.</p>
+{% if T.tar_packs_rot %}<p class="rotulo">{{ T.tar_packs_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_packs_tit }}</h2>
+{% if T.tar_packs_sub %}<p class="tf-sub">{{ T.tar_packs_sub }}</p>{% endif %}
 <div class="tf-grid">
 {% for k, P in R.packs.items() %}
 {% set armado = P.q[0] * F.basica + P.q[1] * F.completa + P.q[2] * F.pro %}
 <div class="tf-card{{ ' reco' if P.reco }}">
-{% if P.reco %}<span class="tf-tag">Recomendado</span>{% endif %}
+{% if P.reco and T.tar_reco %}<span class="tf-tag">{{ T.tar_reco }}</span>{% endif %}
 <h3>{{ P.nombre }}</h3>
 <p class="tf-precio">{{ pesos(redondo(P.precio, 100)) }}<small>{{ P.q|sum }} fotos editadas + la cobertura</small></p>
 <ul class="tf-ul">
@@ -6271,20 +6552,18 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 </div>
 {% endfor %}
 </div>
-<p class="tf-nota"><b>&iquest;Ninguno te calza?</b> Arma tu propia combinaci&oacute;n a precio por foto:
-{{ pesos(redondo(F.basica, 10)) }} la b&aacute;sica, {{ pesos(redondo(F.completa, 10)) }} la completa y
-{{ pesos(redondo(F.pro, 10)) }} la profesional.</p>
+{% if T.tar_nota %}<p class="tf-nota">{{ tx('tar_nota', basica=pesos(redondo(F.basica, 10)),
+  completa=pesos(redondo(F.completa, 10)), pro=pesos(redondo(F.pro, 10))) }}</p>{% endif %}
 </section>
 
 <section class="bloque">
-<p class="rotulo">Niveles de edici&oacute;n</p>
-<h2 class="tf-h2">Qu&eacute; lleva cada foto</h2>
-<p class="tf-sub">De noche, bajo focos, la edici&oacute;n es la mitad del resultado. La diferencia entre
-niveles est&aacute; en cu&aacute;nto trabajo lleva encima cada foto.</p>
+{% if T.tar_niv_rot %}<p class="rotulo">{{ T.tar_niv_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_niv_tit }}</h2>
+{% if T.tar_niv_sub %}<p class="tf-sub">{{ T.tar_niv_sub }}</p>{% endif %}
 <div class="tf-grid">
 {% for k in ("basica", "completa", "pro") %}{% set N = R.niveles[k] %}
 <div class="tf-card{{ ' reco' if k == 'completa' }}">
-{% if k == 'completa' %}<span class="tf-tag">La m&aacute;s pedida</span>{% endif %}
+{% if k == 'completa' and T.tar_niv_tag %}<span class="tf-tag">{{ T.tar_niv_tag }}</span>{% endif %}
 <h3>{{ N.nombre }}</h3>
 <ul class="tf-ul">{% for it in N["items"] %}<li>{{ it }}</li>{% endfor %}</ul>
 </div>
@@ -6293,10 +6572,9 @@ niveles est&aacute; en cu&aacute;nto trabajo lleva encima cada foto.</p>
 </section>
 
 <section class="bloque" id="calcular">
-<p class="rotulo">Calculadora</p>
-<h2 class="tf-h2">Calcula tu fecha</h2>
-<p class="tf-sub">Arma la jornada y te muestro el total. El bot&oacute;n de abajo me manda el pedido
-por WhatsApp ya escrito.</p>
+{% if T.tar_calc_rot %}<p class="rotulo">{{ T.tar_calc_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_calc_tit }}</h2>
+{% if T.tar_calc_sub %}<p class="tf-sub">{{ T.tar_calc_sub }}</p>{% endif %}
 <div class="tf-calc">
 <form class="tf-form" id="tf-form">
   <div class="tf-dos">
@@ -6322,8 +6600,7 @@ por WhatsApp ya escrito.</p>
       <option value="abierto">Abierta: los jugadores pueden comprar sus fotos</option>
       <option value="exclusivo">Exclusiva (+{{ R.exclusivo_pct }} % en fotos): solo la liga recibe las fotos</option>
     </select>
-    <p class="tf-ayuda">En la abierta, si compartes con los jugadores las fotos que compraste, esas
-    quedan fuera de la venta: nadie paga por una foto que ya tiene.</p></div>
+    {% if T.tar_venta_nota %}<p class="tf-ayuda">{{ T.tar_venta_nota }}</p>{% endif %}</div>
   <div>
     <span class="tf-l" style="display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem">Extras</span>
     <label class="tf-chk"><input type="checkbox" id="tf-xl"><span>Logo o marco de la liga &middot; {{ pesos(redondo(R.logo, 100)) }}<small>En todas las fotos, con versi&oacute;n para redes</small></span></label>
@@ -6340,31 +6617,22 @@ por WhatsApp ya escrito.</p>
     <dt>Extras</dt><dd id="tf-de">&mdash;</dd>
     <dt>Para reservar ({{ R.anticipo }} %)</dt><dd id="tf-da">&mdash;</dd>
   </dl>
-  <p class="tf-ayuda">El traslado se cotiza seg&uacute;n el lugar.</p>
-  {% if wsp %}<a class="wsp" id="tf-ir" href="https://wa.me/{{ wsp }}" rel="noopener">Pedir esta fecha</a>{% endif %}
+  {% if T.tar_traslado %}<p class="tf-ayuda">{{ T.tar_traslado }}</p>{% endif %}
+  {% if wsp %}<a class="wsp" id="tf-ir" href="https://wa.me/{{ wsp }}" rel="noopener">{{ T.tar_boton_wsp }}</a>{% endif %}
 </aside>
 </div>
 </section>
 
 <section class="bloque">
-<p class="rotulo">Condiciones</p>
-<h2 class="tf-h2">Lo que siempre va incluido, y la letra chica</h2>
+{% if T.tar_cond_rot %}<p class="rotulo">{{ T.tar_cond_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_cond_tit }}</h2>
 <div class="tf-cond">
-<div><h3>Siempre incluido</h3><ul class="tf-ul">
-<li>La jornada completa, sin l&iacute;mite de disparos</li>
-<li>Galer&iacute;a completa con marca de agua dentro de {{ R.galeria_horas }} horas, para elegir con calma</li>
-<li>Las elegidas, editadas y en alta resoluci&oacute;n, {{ R.entrega_dias }} d&iacute;as h&aacute;biles despu&eacute;s de tu selecci&oacute;n</li>
-<li>Uso libre en las redes de la liga y de cada equipo</li>
-<li>Entrega por galer&iacute;a privada o Google Drive</li>
+<div><h3>{{ T.tar_incl_tit }}</h3><ul class="tf-ul">
+{% for l in txl('tar_incl', galeria_horas=R.galeria_horas, entrega_dias=R.entrega_dias) %}<li>{{ l }}</li>{% endfor %}
 </ul></div>
-<div><h3>Letra chica</h3><ul class="tf-ul">
-<li><b>Reserva:</b> {{ R.anticipo }} % al confirmar la fecha, el resto contra entrega.</li>
-<li><b>Canchas:</b> hasta {{ R.canchas_incluidas }} contiguas sin recargo; desde la siguiente, +{{ R.cancha_extra_pct }} % de la cobertura por cancha.</li>
-<li><b>Si la jornada se alarga:</b> los primeros 15 minutos no se cobran. Despu&eacute;s, cada bloque de 20 minutos
-iniciado vale un tercio de la hora. Si se alarga media hora, son 2 bloques: {{ pesos(redondo(2 * R.hora / 3, 10)) }}.</li>
-<li><b>Lluvia o suspensi&oacute;n:</b> si se suspende antes de empezar, se reprograma sin costo. Si se suspende a mitad, se cobra el tiempo trabajado.</li>
-<li><b>Cancelaci&oacute;n:</b> con 48 horas de aviso se reprograma sin costo. Con menos, se retiene el anticipo.</li>
-<li><b>Traslado y estacionamiento:</b> se cotizan seg&uacute;n el lugar.</li>
+<div><h3>{{ T.tar_letra_tit }}</h3><ul class="tf-ul">
+{% for l in txl('tar_letra', negrita=True, anticipo=R.anticipo, canchas=R.canchas_incluidas,
+   cancha_pct=R.cancha_extra_pct, media_hora=pesos(redondo(2 * R.hora / 3, 10))) %}<li>{{ l }}</li>{% endfor %}
 </ul></div>
 </div>
 </section>
@@ -10817,6 +11085,23 @@ def test():
         assert "$8.000" in tar and "$9.440" not in tar, "se publico con boleta"
         assert "boleta" not in tar.lower(), "la pagina publica menciona la boleta"
         assert "$43.000" in tar, "el pack Liga no salio de 43.000"
+        assert "{hora}" not in tar and 'data-t="' not in tar, "quedo una marca o el editor"
+        # el editor del sitio: la misma pagina con los textos editables, sin
+        # indexar; guardar cambia la publica y una clave inventada se ignora
+        ed_ = c.get("/panel/editar/tarifas").get_data(as_text=True)
+        assert 'data-t="tar_paso1"' in ed_ and "{hora}" in ed_ and 'id="ed-bar"' in ed_
+        assert "noindex" in ed_.split("<style>")[0], "el editor se puede indexar"
+        for u in ("/panel/editar/", "/panel/editar/eventos", "/panel/editar/sobre-mi"):
+            assert 'id="ed-bar"' in c.get(u).get_data(as_text=True), u
+        assert c.get("/panel/editar/nada").status_code == 404
+        r = c.post("/panel/editar/guardar",
+                   json={"tar_paso2_t": "Fotos a tu gusto", "no_existe": "x"})
+        assert r.get_json() == {"ok": True, "guardados": 1}, r.get_json()
+        assert "Fotos a tu gusto" in c.get("/tarifas").get_data(as_text=True)
+        c.post("/panel/editar/guardar", json={"tar_paso2_t": DEFAULTS["tar_paso2_t"]})
+        assert db().execute("SELECT 1 FROM texto WHERE clave = 'tar_paso2_t'"
+                            ).fetchone() is None
+        assert c.post("/panel/editar/guardar", data="x").status_code == 400
         assert "const TARIFAS" in c.get("/panel/cotizador").get_data(as_text=True)
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
