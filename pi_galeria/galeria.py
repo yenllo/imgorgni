@@ -6605,7 +6605,9 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
     <span class="tf-l" style="display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem">Extras</span>
     <label class="tf-chk"><input type="checkbox" id="tf-xl"><span>Logo o marco de la liga &middot; {{ pesos(R.logo) }}<small>En todas las fotos, con versi&oacute;n para redes</small></span></label>
     <label class="tf-chk"><input type="checkbox" id="tf-xp"><span>Separaci&oacute;n por partidos &middot; {{ pesos(R.partidos) }}<small>Una carpeta por partido, con conteo de fotos</small></span></label>
-    <label class="tf-chk"><input type="checkbox" id="tf-xs"><span>Yo elijo las fotos por ti &middot; {{ pesos(R.sel_foto) }} por foto<small>M&iacute;nimo {{ pesos(R.sel_min) }}. Te ahorras revisar la galer&iacute;a</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xs"><span>Yo elijo las fotos por ti &middot; desde {{ pesos(R.seleccion[0][1]) }}<small>Seg&uacute;n cu&aacute;ntas fotos lleva tu pedido:
+      {% for cant, precio in R.seleccion %}hasta {{ cant }}, {{ pesos(precio) }}{{ " · " if not loop.last }}{% endfor %}.
+      Te ahorras revisar la galer&iacute;a.</small></span></label>
   </div>
 </form>
 <aside class="tf-res" aria-live="polite">
@@ -6643,6 +6645,14 @@ const R = {{ tarifas|tojson }}, WSP = {{ wsp|tojson }};
 const $ = id => document.getElementById(id);
 const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
 const b100 = n => Math.round(n);
+// igual que precio_de() en Python: el tramo mas chico que cubra n; arriba del
+// ultimo, a su precio por foto redondeado a la centena
+function tramo(n, tr){
+  if(n <= 0 || !tr.length) return 0;
+  for(const [cant, precio] of tr) if(n <= cant) return precio;
+  const [cant, precio] = tr[tr.length - 1];
+  return precio + Math.round((n - cant) * precio / cant / 100) * 100;
+}
 const n0 = (id, min) => Math.max(min || 0, parseFloat($(id).value) || 0);
 function calcular(){
   const h = n0("tf-h"), c = Math.round(n0("tf-c", 1));
@@ -6657,7 +6667,7 @@ function calcular(){
   let extras = 0; const xs = [];
   if($("tf-xl").checked){ extras += R.logo; xs.push("logo de la liga"); }
   if($("tf-xp").checked){ extras += R.partidos; xs.push("separación por partidos"); }
-  if($("tf-xs").checked){ extras += Math.max(R.sel_min, n * R.sel_foto); xs.push("que elijas tú las fotos"); }
+  if($("tf-xs").checked){ extras += tramo(n, R.seleccion); xs.push("que elijas tú las fotos"); }
   const total = b100(cob + fotos + extras);
   $("tf-tot").textContent = pesos(total);
   $("tf-dc").textContent = pesos(b100(cob));
@@ -8008,7 +8018,10 @@ TARIFAS_DEF = {
             "Máscaras por sujeto/fondo/campo para edición por zonas"]},
     },
     "logo": 10000, "partidos": 3000, "exclusivo_pct": 15,
-    "sel_foto": 40, "sel_min": 2000,
+    # seleccion personal por tramos (20/10/2026): [hasta N fotos, precio]. Se
+    # cobra el tramo mas chico que cubra las fotos del pedido, con la misma
+    # regla que los tramos de una galeria (precio_de)
+    "seleccion": [[75, 8500], [125, 12500], [200, 18000], [300, 24000]],
     "retencion": 15.25,   # boleta de honorarios 2026: sube cada enero
     # el anticipo no es un %: es la cobertura (las horas, con el recargo de
     # canchas), sea cual sea el pack (20/10/2026)
@@ -8042,8 +8055,11 @@ CAMPOS_TARIFAS = (
         ("logo", "Logo o marco de la liga ($)"),
         ("partidos", "Separaci\u00f3n por partidos ($)"),
         ("exclusivo_pct", "Recargo venta exclusiva, sobre las fotos (%)"),
-        ("sel_foto", "Selecci\u00f3n personal, por foto ($)"),
-        ("sel_min", "Selecci\u00f3n personal, m\u00ednimo ($)"))),
+        )),
+    ("Selecci\u00f3n personal, por tramos", tuple(
+        c for i in range(len(TARIFAS_DEF["seleccion"])) for c in (
+            ("seleccion.%d.0" % i, "Tramo %d: hasta (fotos)" % (i + 1)),
+            ("seleccion.%d.1" % i, "Tramo %d: precio ($)" % (i + 1))))),
     ("Pago y entrega", (
         ("retencion", "Retenci\u00f3n de la boleta de honorarios (%)"),
         ("entrega_dias", "Entrega, d\u00edas h\u00e1biles desde la selecci\u00f3n"),
@@ -8077,6 +8093,7 @@ def tarifas():
             d[k] = v
         except (KeyError, IndexError, ValueError, TypeError):
             pass              # un campo que ya no existe en el codigo
+    t["seleccion"] = sorted(t["seleccion"])     # precio_de los quiere en orden
     fp = t["foto_pack"]
     t["foto"] = {k: int(round(v * (1 + t["medida_pct"] / 100) / 10) * 10)
                  for k, v in fp.items()}
@@ -8353,12 +8370,8 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     <label class="cz-chk"><input type="checkbox" id="aLogo"> Logo/marco del cliente + exportación para redes</label>
     <label class="cz-chk"><input type="checkbox" id="aPartidos"> Separación por partidos con conteo de fotos</label>
     <div class="cz-f" style="margin-top:4px"><div><label>N° de partidos (opcional)</label><input id="nPartidos" type="number" min="0" value=""></div></div>
-    <label class="cz-chk"><input type="checkbox" id="aSeleccion"> Selección personal (yo elijo por el organizador)</label>
-    <div class="cz-f cz-tres" style="margin-top:4px">
-      <div><label>Básicas que elijo</label><input id="sBasica" type="number" min="0" value="0"></div>
-      <div><label>Completas</label><input id="sCompleta" type="number" min="0" value="0"></div>
-      <div><label>Profesionales</label><input id="sPro" type="number" min="0" value="0"></div>
-    </div>
+    <label class="cz-chk"><input type="checkbox" id="aSeleccion"> Selección personal (yo elijo por el organizador), por tramos según las fotos del pedido</label>
+    <label class="cz-chk" style="margin-left:1.4rem"><input type="checkbox" id="gSel"> como cortesía</label>
   </fieldset>
 
   <fieldset><legend>5. Precios: lista y cliente</legend>
@@ -8370,8 +8383,6 @@ PANEL_COTIZADOR = r"""<main class="cotz">
       <tr><td>Profesional</td><td><input id="lPro" type="number" value="840"></td><td><input id="cPro" type="number" value="840"></td><td></td></tr>
       <tr><td>Logo/marco</td><td><input id="lLogo" type="number" value="10000"></td><td><input id="cLogo" type="number" value="10000"></td><td><input type="checkbox" id="gLogo"></td></tr>
       <tr><td>Partidos</td><td><input id="lPartidos" type="number" value="3000"></td><td><input id="cPartidos" type="number" value="3000"></td><td><input type="checkbox" id="gPartidos"></td></tr>
-      <tr><td>Selección/foto</td><td><input id="lSel" type="number" value="40"></td><td><input id="cSel" type="number" value="40"></td><td><input type="checkbox" id="gSel"></td></tr>
-      <tr><td>Selección mín.</td><td><input id="lSelMin" type="number" value="2000"></td><td><input id="cSelMin" type="number" value="2000"></td><td></td></tr>
     </table>
     <p class="cz-ayuda">Si el precio del cliente es menor que el de lista, la boleta muestra el descuento línea por línea y el ahorro total.</p>
   </fieldset>
@@ -8430,15 +8441,15 @@ const PRESETS = {
   lista: {packFotos:"liga",canchas:1,lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
-          lSel:T.sel_foto,cSel:T.sel_foto,gSel:false,lSelMin:T.sel_min,cSelMin:T.sel_min,volumen:0,boleta:"si",
+          gSel:false,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
   // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
-          packFotos:"",canchas:1,lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,
+          packFotos:"",canchas:1,lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
-          lSel:T.sel_foto,cSel:T.sel_foto,gSel:false,lSelMin:T.sel_min,cSelMin:T.sel_min,volumen:0,
+          gSel:false,volumen:0,
           boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
 };
 
@@ -8525,16 +8536,15 @@ function calcular(){
     linea("Add-ons","Separación por partidos", (np ? np + " partidos · " : "") + "con conteo de fotos por partido",
           1, num("lPartidos"), num("cPartidos"), $("gPartidos").checked);
   }
-  if($("aSeleccion").checked){
-    const s = {b:ent("sBasica"), c:ent("sCompleta"), p:ent("sPro")}, n = s.b+s.c+s.p;
-    if(n){
-      const partes = [s.b && s.b+" básicas", s.c && s.c+" completas", s.p && s.p+" profesionales"].filter(Boolean).join(", ");
-      const tL = Math.max(num("lSelMin"), n*num("lSel"));
-      const tC = $("gSel").checked ? 0 : Math.max(num("cSelMin"), n*num("cSel"));
-      const minimo = n*num("cSel") < num("cSelMin") && !$("gSel").checked;
-      L.push({grupo:"Add-ons",concepto:"Selección personal",detalle:`Elijo ${partes} por el organizador` + (minimo ? " · aplica mínimo" : ""),
-              cant:n,uL:num("lSel"),uC:$("gSel").checked?0:num("cSel"),tL,tC,cortesia:$("gSel").checked});
-    }
+  if($("aSeleccion").checked && totalFotos){
+    // por tramos, como la pagina publica: el tramo que cubre las fotos del pedido
+    const tr = T.seleccion, i = tr.findIndex(([cant]) => totalFotos <= cant);
+    let pSel;
+    if(i >= 0) pSel = tr[i][1];
+    else { const [cant, precio] = tr[tr.length-1]; pSel = precio + Math.round((totalFotos-cant)*precio/cant/100)*100; }
+    linea("Add-ons","Selección personal",
+          `Elijo las ${totalFotos} fotos por el organizador · ` + (i >= 0 ? `tramo hasta ${tr[i][0]}` : `sobre ${tr[tr.length-1][0]}, a su precio por foto`),
+          1, pSel, pSel, $("gSel").checked);
   }
 
   const tras = num("traslado");
@@ -11089,6 +11099,12 @@ def test():
         assert "$8.000" in tar and "$9.440" not in tar, "se publico con boleta"
         assert "boleta" not in tar.lower(), "la pagina publica menciona la boleta"
         assert "$43.000" in tar, "el pack Liga no salio de 43.000"
+        # seleccion por tramos: el mas chico que cubre; sobre el ultimo, a su
+        # precio por foto. La pagina muestra los tramos.
+        sel = TARIFAS_DEF["seleccion"]
+        assert (precio_de(75, sel), precio_de(76, sel), precio_de(160, sel)) == (8500, 12500, 18000)
+        assert precio_de(330, sel) == 24000 + 2400
+        assert "hasta 75, $8.500" in tar, "no se ven los tramos de la seleccion"
         # un precio a mano como 3.990 sale tal cual, sin redondear a 4.000
         c.post("/panel/tarifas", data={"partidos": "3990"})
         assert "$3.990" in c.get("/tarifas").get_data(as_text=True), "redondeo el 990"
