@@ -6483,7 +6483,7 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-form{display:grid;gap:1.2rem;margin:0}
 .tf-form .tf-l{display:block;font-family:var(--mono);font-size:.66rem;
   letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem}
-.tf-form input[type=number],.tf-form input[type=time],.tf-form select{width:100%;background:var(--panel);
+.tf-form input[type=number],.tf-form input[type=time],.tf-form input[type=date],.tf-form select{width:100%;background:var(--panel);
   color:var(--cal);border:1px solid var(--linea2);border-radius:2px;
   padding:.7rem .75rem;font:inherit;font-size:16px}
 .tf-dos,.tf-tres{display:grid;gap:.8rem;grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -6500,7 +6500,9 @@ TARIFAS_PUB = BARRA + """<main class="viz">
   margin:1.2rem 0 0;font-size:.9rem;color:var(--humo)}
 .tf-res dt,.tf-res dd{margin:0;padding:.3rem 0;border-top:1px solid var(--linea)}
 .tf-res dd{color:var(--cal);text-align:right}
-.tf-res .wsp{width:100%;justify-content:center;margin-top:1.4rem}
+.tf-res .wsp{width:100%;justify-content:center;margin-top:1.4rem;cursor:pointer}
+.tf-res .wsp + .wsp{margin-top:.6rem}
+#tf-temp{color:var(--cal);margin:.3rem 0 0}
 .tf-cond{display:grid;gap:2rem 3rem;grid-template-columns:repeat(2,minmax(0,1fr));
   margin-top:2.2rem}
 .tf-cond h3{margin:0;font-size:1rem;color:var(--cal)}
@@ -6642,6 +6644,12 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 {% if T.tar_calc_sub %}<p class="tf-sub">{{ T.tar_calc_sub }}</p>{% endif %}
 <div class="tf-calc">
 <form class="tf-form" id="tf-form">
+  <div class="tf-dos">
+    <div><label class="tf-l" for="tf-fecha">Fecha del evento</label>
+      <input id="tf-fecha" type="date"></div>
+    <div><label class="tf-l" for="tf-nf">Fechas en la temporada</label>
+      <input id="tf-nf" type="number" min="1" max="40" step="1" value="1" inputmode="numeric"></div>
+  </div>
   <div class="tf-tres">
     <div><label class="tf-l" for="tf-ini">Empieza el primer partido</label>
       <input id="tf-ini" type="time" value="19:00"></div>
@@ -6692,14 +6700,16 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 <aside class="tf-res" aria-live="polite">
   <span class="tf-l" style="font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo)">Total de la fecha</span>
   <p class="tf-precio" id="tf-tot">&mdash;</p>
+  <p class="tf-ayuda" id="tf-temp" hidden></p>
   <dl>
     <dt id="tf-dcl">Cobertura</dt><dd id="tf-dc">&mdash;</dd>
     <dt id="tf-dfl">Fotos</dt><dd id="tf-df">&mdash;</dd>
     <dt>Extras</dt><dd id="tf-de">&mdash;</dd>
-    <dt>Para reservar (las horas)</dt><dd id="tf-da">&mdash;</dd>
+    <dt id="tf-dal">Para reservar (las horas)</dt><dd id="tf-da">&mdash;</dd>
   </dl>
   {% if T.tar_traslado %}<p class="tf-ayuda">{{ T.tar_traslado }}</p>{% endif %}
   {% if wsp %}<a class="wsp" id="tf-ir" href="https://wa.me/{{ wsp }}" rel="noopener">{{ T.tar_boton_wsp }}</a>{% endif %}
+  <button type="button" class="wsp hueco" id="tf-link">Copiar link para compartir</button>
 </aside>
 </div>
 </section>
@@ -6752,7 +6762,7 @@ const enBloque = {};          // partidos a la vez por horario ("19:00" -> 2), s
 let firma = "";
 // los horarios de la jornada, de a un partido; el ultimo puede quedar corto
 function bloques(){
-  const a = minutos($("tf-ini").value), b0 = minutos($("tf-fin").value), dur = +$("tf-dur").value;
+  const a = minutos($("tf-ini").value), b0 = minutos($("tf-fin").value), dur = +$("tf-dur").value || 60;
   if(a === null || b0 === null) return [];
   const b = b0 <= a ? b0 + 1440 : b0;
   const out = [];
@@ -6776,7 +6786,7 @@ $("tf-bloques").addEventListener("input", e => {
 function calcular(){
   const bs = bloques();
   pintarBloques(bs);
-  const dur = +$("tf-dur").value, pctDur = R.duracion_pct[String(dur)] || 0;
+  const dur = +$("tf-dur").value || 60, pctDur = R.duracion_pct[String(dur)] || 0;
   let cob = 0, nSug = 0, h = 0, partidos = 0, conRecargo = 0, maxC = 1;
   for(const [t0, t1] of bs){
     const hs = (t1 - t0) / 60, c = enBloque[hhmm(t0)] || 1;
@@ -6826,22 +6836,73 @@ function calcular(){
   $("tf-df").textContent = pesos(b100(fotos));
   $("tf-de").textContent = extras ? pesos(b100(extras)) : "—";
   $("tf-da").textContent = pesos(cob);       // el anticipo son las horas
+  // la temporada: el total por fecha por cuantas fechas
+  const nf = nFechas();
+  $("tf-temp").hidden = nf < 2;
+  $("tf-temp").textContent = nf > 1 ? "× " + nf + " fechas = " + pesos(total * nf) + " la temporada" : "";
+  $("tf-dal").textContent = nf > 1 ? "Para reservar cada fecha (las horas)" : "Para reservar (las horas)";
+  const f = $("tf-fecha").value, fTxt = f ? new Date(f + "T12:00").toLocaleDateString("es-CL",
+    {weekday: "long", day: "numeric", month: "long"}).replace(",", "") : "";
   const ir = $("tf-ir");
   if(ir){
-    const msg = "Hola Renzo, quiero cotizar una fecha: de " + $("tf-ini").value + " a " + $("tf-fin").value
+    const msg = "Hola Renzo, quiero cotizar " + (nf > 1 ? nf + " fechas" : "una fecha")
+      + (fTxt ? (nf > 1 ? " desde el " : " para el ") + fTxt : "")
+      + ": de " + $("tf-ini").value + " a " + $("tf-fin").value
       + " (" + hTxt + " h), partidos de " + dur + " minutos, " + partidos + " en total"
       + (maxC > 1 ? " (hasta " + maxC + " a la vez)" : "") + ", "
       + (P ? "pack " + P.nombre + " (" + n + " fotos)"
            : "fotos a mi medida (" + q[0] + " básicas, " + q[1] + " completas, " + q[2] + " profesionales)")
       + ", venta " + (excl ? "exclusiva" : "abierta")
       + (xs.length ? ", con " + xs.join(", ") : "")
-      + ". Total estimado " + pesos(total) + ".";
+      + ". Total estimado " + pesos(total) + (nf > 1 ? " por fecha, " + pesos(total * nf) + " la temporada" : "")
+      + ". Detalle: " + linkCotizacion();
     ir.href = "https://wa.me/" + WSP + "?text=" + encodeURIComponent(msg);
   }
 }
 $("tf-form").addEventListener("submit", e => e.preventDefault());
 $("tf-form").addEventListener("input", calcular);
 $("tf-form").addEventListener("change", calcular);
+
+const nFechas = () => Math.min(40, Math.round(n0("tf-nf", 1)));
+// el link guarda la cotizacion entera en la direccion: quien lo abre ve la
+// calculadora igual (y Renzo, el pedido exacto que le llega por WhatsApp)
+const EXTRAS = [["tf-xl", "l"], ["tf-xp", "p"], ["tf-xs", "s"]];
+function linkCotizacion(){
+  const q = new URLSearchParams();
+  q.set("ini", $("tf-ini").value); q.set("fin", $("tf-fin").value); q.set("dur", $("tf-dur").value);
+  const sim = Object.entries(enBloque).filter(([, v]) => v > 1).map(([k, v]) => k + "-" + v).join(",");
+  if(sim) q.set("s", sim);
+  const pk = (radios.find(r => r.checked) || {}).value || "";
+  q.set("p", pk);
+  if(!pk) ["qb", "qc", "qp"].forEach(k => q.set(k, $("tf-" + k).value));
+  if($("tf-x").value !== "abierto") q.set("x", $("tf-x").value);
+  const ex = EXTRAS.filter(([id]) => $(id).checked).map(([, l]) => l).join("");
+  if(ex) q.set("e", ex);
+  if($("tf-fecha").value) q.set("f", $("tf-fecha").value);
+  if(nFechas() > 1) q.set("n", nFechas());
+  return location.origin + "/tarifas?" + q + "#calcular";
+}
+// abrir un link compartido: lo que trae la direccion pisa los valores de partida
+const q0 = new URLSearchParams(location.search);
+if(q0.has("ini")){
+  [["ini", "tf-ini"], ["fin", "tf-fin"], ["dur", "tf-dur"], ["x", "tf-x"], ["f", "tf-fecha"],
+   ["n", "tf-nf"], ["qb", "tf-qb"], ["qc", "tf-qc"], ["qp", "tf-qp"]].forEach(([k, id]) => {
+    if(q0.has(k)) $(id).value = q0.get(k);
+  });
+  (q0.get("s") || "").split(",").forEach(par => {
+    const [k, v] = par.split("-");
+    if(/^[0-9][0-9]:[0-9][0-9]$/.test(k || "")) enBloque[k] = Math.min(4, Math.max(1, parseInt(v, 10) || 1));
+  });
+  const r = radios.find(r => r.value === q0.get("p"));
+  if(r){ r.checked = true; aMano = true; }
+  EXTRAS.forEach(([id, l]) => { $(id).checked = (q0.get("e") || "").includes(l); });
+}
+$("tf-link").addEventListener("click", async () => {
+  const u = linkCotizacion(), b = $("tf-link");
+  try{ await navigator.clipboard.writeText(u); b.textContent = "Link copiado"; }
+  catch(_){ prompt("Copia este link:", u); }
+  setTimeout(() => { b.textContent = "Copiar link para compartir"; }, 1800);
+});
 calcular();
 })();
 </script>
@@ -8512,6 +8573,8 @@ PANEL_COTIZADOR = r"""<main class="cotz">
       <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
       <div><label>Cada partido dura</label><select id="durPartido"><option value="20">20 min</option>
         <option value="30">30 min</option><option value="60" selected>60 min</option></select></div>
+      <div><label>Valor de la hora</label><input id="horaLista" readonly tabindex="-1"></div>
+      <div><label>Descuento a la hora (%)</label><input id="descHora" type="number" min="0" max="100" step="0.5" value="0"></div>
       <div><label>N° cotización</label><input id="numero"></div>
       <div><label>Válida por (días)</label><input id="validez" type="number" min="1" value="15"></div>
     </div>
@@ -8680,6 +8743,11 @@ function pintarBloquesCz(bs){
   $("czBloques").innerHTML = bs.map(([t0,t1]) => { const k = hhmm(t0);
     return `<label class="cz-bq"><span>${k}–${hhmm(t1)}</span><input type="number" min="1" max="4" value="${S[k]||1}" data-ini="${k}"></label>`; }).join("");
 }
+// el descuento a la hora escribe el precio cliente de la hora (tabla de
+// precios); si se cambia ese precio a mano, el descuento se recalcula solo
+$("descHora").addEventListener("input", () => {
+  $("cHora").value = Math.round(num("lHora") * (1 - Math.min(100, num("descHora")) / 100));
+});
 $("czBloques").addEventListener("input", e => {
   const i = e.target.closest("input[data-ini]"); if(!i) return;
   const S = simult(); S[i.dataset.ini] = Math.min(4, Math.max(1, Math.round(+i.value || 1)));
@@ -8715,8 +8783,12 @@ function calcular(){
   };
 
   const hTxt = (Math.round(horas*100)/100).toLocaleString("es-CL");
+  const dH = num("lHora") ? Math.max(0, Math.round((1 - num("cHora")/num("lHora"))*1000)/10) : 0;
+  $("horaLista").value = pesos(num("lHora")) + (dH > 0 ? " → " + pesos(num("cHora")) : "");
+  if(document.activeElement !== $("descHora")) $("descHora").value = dH;
   linea("Cobertura","Cobertura de la jornada",
-        `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`, horas, num("lHora"), num("cHora"));
+        `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`
+        + (dH > 0 ? ` · descuento ${dH.toLocaleString("es-CL")} % a la hora` : ""), horas, num("lHora"), num("cHora"));
   // partidos a la vez, horario por horario: hasta 2 incluidos; cada uno extra
   // suma cancha_extra_pct de la hora, solo en los horarios que lo tienen
   const bs = bloquesCz(); pintarBloquesCz(bs);
@@ -11345,6 +11417,9 @@ def test():
         assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
         assert "{pct30}" not in tar and "Partidos cortos:" in tar
         assert 'id="tf-dur"' in tar and 'id="tf-bloques"' in tar
+        assert all(('id="%s"' % i) in tar for i in ("tf-fecha", "tf-nf", "tf-link", "tf-temp"))
+        # un link compartido (con parametros) abre la misma pagina, sin romperla
+        assert c.get("/tarifas?ini=19:00&fin=21:00&dur=60&s=20:00-3&p=liga&e=ls&n=8").status_code == 200
         assert 'toggle("mas"' not in tar, "la clase mas choca con el link de eventos"
         # un precio a mano como 3.990 sale tal cual, sin redondear a 4.000
         c.post("/panel/tarifas", data={"_ver": TARIFAS_VER, "partidos": "3990"})
@@ -11369,7 +11444,7 @@ def test():
         assert c.post("/panel/editar/guardar", data="x").status_code == 400
         cz_ = c.get("/panel/cotizador").get_data(as_text=True)
         assert "const TARIFAS" in cz_ and 'id="durPartido"' in cz_ and 'id="czBloques"' in cz_
-        assert 'id="canchas"' not in cz_
+        assert 'id="canchas"' not in cz_ and 'id="descHora"' in cz_
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
         assert c.get("/panel/tarifas").status_code == 200
