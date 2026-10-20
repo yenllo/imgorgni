@@ -7394,8 +7394,11 @@ queda: el fondo blanco de un JPG se ve como un cuadrado.</p>
 # todos lados. La ruta lo pega despues de PANEL_CSS + PANEL_BARRA renderizados.
 # Sus clases llevan cz- porque el sitio ya usa .aviso, .barra, .pie y .marca.
 # Reglas de cobro, acordadas con Renzo:
-# - Niveles por foto, precio de lista: Basica 200 / Completa 390 / Profesional
-#   700. Completa es la que se empuja: va marcada "Recomendada".
+# - Niveles por foto: Basica 200 / Completa 390 / Profesional 700. Completa es
+#   la que se empuja: va marcada "Recomendada".
+# - Packs (19/10/2026): Esencial 100 fotos $25.000, Liga 150 $43.000
+#   (recomendado), Full 250 $75.000. Personalizado = por foto +20 %
+#   (240/470/840) y sin descuento: es el precio de lista de la boleta.
 # - La cobertura se cobra por hora. No hay "hora extra": la hora vale lo
 #   acordado. Hora pasada: si se sigue fotografiando despues del termino, 15 min
 #   de tolerancia y despues cada bloque de 20 min iniciado a 1/3 de la hora.
@@ -7548,16 +7551,17 @@ PANEL_COTIZADOR = r"""<main class="cotz">
   </fieldset>
 
   <fieldset><legend>2. Fotos seleccionadas</legend>
-    <div class="cz-f cz-tres">
+    <label>Pack</label>
+    <select id="packFotos"><option value="">Personalizado: precio por foto, sin descuento</option></select>
+    <div class="cz-f cz-tres" style="margin-top:8px">
       <div><label>Básica</label><input id="qBasica" type="number" min="0" value="64"></div>
       <div><label>Completa</label><input id="qCompleta" type="number" min="0" value="36"></div>
       <div><label>Profesional</label><input id="qPro" type="number" min="0" value="0"></div>
     </div>
     <div class="cz-f" style="margin-top:8px">
-      <div><label>Desc. por volumen (%)</label><input id="volumen" type="number" min="0" max="100" step="0.5" value="0"></div>
-      <div><label>&nbsp;</label><label class="cz-chk" style="margin:0"><input type="checkbox" id="volAuto" checked> Automático</label></div>
+      <div><label>Descuento (%)</label><input id="volumen" type="number" min="0" max="100" step="0.5" value="0"></div>
     </div>
-    <p class="cz-ayuda">Automático: 8 % desde 260 fotos y 11 % desde 320 (los packs Liga y Full).</p>
+    <p class="cz-ayuda">Los packs ya traen su descuento. Este campo es para casos aparte, como un contrato de temporada.</p>
   </fieldset>
 
   <fieldset><legend>3. Venta posterior</legend>
@@ -7596,9 +7600,9 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     <table class="cz-precios">
       <tr><th></th><th>Lista</th><th>Cliente</th><th title="Cortesía: precio 0">Cort.</th></tr>
       <tr><td>Hora</td><td><input id="lHora" type="number" value="8000"></td><td><input id="cHora" type="number" value="8000"></td><td></td></tr>
-      <tr><td>Básica</td><td><input id="lBasica" type="number" value="200"></td><td><input id="cBasica" type="number" value="200"></td><td></td></tr>
-      <tr><td>Completa</td><td><input id="lCompleta" type="number" value="390"></td><td><input id="cCompleta" type="number" value="390"></td><td></td></tr>
-      <tr><td>Profesional</td><td><input id="lPro" type="number" value="700"></td><td><input id="cPro" type="number" value="700"></td><td></td></tr>
+      <tr><td>Básica</td><td><input id="lBasica" type="number" value="240"></td><td><input id="cBasica" type="number" value="240"></td><td></td></tr>
+      <tr><td>Completa</td><td><input id="lCompleta" type="number" value="470"></td><td><input id="cCompleta" type="number" value="470"></td><td></td></tr>
+      <tr><td>Profesional</td><td><input id="lPro" type="number" value="840"></td><td><input id="cPro" type="number" value="840"></td><td></td></tr>
       <tr><td>Logo/marco</td><td><input id="lLogo" type="number" value="10000"></td><td><input id="cLogo" type="number" value="10000"></td><td><input type="checkbox" id="gLogo"></td></tr>
       <tr><td>Partidos</td><td><input id="lPartidos" type="number" value="3000"></td><td><input id="cPartidos" type="number" value="3000"></td><td><input type="checkbox" id="gPartidos"></td></tr>
       <tr><td>Selección/foto</td><td><input id="lSel" type="number" value="40"></td><td><input id="cSel" type="number" value="40"></td><td><input type="checkbox" id="gSel"></td></tr>
@@ -7666,23 +7670,37 @@ const NIVELES = {
 };
 
 const PRESETS = {
-  lista: {canchas:1,lHora:8000,cHora:8000,lBasica:200,cBasica:200,lCompleta:390,cCompleta:390,lPro:700,cPro:700,
+  // Los precios por foto de lista son los del pack Personalizado (+20 % sobre
+  // 200/390/700); los packs cerrados tienen su precio en PACKS.
+  lista: {packFotos:"liga",canchas:1,lHora:8000,cHora:8000,lBasica:240,cBasica:240,lCompleta:470,cCompleta:470,lPro:840,cPro:840,
           lLogo:10000,cLogo:10000,gLogo:false,lPartidos:3000,cPartidos:3000,gPartidos:false,
-          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volAuto:true,boleta:"si",anticipo:30,
+          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volumen:0,boleta:"si",anticipo:30,
           aLogo:false,aPartidos:false,aSeleccion:false},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
   // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
-          canchas:1,lHora:8000,cHora:6000,lBasica:200,cBasica:110,lCompleta:390,cCompleta:250,lPro:700,cPro:420,
+          packFotos:"",canchas:1,lHora:8000,cHora:6000,lBasica:240,cBasica:110,lCompleta:470,cCompleta:250,lPro:840,cPro:420,
           lLogo:10000,cLogo:10000,gLogo:true,aLogo:true,lPartidos:3000,cPartidos:3000,gPartidos:true,aPartidos:true,
-          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volAuto:false,volumen:0,
+          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volumen:0,
           boleta:"no",anticipo:0,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
+};
+
+// Packs cerrados (19/10/2026). Liga es el que se empuja. Su "lista" en la boleta
+// es lo que costaria armarlo foto a foto como Personalizado: ese contraste es
+// el decoy, el pack siempre sale mas barato que armarlo a mano.
+const PACKS = {
+  esencial: {nombre:"Esencial", q:[70,30,0],  precio:25000},
+  liga:     {nombre:"Liga",     q:[90,50,10], precio:43000, reco:true},
+  full:     {nombre:"Full",     q:[140,85,25],precio:75000}
 };
 
 const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
 const ent = id => Math.max(0, Math.round(num(id)));
 const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+Object.entries(PACKS).forEach(([k,P]) => $("packFotos").insertAdjacentHTML("beforeend",
+  `<option value="${k}">${P.nombre} · ${P.q[0]+P.q[1]+P.q[2]} fotos · ${pesos(P.precio)}${P.reco?" · recomendado":""}</option>`));
 
 function minutos(h){ if(!h) return null; const [a,b] = h.split(":").map(Number); return a*60+b; }
 function duracion(ini, fin){ // en minutos, cruza medianoche
@@ -7701,9 +7719,11 @@ function numeroNuevo(){
 
 function calcular(){
   const horas = duracion($("horaInicio").value, $("horaFin").value) / 60;
+  // un pack cerrado fija las cantidades; Personalizado las deja libres
+  const P = PACKS[$("packFotos").value];
+  ["qBasica","qCompleta","qPro"].forEach((id,i) => { $(id).readOnly = !!P; if(P) $(id).value = P.q[i]; });
   const q = {basica:ent("qBasica"), completa:ent("qCompleta"), pro:ent("qPro")};
   const totalFotos = q.basica + q.completa + q.pro;
-  if($("volAuto").checked) $("volumen").value = totalFotos >= 320 ? 11 : totalFotos >= 260 ? 8 : 0;
   const volPct = num("volumen");
   const pack = $("pack").value;
   const exclPct = pack === "exclusivo" ? num("recargoExcl") : 0;
@@ -7723,9 +7743,15 @@ function calcular(){
   if(extra) L.push({grupo:"Cobertura",concepto:`Canchas simultáneas (${ent("canchas")})`,detalle:"2 incluidas · +15 % por cancha desde la tercera",
                     cant:null,tL:L[0].tL*0.15*extra,tC:L[0].tC*0.15*extra});
 
-  if(q.basica)   linea("Fotos","Fotos con edición básica","", q.basica, num("lBasica"), num("cBasica"));
-  if(q.completa) linea("Fotos","Fotos con edición completa","Recomendada", q.completa, num("lCompleta"), num("cCompleta"));
-  if(q.pro)      linea("Fotos","Fotos con edición profesional","", q.pro, num("lPro"), num("cPro"));
+  if(P){
+    const armado = q.basica*num("lBasica") + q.completa*num("lCompleta") + q.pro*num("lPro");
+    linea("Fotos",`Pack ${P.nombre}`,`${q.basica} básicas · ${q.completa} completas · ${q.pro} profesionales · lista: armado foto a foto`,
+          1, armado, P.precio);
+  } else {
+    if(q.basica)   linea("Fotos","Fotos con edición básica","", q.basica, num("lBasica"), num("cBasica"));
+    if(q.completa) linea("Fotos","Fotos con edición completa","Recomendada", q.completa, num("lCompleta"), num("cCompleta"));
+    if(q.pro)      linea("Fotos","Fotos con edición profesional","", q.pro, num("lPro"), num("cPro"));
+  }
   const fotosL = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tL,0);
   const fotosC = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tC,0);
   const ajustes = [];
@@ -7778,7 +7804,7 @@ function calcular(){
   const total = conBoleta ? Math.round(subC/(1-ret)) : Math.round(subC);
   const impuesto = total - Math.round(subC);
   const anticipo = Math.round(total*num("anticipo")/100);
-  return {L, horas, q, totalFotos, pack, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
+  return {L, horas, q, totalFotos, pack, P, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
           ahorro: subL - subC, conBoleta, ret, pasada};
 }
 
@@ -7855,7 +7881,7 @@ function render(){
       <dt>Fecha</dt><dd>${fechaLarga($("fechaEvento").value)}</dd>
       <dt>Horario</dt><dd>${v("horaInicio") || "--:--"} a ${v("horaFin") || "--:--"} hrs</dd>
       ${$("lugar").value.trim() ? `<dt>Lugar</dt><dd>${v("lugar")}</dd>` : ""}
-      <dt>Pack</dt><dd>${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas</dd>
+      <dt>Pack</dt><dd>${r.P ? r.P.nombre + " · " : ""}${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas</dd>
     </dl></div>
     <div class="cz-total-caja"><small>Total a pagar</small><div class="cz-monto">${pesos(r.total)}</div>
       ${num("anticipo") > 0 ? `<div class="cz-linea"><span>Anticipo para reservar (${num("anticipo")} %)</span><span>${pesos(r.anticipo)}</span></div>
@@ -7863,7 +7889,7 @@ function render(){
     </div>
   </div>
 
-  ${r.ahorro > 0 ? `<div class="cz-ahorro"><span>Valor a precio de lista: <s style="color:inherit">${pesos(r.subL)}</s><br>Su tarifa preferente le ahorra</span>
+  ${r.ahorro > 0 ? `<div class="cz-ahorro"><span>Valor a precio de lista: <s style="color:inherit">${pesos(r.subL)}</s><br>${r.P ? "Con el pack " + r.P.nombre + " ahorra" : "Su tarifa preferente le ahorra"}</span>
     <span><b>${pesos(r.ahorro)}</b> (${pct.toLocaleString("es-CL")} %)</span></div>` : ""}
   ${avisoComparte}
 
