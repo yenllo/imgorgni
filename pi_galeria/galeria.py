@@ -1346,8 +1346,7 @@ CAMPOS = (
         ("tar_titulo", "Titulo de la pagina", 1, "Tarifas para ligas"),
         ("tar_bajada", "Bajada", 3,
          "Cubro la jornada completa y t\u00fa eliges qu\u00e9 fotos se editan. "
-         "Los precios son finales: ya incluyen la boleta de honorarios, as\u00ed "
-         "que lo que ves es lo que transfieres."),
+         "Aqu\u00ed est\u00e1 lo que cobro y lo que entrego, sin letra escondida."),
     )),
     ("Como recibis tus fotos", (
         ("como_titulo", "Titulo (vacio = no se muestra la seccion)", 1,
@@ -1872,13 +1871,12 @@ def calculadora():
 @app.get("/tarifas")
 def tarifas_publicas():
     """Cuanto cobro y que entrego, con una calculadora que termina en WhatsApp.
-    Los precios salen de tarifas() y se muestran con la boleta incluida."""
-    t = tarifas()
+    Los precios salen de tarifas() y van netos: la boleta se conversa aparte."""
     return _viz(TARIFAS_PUB, seccion="tarifas", indexar=True,
                 titulo="Tarifas para ligas \u00b7 rb.fotos",
                 desc="Cobertura de ligas y torneos: packs de fotos editadas, "
-                     "precios finales con boleta incluida y calculadora.",
-                tarifas=t, bruto=lambda n, a=1: bruto(n, t["retencion"], a))
+                     "precios y calculadora.",
+                tarifas=tarifas(), redondo=lambda n, a=1: int(round(n / a) * a))
 
 
 @app.get("/eventos")
@@ -6159,9 +6157,9 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 <div class="viz">""" + PIE + """</div>"""
 
 # La pagina publica de tarifas (20/10/2026). Todo precio sale de tarifas() y se
-# muestra con la boleta incluida (bruto): por foto redondeado a $10, lo demas
-# a $100. La calculadora hace la cuenta neta y brutea el total una sola vez,
-# como el cotizador del panel, y termina en un WhatsApp con el pedido escrito.
+# muestra NETO, sin la boleta de honorarios: eso Renzo lo conversa aparte con
+# cada organizador (20/10/2026). Por foto se redondea a $10 y lo demas a $100.
+# La calculadora termina en un WhatsApp con el pedido escrito.
 TARIFAS_PUB = BARRA + """<main class="viz">
 <style>
 .tf-ancla{margin:2rem 0 0;padding:1.1rem 1.3rem;border-left:2px solid var(--cancha);
@@ -6233,7 +6231,7 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 <h1 class="tit">{{ T.tar_titulo }}</h1>
 <p class="bajada">{{ T.tar_bajada }}</p>
 <p class="tf-ancla">Una fecha t&iacute;pica, {{ L.horas }} horas de cobertura con el pack {{ L.nombre }}
-({{ L.q|sum }} fotos editadas): <b>{{ pesos(bruto(L.horas * R.hora + L.precio, 100)) }}</b> en total.</p>
+({{ L.q|sum }} fotos editadas): <b>{{ pesos(redondo(L.horas * R.hora + L.precio, 100)) }}</b> en total.</p>
 <p class="botones"><a class="wsp" href="#calcular">Calcular mi fecha</a>
 <a class="wsp hueco" href="#packs">Ver los packs</a></p>
 </section>
@@ -6241,7 +6239,7 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 <section class="bloque">
 <div class="como">
 <h2>C&oacute;mo se arma el precio</h2>
-<div class="paso"><b>Cobertura por hora</b><p>{{ pesos(bruto(R.hora, 10)) }} por hora en cancha,
+<div class="paso"><b>Cobertura por hora</b><p>{{ pesos(redondo(R.hora, 10)) }} por hora en cancha,
 sin l&iacute;mite de disparos. Hasta {{ R.canchas_incluidas }} canchas contiguas al mismo tiempo sin recargo.</p></div>
 <div class="paso"><b>Fotos editadas</b><p>Recibes la galer&iacute;a completa con marca de agua y
 eliges cu&aacute;les se editan. Puedes tomar un pack o armar el tuyo.</p></div>
@@ -6261,21 +6259,21 @@ las mismas fotos una por una.</p>
 <div class="tf-card{{ ' reco' if P.reco }}">
 {% if P.reco %}<span class="tf-tag">Recomendado</span>{% endif %}
 <h3>{{ P.nombre }}</h3>
-<p class="tf-precio">{{ pesos(bruto(P.precio, 100)) }}<small>{{ P.q|sum }} fotos editadas + la cobertura</small></p>
+<p class="tf-precio">{{ pesos(redondo(P.precio, 100)) }}<small>{{ P.q|sum }} fotos editadas + la cobertura</small></p>
 <ul class="tf-ul">
 <li><b>{{ P.q[0] }}</b> con edici&oacute;n b&aacute;sica</li>
 <li><b>{{ P.q[1] }}</b> con edici&oacute;n completa</li>
 {% if P.q[2] %}<li><b>{{ P.q[2] }}</b> con edici&oacute;n profesional, para portadas y redes</li>{% endif %}
 <li>Pensado para jornadas de unas {{ P.horas }} horas</li>
 </ul>
-<p class="tf-ahorro">Una por una: <s>{{ pesos(bruto(armado, 100)) }}</s> &middot;
-ahorras {{ pesos(bruto(armado, 100) - bruto(P.precio, 100)) }}</p>
+<p class="tf-ahorro">Una por una: <s>{{ pesos(redondo(armado, 100)) }}</s> &middot;
+ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 </div>
 {% endfor %}
 </div>
 <p class="tf-nota"><b>&iquest;Ninguno te calza?</b> Arma tu propia combinaci&oacute;n a precio por foto:
-{{ pesos(bruto(F.basica, 10)) }} la b&aacute;sica, {{ pesos(bruto(F.completa, 10)) }} la completa y
-{{ pesos(bruto(F.pro, 10)) }} la profesional.</p>
+{{ pesos(redondo(F.basica, 10)) }} la b&aacute;sica, {{ pesos(redondo(F.completa, 10)) }} la completa y
+{{ pesos(redondo(F.pro, 10)) }} la profesional.</p>
 </section>
 
 <section class="bloque">
@@ -6328,9 +6326,9 @@ por WhatsApp ya escrito.</p>
     quedan fuera de la venta: nadie paga por una foto que ya tiene.</p></div>
   <div>
     <span class="tf-l" style="display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem">Extras</span>
-    <label class="tf-chk"><input type="checkbox" id="tf-xl"><span>Logo o marco de la liga &middot; {{ pesos(bruto(R.logo, 100)) }}<small>En todas las fotos, con versi&oacute;n para redes</small></span></label>
-    <label class="tf-chk"><input type="checkbox" id="tf-xp"><span>Separaci&oacute;n por partidos &middot; {{ pesos(bruto(R.partidos, 100)) }}<small>Una carpeta por partido, con conteo de fotos</small></span></label>
-    <label class="tf-chk"><input type="checkbox" id="tf-xs"><span>Yo elijo las fotos por ti &middot; {{ pesos(bruto(R.sel_foto, 10)) }} por foto<small>M&iacute;nimo {{ pesos(bruto(R.sel_min, 100)) }}. Te ahorras revisar la galer&iacute;a</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xl"><span>Logo o marco de la liga &middot; {{ pesos(redondo(R.logo, 100)) }}<small>En todas las fotos, con versi&oacute;n para redes</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xp"><span>Separaci&oacute;n por partidos &middot; {{ pesos(redondo(R.partidos, 100)) }}<small>Una carpeta por partido, con conteo de fotos</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xs"><span>Yo elijo las fotos por ti &middot; {{ pesos(redondo(R.sel_foto, 10)) }} por foto<small>M&iacute;nimo {{ pesos(redondo(R.sel_min, 100)) }}. Te ahorras revisar la galer&iacute;a</small></span></label>
   </div>
 </form>
 <aside class="tf-res" aria-live="polite">
@@ -6342,7 +6340,7 @@ por WhatsApp ya escrito.</p>
     <dt>Extras</dt><dd id="tf-de">&mdash;</dd>
     <dt>Para reservar ({{ R.anticipo }} %)</dt><dd id="tf-da">&mdash;</dd>
   </dl>
-  <p class="tf-ayuda">Boleta de honorarios incluida. El traslado se cotiza seg&uacute;n el lugar.</p>
+  <p class="tf-ayuda">El traslado se cotiza seg&uacute;n el lugar.</p>
   {% if wsp %}<a class="wsp" id="tf-ir" href="https://wa.me/{{ wsp }}" rel="noopener">Pedir esta fecha</a>{% endif %}
 </aside>
 </div>
@@ -6363,7 +6361,7 @@ por WhatsApp ya escrito.</p>
 <li><b>Reserva:</b> {{ R.anticipo }} % al confirmar la fecha, el resto contra entrega.</li>
 <li><b>Canchas:</b> hasta {{ R.canchas_incluidas }} contiguas sin recargo; desde la siguiente, +{{ R.cancha_extra_pct }} % de la cobertura por cancha.</li>
 <li><b>Si la jornada se alarga:</b> los primeros 15 minutos no se cobran. Despu&eacute;s, cada bloque de 20 minutos
-iniciado vale un tercio de la hora. Si se alarga media hora, son 2 bloques: {{ pesos(bruto(2 * R.hora / 3, 10)) }}.</li>
+iniciado vale un tercio de la hora. Si se alarga media hora, son 2 bloques: {{ pesos(redondo(2 * R.hora / 3, 10)) }}.</li>
 <li><b>Lluvia o suspensi&oacute;n:</b> si se suspende antes de empezar, se reprograma sin costo. Si se suspende a mitad, se cobra el tiempo trabajado.</li>
 <li><b>Cancelaci&oacute;n:</b> con 48 horas de aviso se reprograma sin costo. Con menos, se retiene el anticipo.</li>
 <li><b>Traslado y estacionamiento:</b> se cotizan seg&uacute;n el lugar.</li>
@@ -6375,9 +6373,8 @@ iniciado vale un tercio de la hora. Si se alarga media hora, son 2 bloques: {{ p
 (function(){
 const R = {{ tarifas|tojson }}, WSP = {{ wsp|tojson }};
 const $ = id => document.getElementById(id);
-const neto = 1 - R.retencion / 100;
 const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
-const b100 = n => Math.round(n / neto / 100) * 100;
+const b100 = n => Math.round(n / 100) * 100;
 const n0 = (id, min) => Math.max(min || 0, parseFloat($(id).value) || 0);
 function calcular(){
   const h = n0("tf-h"), c = Math.round(n0("tf-c", 1));
@@ -7846,8 +7843,8 @@ PANEL_TARIFAS = PANEL_CSS + PANEL_BARRA + """<main>
 @media (max-width:900px){.tfz{grid-template-columns:1fr}.tfz .res{position:static}}
 </style>
 <h1 class="tit">Tarifas</h1>
-<p style="opacity:.55;font-size:.9rem;max-width:68ch">Los precios van <b>sin</b> la boleta: la p&aacute;gina
-p&uacute;blica les suma la retenci&oacute;n. Los packs se calculan solos: sus fotos por el precio dentro de
+<p style="opacity:.55;font-size:.9rem;max-width:68ch">Los precios van <b>sin</b> la boleta, y as&iacute; se
+publican: la boleta se conversa aparte con cada organizador. La columna "con boleta" es solo tu referencia. Los packs se calculan solos: sus fotos por el precio dentro de
 pack, menos su descuento. El pedido a medida es el precio dentro de pack m&aacute;s su recargo. Al guardar
 cambian la p&aacute;gina <a href="/tarifas" target="_blank" rel="noopener">/tarifas</a> y el
 <a href="/panel/cotizador">cotizador</a>.</p>
@@ -10814,30 +10811,32 @@ def test():
         tar = c.get("/tarifas").get_data(as_text=True)
         assert DEFAULTS["tar_bajada"] not in c.get("/").get_data(as_text=True)
         assert DEFAULTS["tar_bajada"] in tar
-        # precios con boleta: la hora de 8.000 neta se publica a 9.440, y el
-        # pack Liga (90x200 + 50x390 + 10x700 = 44.500, -3,5 % = 43.000) a 50.700
-        assert bruto(8000, 15.25, 10) == 9440 and "$9.440" in tar
-        assert "$50.700" in tar, "el pack Liga no salio de 43.000 neto"
+        # la pagina publica va neta (la boleta se conversa aparte): la hora a
+        # 8.000 y el pack Liga (90x200 + 50x390 + 10x700 = 44.500, -3,5 %) a 43.000
+        assert bruto(8000, 15.25, 10) == 9440
+        assert "$8.000" in tar and "$9.440" not in tar, "se publico con boleta"
+        assert "boleta" not in tar.lower(), "la pagina publica menciona la boleta"
+        assert "$43.000" in tar, "el pack Liga no salio de 43.000"
         assert "const TARIFAS" in c.get("/panel/cotizador").get_data(as_text=True)
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
         assert c.get("/panel/tarifas").status_code == 200
-        r = c.post("/panel/tarifas", data={"hora": "10000", "anticipo": "abc"})
+        r = c.post("/panel/tarifas", data={"hora": "9000", "anticipo": "abc"})
         assert "abc" not in r.headers["Location"] and "Anticipo" in \
             urllib.parse.unquote_plus(r.headers["Location"]), r.headers["Location"]
         tar = c.get("/tarifas").get_data(as_text=True)
-        assert "$11.800" in tar and "$9.440" not in tar, "la hora no se movio"
+        assert "$9.000" in tar and "$8.000" not in tar, "la hora no se movio"
         c.post("/panel/textos/restaurar")
-        assert "$11.800" in c.get("/tarifas").get_data(as_text=True), \
+        assert "$9.000" in c.get("/tarifas").get_data(as_text=True), \
             "restaurar los textos se llevo las tarifas"
         c.post("/panel/tarifas", data={"hora": "8000"})
         assert db().execute("SELECT 1 FROM texto WHERE clave = 'tarifas'"
                             ).fetchone() is None, "quedo guardado un valor igual al default"
         c.post("/panel/tarifas", data={"foto_pack.completa": "450"})
-        assert "$50.700" not in c.get("/tarifas").get_data(as_text=True), \
+        assert "$43.000" not in c.get("/tarifas").get_data(as_text=True), \
             "subir la completa no movio el pack Liga"
         c.post("/panel/tarifas/restaurar")
-        assert "$50.700" in c.get("/tarifas").get_data(as_text=True)
+        assert "$43.000" in c.get("/tarifas").get_data(as_text=True)
         assert DEFAULTS["mi_titulo"] in c.get("/sobre-mi").get_data(as_text=True)
         assert c.get("/panel/textos").status_code == 200
         assert DEFAULTS["hero_titulo"] in c.get("/").get_data(as_text=True)
