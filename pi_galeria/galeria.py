@@ -1415,12 +1415,14 @@ CAMPOS = (
          "Entrega por galer\u00eda privada o Google Drive"),
         ("tar_letra_tit", "Letra chica, titulo", 1, "Letra chica"),
         ("tar_letra", "Letra chica: una linea por vi\u00f1eta, lo de antes "
-         "de los dos puntos va en negrita ({hora} {canchas} {cancha_pct} "
+         "de los dos puntos va en negrita ({hora} {canchas} {cancha_pct} {pct30} {pct20} "
          "{media_hora})", 8,
          "Reserva: al confirmar la fecha se paga la cobertura ({hora} por "
          "hora); las fotos, contra entrega.\n"
          "Canchas: hasta {canchas} contiguas sin recargo; desde la siguiente, "
          "+{cancha_pct} % de la cobertura por cancha.\n"
+         "Partidos cortos: si duran 30 minutos la cobertura sube {pct30} %, y "
+         "si duran 20 minutos, {pct20} %.\n"
          "Si la jornada se alarga: los primeros 15 minutos no se cobran. "
          "Despu\u00e9s, cada bloque de 20 minutos iniciado vale un tercio de "
          "la hora. Si se alarga media hora, son 2 bloques: {media_hora}.\n"
@@ -6501,26 +6503,29 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-cond h3{margin:0;font-size:1rem;color:var(--cal)}
 /* que lleva cada foto: tabla de checks, la columna recomendada encendida */
 .tf-tabla-wrap{margin-top:2.2rem;overflow-x:auto}
-.tf-tabla{width:100%;border-collapse:collapse;font-size:.95rem}
-.tf-tabla th,.tf-tabla td{padding:.75rem .6rem;border-bottom:1px solid var(--linea);
+.tf-tabla{width:100%;border-collapse:collapse;font-size:1.06rem}
+.tf-tabla th,.tf-tabla td{padding:1rem .8rem;border-bottom:1px solid var(--linea2);
   text-align:center}
-.tf-tabla tbody th{text-align:left;color:var(--humo);font-weight:400}
-.tf-tabla thead th{color:var(--cal);font-weight:600;vertical-align:bottom;
-  border-bottom-color:var(--linea2)}
+.tf-tabla tbody th{text-align:left;color:var(--cal);font-weight:400}
+.tf-tabla tbody tr:hover th,.tf-tabla tbody tr:hover td{background:rgba(240,243,234,.03)}
+.tf-tabla thead th{color:var(--cal);font-weight:600;font-size:1.15rem;
+  vertical-align:bottom;border-bottom:1px solid var(--humo)}
 .tf-tabla thead th:first-child{text-align:left;font-family:var(--mono);
-  font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);
+  font-size:.74rem;letter-spacing:.13em;text-transform:uppercase;color:#C4C9BE;
   font-weight:500}
-.tf-tabla thead small{display:block;font-family:var(--mono);font-size:.58rem;
+.tf-tabla thead small{display:block;font-family:var(--mono);font-size:.66rem;
   letter-spacing:.14em;text-transform:uppercase;color:var(--cancha);font-weight:700;
-  margin-bottom:.3rem}
-.tf-tabla .reco{background:rgba(198,240,74,.06)}
-.tf-si{color:var(--cancha);font-weight:700;font-size:1.05rem}
-.tf-no{color:var(--linea2)}
+  margin-bottom:.35rem}
+.tf-tabla .reco{background:rgba(198,240,74,.09)}
+.tf-tabla tbody tr:hover .reco{background:rgba(198,240,74,.13)}
+.tf-si{color:var(--cancha);font-weight:700;font-size:1.4rem;line-height:1}
+.tf-no{color:var(--humo)}
 @media (max-width:560px){
-  .tf-tabla{font-size:.82rem}
-  .tf-tabla th,.tf-tabla td{padding:.6rem .2rem}
-  .tf-tabla thead th{font-size:.74rem}
-  .tf-tabla thead small{font-size:.5rem;letter-spacing:.08em}
+  .tf-tabla{font-size:.86rem}
+  .tf-tabla th,.tf-tabla td{padding:.7rem .2rem}
+  .tf-tabla thead th{font-size:.8rem}
+  .tf-tabla thead small{font-size:.52rem;letter-spacing:.08em}
+  .tf-si{font-size:1.15rem}
 }
 /* calculadora: los packs en chico; el recomendado brilla, el elegido se pinta */
 .tf-mini{display:grid;gap:.6rem;grid-template-columns:repeat(4,minmax(0,1fr));
@@ -6531,6 +6536,7 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-mp input{position:absolute;opacity:0;pointer-events:none}
 .tf-mp b{color:var(--cal);font-size:.98rem;font-weight:600}
 .tf-mp span{color:var(--humo);font-size:.8rem}
+.tf-mp small{color:var(--humo);font-size:.7rem;line-height:1.35}
 .tf-mp em{font-style:normal;font-family:var(--mono);font-size:.78rem;
   color:var(--cal);margin-top:.35rem}
 .tf-mp i{position:absolute;top:-.6rem;left:.6rem;font-style:normal;
@@ -6545,6 +6551,14 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-mp:focus-within{outline:2px solid var(--cancha);outline-offset:2px}
 @media (max-width:560px){.tf-mini{grid-template-columns:repeat(2,minmax(0,1fr));
   gap:.9rem .6rem}}
+/* un cuadrito por horario de partido, con cuantos se juegan a la vez */
+.tf-bloques{display:grid;gap:.5rem;grid-template-columns:repeat(auto-fill,minmax(6.6rem,1fr));
+  margin-top:.2rem}
+.tf-bq{display:flex;flex-direction:column;gap:.3rem;padding:.55rem .6rem;
+  border:1px solid var(--linea2);background:var(--panel)}
+.tf-bq span{font-family:var(--mono);font-size:.7rem;color:var(--cal);letter-spacing:.04em}
+.tf-bq input[type=number]{padding:.45rem .5rem}
+.tf-bq.mas{border-color:rgba(255,206,123,.55)}
 @media (max-width:860px){
   .tf-grid,.tf-calc,.tf-cond{grid-template-columns:1fr}
   .tf-grid{gap:1.6rem}
@@ -6628,15 +6642,20 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
       <input id="tf-ini" type="time" value="19:00"></div>
     <div><label class="tf-l" for="tf-fin">Termina el &uacute;ltimo</label>
       <input id="tf-fin" type="time" value="22:00"></div>
-    <div><label class="tf-l" for="tf-c">Partidos a la vez</label>
-      <input id="tf-c" type="number" min="1" max="4" step="1" value="1" inputmode="numeric"></div>
+    <div><label class="tf-l" for="tf-dur">Cada partido dura</label>
+      <select id="tf-dur"><option value="20">20 minutos</option>
+        <option value="30">30 minutos</option><option value="60" selected>60 minutos</option></select></div>
   </div>
-  <p class="tf-ayuda" id="tf-hinfo" style="margin-top:-.6rem"></p>
+  <div><span class="tf-l">Partidos a la vez en cada horario</span>
+    <div class="tf-bloques" id="tf-bloques"></div>
+    <p class="tf-ayuda" id="tf-hinfo"></p></div>
   <div><span class="tf-l">Fotos editadas</span>
     <div class="tf-mini" role="radiogroup" aria-label="Pack de fotos">
     {% for k, P in R.packs.items() %}
       <label class="tf-mp"><input type="radio" name="tf-p" value="{{ k }}"{{ ' checked' if P.reco }}>
-        <i>Te lo recomiendo</i><b>{{ P.nombre }}</b><span>{{ P.q|sum }} fotos</span><em>{{ pesos(P.precio) }}</em></label>
+        <i>Te lo recomiendo</i><b>{{ P.nombre }}</b><span>{{ P.q|sum }} fotos</span>
+        <small>{{ P.q[0] }} b&aacute;sicas &middot; {{ P.q[1] }} completas{% if P.q[2] %} &middot; {{ P.q[2] }} profesionales{% endif %}</small>
+        <em>{{ pesos(P.precio) }}</em></label>
     {% endfor %}
       <label class="tf-mp"><input type="radio" name="tf-p" value="">
         <i>Te lo recomiendo</i><b>A tu medida</b><span>Eliges cu&aacute;ntas</span><em>por foto</em></label>
@@ -6689,7 +6708,8 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 </ul></div>
 <div><h3>{{ T.tar_letra_tit }}</h3><ul class="tf-ul">
 {% for l in txl('tar_letra', negrita=True, hora=pesos(R.hora), canchas=R.canchas_incluidas,
-   cancha_pct=R.cancha_extra_pct, media_hora=pesos(redondo(2 * R.hora / 3, 10))) %}<li>{{ l }}</li>{% endfor %}
+   cancha_pct=R.cancha_extra_pct, pct30=R.duracion_pct["30"], pct20=R.duracion_pct["20"],
+   media_hora=pesos(redondo(2 * R.hora / 3, 10))) %}<li>{{ l }}</li>{% endfor %}
 </ul></div>
 </div>
 </section>
@@ -6714,40 +6734,78 @@ const radios = [...document.querySelectorAll('input[name="tf-p"]')];
 let aMano = false;          // si el visitante eligio un pack, la recomendacion ya no se lo cambia
 radios.forEach(r => r.addEventListener("input", () => { aMano = true; }));
 // el pack cuyo total de fotos queda mas cerca de lo que da la jornada
-function recomendar(h, c){
-  const n = h * R.fotos_por_hora * (1 + 0.5 * (c - 1));
+function recomendar(n){
   let mejor = null, dif = Infinity;
   for(const [k, P] of Object.entries(R.packs)){
     const d = Math.abs(P.q[0] + P.q[1] + P.q[2] - n);
     if(d < dif){ dif = d; mejor = k; }
   }
-  return [mejor, Math.round(n / 10) * 10];
+  return mejor;
 }
+const hhmm = m => String(Math.floor(m / 60) % 24).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+const enBloque = {};          // partidos a la vez por horario ("19:00" -> 2), sobrevive a los cambios
+let firma = "";
+// los horarios de la jornada, de a un partido; el ultimo puede quedar corto
+function bloques(){
+  const a = minutos($("tf-ini").value), b0 = minutos($("tf-fin").value), dur = +$("tf-dur").value;
+  if(a === null || b0 === null) return [];
+  const b = b0 <= a ? b0 + 1440 : b0;
+  const out = [];
+  for(let t = a; t < b && out.length < 36; t += dur) out.push([t, Math.min(t + dur, b)]);
+  return out;
+}
+function pintarBloques(bs){
+  const f = bs.map(([t0, t1]) => t0 + "-" + t1).join(",");
+  if(f === firma) return;       // no rehacer los cuadritos mientras se escribe en uno
+  firma = f;
+  $("tf-bloques").innerHTML = bs.map(([t0, t1]) => {
+    const k = hhmm(t0), v = enBloque[k] || 1;
+    return '<label class="tf-bq"><span>' + k + "–" + hhmm(t1) + '</span><input type="number" min="1" max="4" step="1" value="'
+      + v + '" data-ini="' + k + '" inputmode="numeric" aria-label="Partidos a la vez de ' + k + " a " + hhmm(t1) + '"></label>';
+  }).join("");
+}
+$("tf-bloques").addEventListener("input", e => {
+  const i = e.target.closest("input[data-ini]");
+  if(i) enBloque[i.dataset.ini] = Math.min(4, Math.max(1, Math.round(+i.value || 1)));
+});
 function calcular(){
-  const a = minutos($("tf-ini").value), b = minutos($("tf-fin").value);
-  let dur = (a === null || b === null) ? 0 : b - a;
-  if(a !== null && b !== null && dur <= 0) dur += 1440;     // termina pasada la medianoche
-  const h = dur / 60, c = Math.round(n0("tf-c", 1));
+  const bs = bloques();
+  pintarBloques(bs);
+  const dur = +$("tf-dur").value, pctDur = R.duracion_pct[String(dur)] || 0;
+  let cob = 0, nSug = 0, h = 0, partidos = 0, conRecargo = 0, maxC = 1;
+  for(const [t0, t1] of bs){
+    const hs = (t1 - t0) / 60, c = enBloque[hhmm(t0)] || 1;
+    h += hs; partidos += c; maxC = Math.max(maxC, c);
+    const extra = Math.max(0, c - R.canchas_incluidas);
+    if(extra) conRecargo++;
+    cob += hs * R.hora * (1 + R.cancha_extra_pct / 100 * extra);
+    nSug += hs * R.fotos_por_hora * (1 + 0.5 * (c - 1));
+  }
+  cob *= 1 + pctDur / 100;
+  nSug = Math.round(nSug / 10) * 10;
+  document.querySelectorAll(".tf-bq").forEach(el => {
+    el.classList.toggle("mas", +el.querySelector("input").value > R.canchas_incluidas);
+  });
   const hTxt = (Math.round(h * 100) / 100).toLocaleString("es-CL");
-  const extra = Math.max(0, c - R.canchas_incluidas);
+  const notas = [];
+  if(conRecargo) notas.push("+" + R.cancha_extra_pct + " % por cada partido sobre " + R.canchas_incluidas + " a la vez");
+  if(pctDur) notas.push("+" + pctDur + " % por partidos de " + dur + " minutos");
   $("tf-hinfo").textContent = !h ? "Indica a qué hora empieza el primer partido y a qué hora termina el último."
-    : hTxt + " h de cobertura · " + (extra
-        ? "+" + R.cancha_extra_pct * extra + " % por " + extra + (extra > 1 ? " partidos extra" : " partido extra") + " a la vez"
-        : "hasta " + R.canchas_incluidas + " partidos a la vez sin recargo");
-  const [reco, nSug] = recomendar(h, c);
+    : hTxt + " h de cobertura · " + partidos + (partidos > 1 ? " partidos" : " partido") + " en total"
+      + (notas.length ? " · " + notas.join(" · ") : " · hasta " + R.canchas_incluidas + " a la vez sin recargo");
+  const reco = recomendar(nSug);
   if(!aMano){ const r = radios.find(r => r.value === reco); if(r) r.checked = true; }
   radios.forEach(r => {
     const card = r.closest(".tf-mp");
     card.classList.toggle("on", r.checked);
     card.classList.toggle("rec", !!h && r.value === reco);
   });
-  $("tf-reco").textContent = h ? "Para " + hTxt + " h con " + c + (c > 1 ? " partidos" : " partido")
-    + " a la vez salen unas " + nSug + " fotos que valen la pena: te recomiendo el pack " + R.packs[reco].nombre + "." : "";
+  $("tf-reco").textContent = h ? "Para " + hTxt + " h con " + partidos + (partidos > 1 ? " partidos" : " partido")
+    + " salen unas " + nSug + " fotos que valen la pena: te recomiendo el pack " + R.packs[reco].nombre + "." : "";
   const P = R.packs[(radios.find(r => r.checked) || {}).value];
   $("tf-medida").hidden = !!P;
   const q = P ? P.q : ["tf-qb", "tf-qc", "tf-qp"].map(id => Math.round(n0(id)));
   const n = q[0] + q[1] + q[2];
-  const cob = h * R.hora * (1 + R.cancha_extra_pct / 100 * extra);
   let fotos = P ? P.precio : q[0] * R.foto.basica + q[1] * R.foto.completa + q[2] * R.foto.pro;
   const excl = $("tf-x").value === "exclusivo";
   if(excl) fotos *= 1 + R.exclusivo_pct / 100;
@@ -6766,7 +6824,8 @@ function calcular(){
   const ir = $("tf-ir");
   if(ir){
     const msg = "Hola Renzo, quiero cotizar una fecha: de " + $("tf-ini").value + " a " + $("tf-fin").value
-      + " (" + hTxt + " h), " + c + (c > 1 ? " partidos" : " partido") + " a la vez, "
+      + " (" + hTxt + " h), partidos de " + dur + " minutos, " + partidos + " en total"
+      + (maxC > 1 ? " (hasta " + maxC + " a la vez)" : "") + ", "
       + (P ? "pack " + P.nombre + " (" + n + " fotos)"
            : "fotos a mi medida (" + q[0] + " básicas, " + q[1] + " completas, " + q[2] + " profesionales)")
       + ", venta " + (excl ? "exclusiva" : "abierta")
@@ -8080,6 +8139,9 @@ TARIFAS_DEF = {
     # dieron Renato, Babbo y Prime League) y la mitad mas por cada partido
     # simultaneo extra
     "fotos_por_hora": 50,
+    # partidos cortos: mas equipos que cubrir parejo y mas cambios en el mismo
+    # rato. Recargo sobre la cobertura segun cuanto dura cada partido (min)
+    "duracion_pct": {"20": 10, "30": 5, "60": 0},
     # precio por foto DENTRO de un pack. El pedido a medida lleva medida_pct
     # encima y no tiene descuento: tarifas() lo deja en "foto".
     "foto_pack": {"basica": 200, "completa": 390, "pro": 700},
@@ -8129,7 +8191,9 @@ CAMPOS_TARIFAS = (
         ("hora", "Valor de la hora ($)"),
         ("canchas_incluidas", "Canchas incluidas sin recargo"),
         ("cancha_extra_pct", "Recargo por cada cancha extra (%)"),
-        ("fotos_por_hora", "Fotos por hora, para recomendar el pack"))),
+        ("fotos_por_hora", "Fotos por hora, para recomendar el pack"),
+        ("duracion_pct.30", "Recargo si los partidos duran 30 min (%)"),
+        ("duracion_pct.20", "Recargo si los partidos duran 20 min (%)"))),
     ("Precio por foto", (
         ("foto_pack.basica", "B\u00e1sica, dentro de un pack ($)"),
         ("foto_pack.completa", "Completa, dentro de un pack ($)"),
@@ -11213,6 +11277,8 @@ def test():
         assert "Todo lo de" not in tar.split('class="tf-tabla"')[1].split("</table>")[0]
         # la calculadora: un pack chico por pack, mas el de a tu medida
         assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
+        assert "{pct30}" not in tar and "Partidos cortos:" in tar
+        assert 'id="tf-dur"' in tar and 'id="tf-bloques"' in tar
         # un precio a mano como 3.990 sale tal cual, sin redondear a 4.000
         c.post("/panel/tarifas", data={"partidos": "3990"})
         assert "$3.990" in c.get("/tarifas").get_data(as_text=True), "redondeo el 990"
