@@ -1342,14 +1342,12 @@ CAMPOS = (
          "Ver todos los eventos"),
         ("rotulo_trabajos", "Rotulo de la tira de trabajos", 1, "Trabajos"),
     )),
-    ("Calculadora (proximamente)", (
-        ("calc_titulo", "Titulo de la pagina", 1,
-         "Calculadora de cotizacion"),
-        ("calc_texto", "Texto", 4,
-         "Vas a poder armar el presupuesto vos mismo: horas de cobertura, "
-         "canchas en simultaneo, cuantas fotos entrego y en cuanto tiempo. "
-         "Mientras tanto escribime y te lo paso el mismo dia."),
-        ("calc_sello", "Sello", 1, "En produccion"),
+    ("Tarifas (/tarifas)", (
+        ("tar_titulo", "Titulo de la pagina", 1, "Tarifas para ligas"),
+        ("tar_bajada", "Bajada", 3,
+         "Cubro la jornada completa y t\u00fa eliges qu\u00e9 fotos se editan. "
+         "Los precios son finales: ya incluyen la boleta de honorarios, as\u00ed "
+         "que lo que ves es lo que transfieres."),
     )),
     ("Como recibis tus fotos", (
         ("como_titulo", "Titulo (vacio = no se muestra la seccion)", 1,
@@ -1867,9 +1865,19 @@ def sobre_mi():
 
 @app.get("/calculadora")
 def calculadora():
-    """Todavia no calcula nada: es la pagina que dice que viene."""
-    return _viz(CALCULADORA, seccion="calculadora",
-                titulo="Calculadora de cotizacion \u00b7 rb.fotos")
+    """La URL vieja (era la pagina de 'proximamente'): manda a /tarifas."""
+    return redirect("/tarifas", 301)
+
+
+@app.get("/tarifas")
+def tarifas_publicas():
+    """Cuanto cobro y que entrego, con una calculadora que termina en WhatsApp.
+    Los precios salen de TARIFAS y se muestran con la boleta incluida."""
+    return _viz(TARIFAS_PUB, seccion="tarifas", indexar=True,
+                titulo="Tarifas para ligas \u00b7 rb.fotos",
+                desc="Cobertura de ligas y torneos: packs de fotos editadas, "
+                     "precios finales con boleta incluida y calculadora.",
+                tarifas=TARIFAS, bruto=bruto)
 
 
 @app.get("/eventos")
@@ -1885,7 +1893,7 @@ def eventos_publicos():
 
 
 # lo que se indexa: las mismas paginas que piden indexar=True en _viz
-INDEXABLES = ("/", "/eventos", "/sobre-mi")
+INDEXABLES = ("/", "/eventos", "/sobre-mi", "/tarifas")
 
 
 @app.get("/robots.txt")
@@ -3871,7 +3879,9 @@ def cotizador():
     la protege con basic_auth como al resto de /panel*."""
     return render_template_string(
         BASE_HTML, titulo="Cotizador \u00b7 panel",
-        cuerpo=render_template_string(PANEL_CSS + PANEL_BARRA) + PANEL_COTIZADOR)
+        cuerpo=render_template_string(PANEL_CSS + PANEL_BARRA)
+        + "<script>const TARIFAS = %s;</script>" % json.dumps(TARIFAS)
+        + PANEL_COTIZADOR)
 
 
 @app.get("/panel/textos")
@@ -5999,7 +6009,7 @@ BARRA = """<nav class="barra">
 <div class="links">
 <a href="/" class="{{ 'on' if seccion == 'inicio' }}">Inicio</a>
 <a href="/eventos" class="{{ 'on' if seccion == 'eventos' }}">Eventos</a>
-<a href="/calculadora" class="{{ 'on' if seccion == 'calculadora' }}">Calculadora</a>
+<a href="/tarifas" class="{{ 'on' if seccion == 'tarifas' }}">Tarifas</a>
 <a href="/sobre-mi" class="{{ 'on' if seccion == 'sobre-mi' }}">Sobre mi</a>
 </div>
 {% if wsp %}<a class="wsp chico" href="https://wa.me/{{ wsp }}"
@@ -6009,7 +6019,7 @@ BARRA = """<nav class="barra">
 
 PIE = """<hr class="luz">
 <footer class="pie"><span>rb.fotos</span>
-<a href="/eventos">Eventos</a><a href="/calculadora">Calculadora</a>
+<a href="/eventos">Eventos</a><a href="/tarifas">Tarifas</a>
 <a href="/sobre-mi">Sobre mi</a>
 {% if wsp %}<a href="https://wa.me/{{ wsp }}" rel="noopener">WhatsApp</a>{% endif %}
 {% if T.pie %}<span class="fin">{{ T.pie }}</span>{% endif %}</footer>"""
@@ -6090,18 +6100,266 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 </main>
 <div class="viz">""" + PIE + """</div>"""
 
-CALCULADORA = BARRA + """<main class="viz">
-<section class="bloque" style="max-width:44rem">
-{% if T.calc_sello %}<p style="margin:0 0 1.4rem">
-<span class="sello">{{ T.calc_sello }}</span></p>{% endif %}
-<h1 class="tit">{{ T.calc_titulo }}</h1>
-<p class="bajada">{{ T.calc_texto }}</p>
-<p class="botones">
-{% if wsp %}<a class="wsp" href="https://wa.me/{{ wsp }}?text={{
-  'Hola Renzo, quiero cotizar un evento'|urlencode }}"
-  rel="noopener">Pedime la cotizacion</a>{% endif %}
-<a class="wsp hueco" href="/eventos">Ver los eventos</a></p>
+# La pagina publica de tarifas (20/10/2026). Todo precio sale de TARIFAS y se
+# muestra con la boleta incluida (bruto): por foto redondeado a $10, lo demas
+# a $100. La calculadora hace la cuenta neta y brutea el total una sola vez,
+# como el cotizador del panel, y termina en un WhatsApp con el pedido escrito.
+TARIFAS_PUB = BARRA + """<main class="viz">
+<style>
+.tf-ancla{margin:2rem 0 0;padding:1.1rem 1.3rem;border-left:2px solid var(--cancha);
+  background:var(--panel);color:var(--cal);max-width:44rem}
+.tf-ancla b{color:var(--cancha);font-weight:600;white-space:nowrap}
+.tf-h2{margin:0;font-size:clamp(1.5rem,3.6vw,2.1rem);font-weight:600;
+  letter-spacing:-.03em;color:var(--cal)}
+.tf-sub{color:var(--humo);margin:.8rem 0 0;max-width:52ch}
+.tf-grid{display:grid;gap:1rem;grid-template-columns:repeat(3,minmax(0,1fr));
+  margin-top:2.2rem;align-items:start}
+.tf-card{background:var(--panel);border:1px solid var(--linea);padding:1.5rem 1.4rem;
+  position:relative}
+.tf-card.reco{border-color:var(--cancha)}
+.tf-tag{position:absolute;top:-.72rem;left:1.2rem;background:var(--cancha);
+  color:var(--noche);font-family:var(--mono);font-size:.6rem;font-weight:700;
+  letter-spacing:.15em;text-transform:uppercase;padding:.2rem .6rem}
+.tf-card h3{margin:0;font-size:1.2rem;color:var(--cal);letter-spacing:-.01em}
+.tf-precio{font-size:2rem;font-weight:600;color:var(--cal);letter-spacing:-.03em;
+  margin:.5rem 0 0;line-height:1.1}
+.tf-precio small{display:block;font-size:.78rem;color:var(--humo);font-weight:400;
+  letter-spacing:0;margin-top:.3rem}
+.tf-ul{list-style:none;padding:0;margin:1.1rem 0 0;color:var(--humo);font-size:.92rem}
+.tf-ul li{padding:.4rem 0;border-top:1px solid var(--linea)}
+.tf-ul li b{color:var(--cal);font-weight:600}
+.tf-ahorro{font-family:var(--mono);font-size:.68rem;letter-spacing:.05em;
+  color:var(--cancha);margin:1rem 0 0}
+.tf-ahorro s{color:var(--humo)}
+.tf-nota{color:var(--humo);font-size:.92rem;margin:1.4rem 0 0;max-width:60ch}
+.tf-nota b{color:var(--cal);font-weight:600}
+.tf-calc{display:grid;gap:2rem;grid-template-columns:minmax(0,1fr) minmax(0,21rem);
+  margin-top:2.2rem;align-items:start}
+.tf-form{display:grid;gap:1.2rem;margin:0}
+.tf-form label.tf-l{display:block;font-family:var(--mono);font-size:.66rem;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem}
+.tf-form input[type=number],.tf-form select{width:100%;background:var(--panel);
+  color:var(--cal);border:1px solid var(--linea2);border-radius:2px;
+  padding:.7rem .75rem;font:inherit;font-size:16px}
+.tf-dos,.tf-tres{display:grid;gap:.8rem;grid-template-columns:repeat(2,minmax(0,1fr))}
+.tf-tres{grid-template-columns:repeat(3,minmax(0,1fr))}
+.tf-chk{display:flex;gap:.65rem;align-items:flex-start;color:var(--cal);
+  font-size:.95rem;cursor:pointer;padding:.2rem 0}
+.tf-chk input{accent-color:var(--cancha);width:1.1rem;height:1.1rem;margin:.2rem 0 0;flex:none}
+.tf-chk span small{display:block;color:var(--humo);font-size:.82rem}
+.tf-ayuda{color:var(--humo);font-size:.84rem;margin:.45rem 0 0}
+.tf-res{background:var(--panel);border:1px solid var(--linea2);padding:1.5rem;
+  position:sticky;top:6rem}
+.tf-res .tf-precio{font-size:2.5rem}
+.tf-res dl{display:grid;grid-template-columns:1fr auto;gap:.35rem .8rem;
+  margin:1.2rem 0 0;font-size:.9rem;color:var(--humo)}
+.tf-res dt,.tf-res dd{margin:0;padding:.3rem 0;border-top:1px solid var(--linea)}
+.tf-res dd{color:var(--cal);text-align:right}
+.tf-res .wsp{width:100%;justify-content:center;margin-top:1.4rem}
+.tf-cond{display:grid;gap:2rem 3rem;grid-template-columns:repeat(2,minmax(0,1fr));
+  margin-top:2.2rem}
+.tf-cond h3{margin:0;font-size:1rem;color:var(--cal)}
+@media (max-width:860px){
+  .tf-grid,.tf-calc,.tf-cond{grid-template-columns:1fr}
+  .tf-grid{gap:1.6rem}
+  .tf-res{position:static}
+}
+@media (max-width:420px){.tf-tres{grid-template-columns:1fr 1fr}}
+</style>
+{% set R = tarifas %}
+{% set F = R.foto %}
+{% set L = R.packs.liga %}
+
+<section class="bloque" style="max-width:52rem">
+<p class="rotulo">Ligas y torneos</p>
+<h1 class="tit">{{ T.tar_titulo }}</h1>
+<p class="bajada">{{ T.tar_bajada }}</p>
+<p class="tf-ancla">Una fecha t&iacute;pica, {{ L.horas }} horas de cobertura con el pack {{ L.nombre }}
+({{ L.q|sum }} fotos editadas): <b>{{ pesos(bruto(L.horas * R.hora + L.precio, 100)) }}</b> en total.</p>
+<p class="botones"><a class="wsp" href="#calcular">Calcular mi fecha</a>
+<a class="wsp hueco" href="#packs">Ver los packs</a></p>
 </section>
+
+<section class="bloque">
+<div class="como">
+<h2>C&oacute;mo se arma el precio</h2>
+<div class="paso"><b>Cobertura por hora</b><p>{{ pesos(bruto(R.hora, 10)) }} por hora en cancha,
+sin l&iacute;mite de disparos. Hasta {{ R.canchas_incluidas }} canchas contiguas al mismo tiempo sin recargo.</p></div>
+<div class="paso"><b>Fotos editadas</b><p>Recibes la galer&iacute;a completa con marca de agua y
+eliges cu&aacute;les se editan. Puedes tomar un pack o armar el tuyo.</p></div>
+<div class="paso"><b>Extras si los necesitas</b><p>Logo de la liga en las fotos, fotos separadas
+por partido, exclusividad o que yo elija las fotos por ti.</p></div>
+</div>
+</section>
+
+<section class="bloque" id="packs">
+<p class="rotulo">Packs de fotos</p>
+<h2 class="tf-h2">Tres packs cerrados</h2>
+<p class="tf-sub">Cada pack se suma a las horas de cobertura. Salen m&aacute;s baratos que pedir
+las mismas fotos una por una.</p>
+<div class="tf-grid">
+{% for k, P in R.packs.items() %}
+{% set armado = P.q[0] * F.basica + P.q[1] * F.completa + P.q[2] * F.pro %}
+<div class="tf-card{{ ' reco' if P.reco }}">
+{% if P.reco %}<span class="tf-tag">Recomendado</span>{% endif %}
+<h3>{{ P.nombre }}</h3>
+<p class="tf-precio">{{ pesos(bruto(P.precio, 100)) }}<small>{{ P.q|sum }} fotos editadas + la cobertura</small></p>
+<ul class="tf-ul">
+<li><b>{{ P.q[0] }}</b> con edici&oacute;n b&aacute;sica</li>
+<li><b>{{ P.q[1] }}</b> con edici&oacute;n completa</li>
+{% if P.q[2] %}<li><b>{{ P.q[2] }}</b> con edici&oacute;n profesional, para portadas y redes</li>{% endif %}
+<li>Pensado para jornadas de unas {{ P.horas }} horas</li>
+</ul>
+<p class="tf-ahorro">Una por una: <s>{{ pesos(bruto(armado, 100)) }}</s> &middot;
+ahorras {{ pesos(bruto(armado, 100) - bruto(P.precio, 100)) }}</p>
+</div>
+{% endfor %}
+</div>
+<p class="tf-nota"><b>&iquest;Ninguno te calza?</b> Arma tu propia combinaci&oacute;n a precio por foto:
+{{ pesos(bruto(F.basica, 10)) }} la b&aacute;sica, {{ pesos(bruto(F.completa, 10)) }} la completa y
+{{ pesos(bruto(F.pro, 10)) }} la profesional.</p>
+</section>
+
+<section class="bloque">
+<p class="rotulo">Niveles de edici&oacute;n</p>
+<h2 class="tf-h2">Qu&eacute; lleva cada foto</h2>
+<p class="tf-sub">De noche, bajo focos, la edici&oacute;n es la mitad del resultado. La diferencia entre
+niveles est&aacute; en cu&aacute;nto trabajo lleva encima cada foto.</p>
+<div class="tf-grid">
+{% for k in ("basica", "completa", "pro") %}{% set N = R.niveles[k] %}
+<div class="tf-card{{ ' reco' if k == 'completa' }}">
+{% if k == 'completa' %}<span class="tf-tag">La m&aacute;s pedida</span>{% endif %}
+<h3>{{ N.nombre }}</h3>
+<ul class="tf-ul">{% for it in N["items"] %}<li>{{ it }}</li>{% endfor %}</ul>
+</div>
+{% endfor %}
+</div>
+</section>
+
+<section class="bloque" id="calcular">
+<p class="rotulo">Calculadora</p>
+<h2 class="tf-h2">Calcula tu fecha</h2>
+<p class="tf-sub">Arma la jornada y te muestro el total. El bot&oacute;n de abajo me manda el pedido
+por WhatsApp ya escrito.</p>
+<div class="tf-calc">
+<form class="tf-form" id="tf-form">
+  <div class="tf-dos">
+    <div><label class="tf-l" for="tf-h">Horas de cobertura</label>
+      <input id="tf-h" type="number" min="1" max="12" step="0.5" value="{{ L.horas }}" inputmode="decimal"></div>
+    <div><label class="tf-l" for="tf-c">Canchas al mismo tiempo</label>
+      <input id="tf-c" type="number" min="1" max="3" step="1" value="1" inputmode="numeric"></div>
+  </div>
+  <div><label class="tf-l" for="tf-p">Fotos editadas</label>
+    <select id="tf-p">
+    {% for k, P in R.packs.items() %}<option value="{{ k }}"{{ ' selected' if P.reco }}>Pack {{ P.nombre }} &middot; {{ P.q|sum }} fotos{{ ' (recomendado)' if P.reco }}</option>{% endfor %}
+    <option value="">A mi medida: elijo cu&aacute;ntas de cada nivel</option>
+    </select></div>
+  <div id="tf-medida" hidden>
+    <div class="tf-tres">
+      <div><label class="tf-l" for="tf-qb">B&aacute;sicas</label><input id="tf-qb" type="number" min="0" step="10" value="60" inputmode="numeric"></div>
+      <div><label class="tf-l" for="tf-qc">Completas</label><input id="tf-qc" type="number" min="0" step="10" value="40" inputmode="numeric"></div>
+      <div><label class="tf-l" for="tf-qp">Profesionales</label><input id="tf-qp" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
+    </div>
+  </div>
+  <div><label class="tf-l" for="tf-x">Venta de fotos a jugadores</label>
+    <select id="tf-x">
+      <option value="abierto">Abierta: los jugadores pueden comprar sus fotos</option>
+      <option value="exclusivo">Exclusiva (+{{ R.exclusivo_pct }} % en fotos): solo la liga recibe las fotos</option>
+    </select>
+    <p class="tf-ayuda">En la abierta, si compartes con los jugadores las fotos que compraste, esas
+    quedan fuera de la venta: nadie paga por una foto que ya tiene.</p></div>
+  <div>
+    <span class="tf-l" style="display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem">Extras</span>
+    <label class="tf-chk"><input type="checkbox" id="tf-xl"><span>Logo o marco de la liga &middot; {{ pesos(bruto(R.logo, 100)) }}<small>En todas las fotos, con versi&oacute;n para redes</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xp"><span>Separaci&oacute;n por partidos &middot; {{ pesos(bruto(R.partidos, 100)) }}<small>Una carpeta por partido, con conteo de fotos</small></span></label>
+    <label class="tf-chk"><input type="checkbox" id="tf-xs"><span>Yo elijo las fotos por ti &middot; {{ pesos(bruto(R.sel_foto, 10)) }} por foto<small>M&iacute;nimo {{ pesos(bruto(R.sel_min, 100)) }}. Te ahorras revisar la galer&iacute;a</small></span></label>
+  </div>
+</form>
+<aside class="tf-res" aria-live="polite">
+  <span class="tf-l" style="font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo)">Total de la fecha</span>
+  <p class="tf-precio" id="tf-tot">&mdash;</p>
+  <dl>
+    <dt>Cobertura</dt><dd id="tf-dc">&mdash;</dd>
+    <dt id="tf-dfl">Fotos</dt><dd id="tf-df">&mdash;</dd>
+    <dt>Extras</dt><dd id="tf-de">&mdash;</dd>
+    <dt>Para reservar ({{ R.anticipo }} %)</dt><dd id="tf-da">&mdash;</dd>
+  </dl>
+  <p class="tf-ayuda">Boleta de honorarios incluida. El traslado se cotiza seg&uacute;n el lugar.</p>
+  {% if wsp %}<a class="wsp" id="tf-ir" href="https://wa.me/{{ wsp }}" rel="noopener">Pedir esta fecha</a>{% endif %}
+</aside>
+</div>
+</section>
+
+<section class="bloque">
+<p class="rotulo">Condiciones</p>
+<h2 class="tf-h2">Lo que siempre va incluido, y la letra chica</h2>
+<div class="tf-cond">
+<div><h3>Siempre incluido</h3><ul class="tf-ul">
+<li>La jornada completa, sin l&iacute;mite de disparos</li>
+<li>Galer&iacute;a completa con marca de agua dentro de {{ R.galeria_horas }} horas, para elegir con calma</li>
+<li>Las elegidas, editadas y en alta resoluci&oacute;n, {{ R.entrega_dias }} d&iacute;as h&aacute;biles despu&eacute;s de tu selecci&oacute;n</li>
+<li>Uso libre en las redes de la liga y de cada equipo</li>
+<li>Entrega por galer&iacute;a privada o Google Drive</li>
+</ul></div>
+<div><h3>Letra chica</h3><ul class="tf-ul">
+<li><b>Reserva:</b> {{ R.anticipo }} % al confirmar la fecha, el resto contra entrega.</li>
+<li><b>Canchas:</b> hasta {{ R.canchas_incluidas }} contiguas sin recargo; desde la siguiente, +{{ R.cancha_extra_pct }} % de la cobertura por cancha.</li>
+<li><b>Si la jornada se alarga:</b> los primeros 15 minutos no se cobran. Despu&eacute;s, cada bloque de 20 minutos
+iniciado vale un tercio de la hora. Si se alarga media hora, son 2 bloques: {{ pesos(bruto(2 * R.hora / 3, 10)) }}.</li>
+<li><b>Lluvia o suspensi&oacute;n:</b> si se suspende antes de empezar, se reprograma sin costo. Si se suspende a mitad, se cobra el tiempo trabajado.</li>
+<li><b>Cancelaci&oacute;n:</b> con 48 horas de aviso se reprograma sin costo. Con menos, se retiene el anticipo.</li>
+<li><b>Traslado y estacionamiento:</b> se cotizan seg&uacute;n el lugar.</li>
+</ul></div>
+</div>
+</section>
+
+<script>
+(function(){
+const R = {{ tarifas|tojson }}, WSP = {{ wsp|tojson }};
+const $ = id => document.getElementById(id);
+const neto = 1 - R.retencion / 100;
+const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
+const b100 = n => Math.round(n / neto / 100) * 100;
+const n0 = (id, min) => Math.max(min || 0, parseFloat($(id).value) || 0);
+function calcular(){
+  const h = n0("tf-h"), c = Math.round(n0("tf-c", 1));
+  const P = R.packs[$("tf-p").value];
+  $("tf-medida").hidden = !!P;
+  const q = P ? P.q : ["tf-qb", "tf-qc", "tf-qp"].map(id => Math.round(n0(id)));
+  const n = q[0] + q[1] + q[2];
+  const cob = h * R.hora * (1 + R.cancha_extra_pct / 100 * Math.max(0, c - R.canchas_incluidas));
+  let fotos = P ? P.precio : q[0] * R.foto.basica + q[1] * R.foto.completa + q[2] * R.foto.pro;
+  const excl = $("tf-x").value === "exclusivo";
+  if(excl) fotos *= 1 + R.exclusivo_pct / 100;
+  let extras = 0; const xs = [];
+  if($("tf-xl").checked){ extras += R.logo; xs.push("logo de la liga"); }
+  if($("tf-xp").checked){ extras += R.partidos; xs.push("separación por partidos"); }
+  if($("tf-xs").checked){ extras += Math.max(R.sel_min, n * R.sel_foto); xs.push("que elijas tú las fotos"); }
+  const total = b100(cob + fotos + extras);
+  $("tf-tot").textContent = pesos(total);
+  $("tf-dc").textContent = pesos(b100(cob));
+  $("tf-dfl").textContent = "Fotos (" + n + ")";
+  $("tf-df").textContent = pesos(b100(fotos));
+  $("tf-de").textContent = extras ? pesos(b100(extras)) : "—";
+  $("tf-da").textContent = pesos(Math.round(total * R.anticipo / 100 / 100) * 100);
+  const ir = $("tf-ir");
+  if(ir){
+    const hTxt = h.toLocaleString("es-CL");
+    const msg = "Hola Renzo, quiero cotizar una fecha: " + hTxt + " h, " + c + (c > 1 ? " canchas" : " cancha") + ", "
+      + (P ? "pack " + P.nombre + " (" + n + " fotos)"
+           : "fotos a mi medida (" + q[0] + " básicas, " + q[1] + " completas, " + q[2] + " profesionales)")
+      + ", venta " + (excl ? "exclusiva" : "abierta")
+      + (xs.length ? ", con " + xs.join(", ") : "")
+      + ". Total estimado " + pesos(total) + ".";
+    ir.href = "https://wa.me/" + WSP + "?text=" + encodeURIComponent(msg);
+  }
+}
+$("tf-form").addEventListener("submit", e => e.preventDefault());
+$("tf-form").addEventListener("input", calcular);
+$("tf-form").addEventListener("change", calcular);
+calcular();
+})();
+</script>
 """ + PIE + """</main>"""
 
 SOBREMI = BARRA + """<main class="viz">
@@ -7389,6 +7647,50 @@ queda: el fondo blanco de un JPG se ve como un cuadrado.</p>
 {% else %}<p style="opacity:.4">Todavia no subiste ninguno.</p>{% endif %}
 </main>"""
 
+# Las tarifas para ligas, en pesos y SIN la retencion de la boleta. Las leen el
+# cotizador del panel (como JSON) y la pagina publica /tarifas: un precio se
+# cambia aca y queda igual en los dos. La pagina publica muestra los precios
+# con la boleta incluida (bruteados), el cotizador hace la cuenta exacta.
+TARIFAS = {
+    "hora": 8000,
+    "canchas_incluidas": 2, "cancha_extra_pct": 15,
+    # por foto, pack Personalizado: +20 % sobre 200/390/700 y sin descuento
+    "foto": {"basica": 240, "completa": 470, "pro": 840},
+    "packs": {
+        "esencial": {"nombre": "Esencial", "q": [70, 30, 0], "precio": 25000,
+                     "horas": 2},
+        "liga": {"nombre": "Liga", "q": [90, 50, 10], "precio": 43000,
+                 "horas": 3, "reco": True},
+        "full": {"nombre": "Full", "q": [140, 85, 25], "precio": 75000,
+                 "horas": 5},
+    },
+    "niveles": {
+        "basica": {"nombre": "Edición básica", "items": [
+            "Balance de blancos (temperatura y matiz)", "Exposición y contraste",
+            "Iluminaciones, sombras, blancos y negros",
+            "Intensidad y saturación", "Nivelado de imagen"]},
+        "completa": {"nombre": "Edición completa", "items": [
+            "Todo lo de la edición básica", "Eliminación de distracciones",
+            "Reducción de ruido manual", "Encuadre al protagonista"]},
+        "pro": {"nombre": "Edición profesional", "items": [
+            "Todo lo de la edición completa", "Reducción de ruido adaptada",
+            "Calibración de colores",
+            "Color grading: mezcla y atenuación de colores",
+            "Máscaras por sujeto/fondo/campo para edición por zonas"]},
+    },
+    "logo": 10000, "partidos": 3000, "exclusivo_pct": 15,
+    "sel_foto": 40, "sel_min": 2000,
+    "retencion": 15.25,   # boleta de honorarios 2026: sube cada enero
+    "anticipo": 30, "entrega_dias": 4, "galeria_horas": 48,
+}
+
+
+def bruto(neto, a=1):
+    """El precio con la retencion de la boleta encima, redondeado a `a` pesos:
+    lo que el cliente transfiere para que a Renzo le quede `neto`."""
+    return int(round(neto / (1 - TARIFAS["retencion"] / 100) / a) * a)
+
+
 # El cotizador para organizadores de ligas (19/10/2026). Va crudo y NO pasa
 # por Jinja: su JS arma la boleta con plantillas `${...}` y tiene llaves por
 # todos lados. La ruta lo pega despues de PANEL_CSS + PANEL_BARRA renderizados.
@@ -7656,43 +7958,31 @@ const $ = id => document.getElementById(id);
 const CLAVE = "rbdeportes_cotizador_v1";
 const PAGO = ["pTitular","pRut","pBanco","pCuenta","pMail"];
 
-const NIVELES = {
-  basica: {nombre:"Edición básica", items:[
-    "Balance de blancos (temperatura y matiz)","Exposición y contraste",
-    "Iluminaciones, sombras, blancos y negros","Intensidad y saturación","Nivelado de imagen"]},
-  completa: {nombre:"Edición completa", items:[
-    "Todo lo de la edición básica","Eliminación de distracciones",
-    "Reducción de ruido manual","Encuadre al protagonista"]},
-  pro: {nombre:"Edición profesional", items:[
-    "Todo lo de la edición completa","Reducción de ruido adaptada",
-    "Calibración de colores","Color grading: mezcla y atenuación de colores",
-    "Máscaras por sujeto/fondo/campo para edición por zonas"]}
-};
+const NIVELES = TARIFAS.niveles;
 
+const T = TARIFAS;
 const PRESETS = {
-  // Los precios por foto de lista son los del pack Personalizado (+20 % sobre
-  // 200/390/700); los packs cerrados tienen su precio en PACKS.
-  lista: {packFotos:"liga",canchas:1,lHora:8000,cHora:8000,lBasica:240,cBasica:240,lCompleta:470,cCompleta:470,lPro:840,cPro:840,
-          lLogo:10000,cLogo:10000,gLogo:false,lPartidos:3000,cPartidos:3000,gPartidos:false,
-          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volumen:0,boleta:"si",anticipo:30,
+  // Los precios por foto de lista son los del pack Personalizado; los packs
+  // cerrados tienen su precio en TARIFAS.packs. Todo sale de TARIFAS (Python).
+  lista: {packFotos:"liga",canchas:1,lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
+          lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
+          lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
+          lSel:T.sel_foto,cSel:T.sel_foto,gSel:false,lSelMin:T.sel_min,cSelMin:T.sel_min,volumen:0,boleta:"si",
+          anticipo:T.anticipo,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
   // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
-          packFotos:"",canchas:1,lHora:8000,cHora:6000,lBasica:240,cBasica:110,lCompleta:470,cCompleta:250,lPro:840,cPro:420,
-          lLogo:10000,cLogo:10000,gLogo:true,aLogo:true,lPartidos:3000,cPartidos:3000,gPartidos:true,aPartidos:true,
-          lSel:40,cSel:40,gSel:false,lSelMin:2000,cSelMin:2000,volumen:0,
+          packFotos:"",canchas:1,lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,
+          lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
+          lSel:T.sel_foto,cSel:T.sel_foto,gSel:false,lSelMin:T.sel_min,cSelMin:T.sel_min,volumen:0,
           boleta:"no",anticipo:0,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
 };
 
 // Packs cerrados (19/10/2026). Liga es el que se empuja. Su "lista" en la boleta
 // es lo que costaria armarlo foto a foto como Personalizado: ese contraste es
 // el decoy, el pack siempre sale mas barato que armarlo a mano.
-const PACKS = {
-  esencial: {nombre:"Esencial", q:[70,30,0],  precio:25000},
-  liga:     {nombre:"Liga",     q:[90,50,10], precio:43000, reco:true},
-  full:     {nombre:"Full",     q:[140,85,25],precio:75000}
-};
+const PACKS = T.packs;
 
 const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
 const ent = id => Math.max(0, Math.round(num(id)));
@@ -7739,9 +8029,10 @@ function calcular(){
   linea("Cobertura","Cobertura de la jornada",
         `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`, horas, num("lHora"), num("cHora"));
   // hasta 2 canchas contiguas van incluidas; desde la tercera, +15 % de la cobertura por cancha
-  const extra = Math.max(0, ent("canchas") - 2);
-  if(extra) L.push({grupo:"Cobertura",concepto:`Canchas simultáneas (${ent("canchas")})`,detalle:"2 incluidas · +15 % por cancha desde la tercera",
-                    cant:null,tL:L[0].tL*0.15*extra,tC:L[0].tC*0.15*extra});
+  const extra = Math.max(0, ent("canchas") - T.canchas_incluidas), cpct = T.cancha_extra_pct;
+  if(extra) L.push({grupo:"Cobertura",concepto:`Canchas simultáneas (${ent("canchas")})`,
+                    detalle:`${T.canchas_incluidas} incluidas · +${cpct} % por cancha desde la siguiente`,
+                    cant:null,tL:L[0].tL*cpct/100*extra,tC:L[0].tC*cpct/100*extra});
 
   if(P){
     const armado = q.basica*num("lBasica") + q.completa*num("lCompleta") + q.pro*num("lPro");
@@ -7905,7 +8196,7 @@ function render(){
 
   <h2>Cómo trabajo</h2>
   <ul class="cz-cond">
-    <li>Cubro la jornada completa sin límite de disparos, hasta 2 canchas contiguas en simultáneo sin recargo; desde la tercera, +15 % de la cobertura por cada cancha. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
+    <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} canchas contiguas en simultáneo sin recargo; desde la siguiente, +${T.cancha_extra_pct} % de la cobertura por cada cancha. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
     <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
     <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
     ${avisoPasada}
@@ -7984,7 +8275,7 @@ $("imprimir").addEventListener("click", () => window.print());
 $("form").addEventListener("input", render);
 $("form").addEventListener("change", render);
 
-if(!cargar()) $("numero").value = numeroNuevo();
+if(!cargar()){ aplicar(PRESETS.lista); $("numero").value = numeroNuevo(); }
 render();
 })();
 </script>
@@ -9849,7 +10140,7 @@ def test():
             h = c.get(p).get_data(as_text=True).split("<style>")[0]
             assert "noindex" not in h, "%s no se puede indexar" % p
             assert 'rel="canonical" href="%s%s"' % (SITIO, p) in h, p
-        for p in ("/g/ccc", "/calculadora", "/panel", "/panel/cotizador"):
+        for p in ("/g/ccc", "/panel", "/panel/cotizador"):
             assert "noindex" in c.get(p).get_data(as_text=True).split("<style>")[0], \
                 "FUGA: %s se puede indexar" % p
         rb = c.get("/robots.txt").get_data(as_text=True)
@@ -10317,14 +10608,18 @@ def test():
     # ------------------------------------------ textos editables desde el panel
     with app.test_client() as c:
         assert c.get("/sobre-mi").status_code == 200
-        assert c.get("/calculadora").status_code == 200
+        assert c.get("/calculadora").status_code == 301
         # la barra fija tiene que estar en las cuatro publicas, y en ninguna
         # galeria de cliente (ahi manda la cabecera de la galeria)
-        for u in ("/", "/eventos", "/sobre-mi", "/calculadora"):
+        for u in ("/", "/eventos", "/sobre-mi", "/tarifas"):
             assert 'class="barra"' in c.get(u).get_data(as_text=True), u
-        # la calculadora vive en su pagina y en la barra, nunca en la portada
-        assert DEFAULTS["calc_texto"] not in c.get("/").get_data(as_text=True)
-        assert DEFAULTS["calc_texto"] in c.get("/calculadora").get_data(as_text=True)
+        # las tarifas viven en su pagina y en la barra, nunca en la portada
+        tar = c.get("/tarifas").get_data(as_text=True)
+        assert DEFAULTS["tar_bajada"] not in c.get("/").get_data(as_text=True)
+        assert DEFAULTS["tar_bajada"] in tar
+        # precios con boleta: la hora de 8.000 neta se publica a 9.440
+        assert bruto(8000, 10) == 9440 and pesos(9440) in tar
+        assert pesos(bruto(TARIFAS["packs"]["liga"]["precio"], 100)) in tar
         assert DEFAULTS["mi_titulo"] in c.get("/sobre-mi").get_data(as_text=True)
         assert c.get("/panel/textos").status_code == 200
         assert DEFAULTS["hero_titulo"] in c.get("/").get_data(as_text=True)
