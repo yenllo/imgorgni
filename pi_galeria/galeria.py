@@ -6524,6 +6524,8 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-tabla .reco{background:rgba(198,240,74,.09)}
 .tf-tabla tbody tr:hover .reco{background:rgba(198,240,74,.13)}
 .tf-si{color:var(--cancha);font-weight:700;font-size:1.4rem;line-height:1}
+.tf-resol th small,.tf-resol td small{display:block;font-size:.74rem;color:var(--humo);margin-top:.15rem}
+.tf-resol td b{color:var(--cal);font-size:1.1rem}
 .tf-no{color:var(--humo)}
 @media (max-width:560px){
   .tf-tabla{font-size:.86rem}
@@ -6634,7 +6636,10 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 {{ R.niveles[k].nombre.replace("Edición ", "")|capitalize }}</th>{% endfor %}</tr></thead>
 <tbody>{% for fila in R.tabla_niveles %}<tr><th scope="row">{{ fila[0] }}</th>
 {% for si in fila[1:] %}<td class="{{ 'reco' if loop.index == 2 }}">{% if si %}<span class="tf-si" role="img" aria-label="Incluye">&#10003;</span>{% else %}<span class="tf-no" role="img" aria-label="No incluye">&mdash;</span>{% endif %}</td>{% endfor %}</tr>
-{% endfor %}</tbody>
+{% endfor %}
+<tr class="tf-resol"><th scope="row">Resoluci&oacute;n de entrega<small>en el borde largo de la foto</small></th>
+{% for k in ("basica", "completa", "pro") %}{% set RS = R.niveles[k].resolucion %}<td class="{{ 'reco' if k == 'completa' }}"><b>{{ RS[0] }}</b><small>{{ "{:,}".format(RS[1]).replace(",", ".") }} px</small></td>{% endfor %}</tr>
+</tbody>
 </table></div>
 </section>
 
@@ -8224,14 +8229,15 @@ TARIFAS_DEF = {
     },
     "redondeo_pack": 1000,
     "niveles": {
-        "basica": {"nombre": "Edición básica", "items": [
+        # resolucion de entrega: [nombre, pixeles en el borde largo]
+        "basica": {"nombre": "Edición básica", "resolucion": ["2K", 2560], "items": [
             "Balance de blancos (temperatura y matiz)", "Exposición y contraste",
             "Iluminaciones, sombras, blancos y negros",
             "Intensidad y saturación", "Nivelado de imagen"]},
-        "completa": {"nombre": "Edición completa", "items": [
+        "completa": {"nombre": "Edición completa", "resolucion": ["4K", 3840], "items": [
             "Todo lo de la edición básica", "Eliminación de distracciones",
             "Reducción de ruido manual", "Encuadre al protagonista"]},
-        "pro": {"nombre": "Edición profesional", "items": [
+        "pro": {"nombre": "Edición profesional", "resolucion": ["4K", 3840], "items": [
             "Todo lo de la edición completa", "Reducción de ruido adaptada",
             "Calibración de colores",
             "Color grading: mezcla y atenuación de colores",
@@ -8525,6 +8531,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 @media (max-width:600px){.cotz .cz-niveles{grid-template-columns:1fr}}
 .cotz .cz-nivel{border:1px solid var(--cz-linea);border-radius:8px;padding:10px 12px;position:relative;font-size:12px}
 .cotz .cz-nivel.cz-reco{border:2px solid var(--cz-marca);background:var(--cz-marca-suave)}
+.cotz .cz-nivel .cz-resol{margin:2px 0 4px;font-size:11px;font-weight:600}
 .cotz .cz-nivel .cz-tag{position:absolute;top:-9px;right:10px;background:var(--cz-marca);color:#fff;font-size:10px;font-weight:700;letter-spacing:.08em;padding:1px 7px;border-radius:3px}
 .cotz .cz-nivel h4{font-size:14px}
 .cotz .cz-nivel .cz-p{font-size:18px;font-weight:700;margin:2px 0 6px}
@@ -8614,6 +8621,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     <div id="bloqueExclusivo" style="margin-top:8px">
       <label>Recargo por exclusividad (% sobre las fotos)</label>
       <input id="recargoExcl" type="number" min="0" step="1" value="15">
+      <label class="cz-chk" style="margin-top:4px"><input type="checkbox" id="gExcl"> como cortesía (se muestra, no se cobra)</label>
     </div>
   </fieldset>
 
@@ -8640,7 +8648,8 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 
   <fieldset><legend>6. Traslado, boleta y pago</legend>
     <div class="cz-f">
-      <div><label>Traslado y estacionamiento ($)</label><input id="traslado" type="number" min="0" value="0"></div>
+      <div><label>Traslado y estacionamiento ($)</label><input id="traslado" type="number" min="0" value="0">
+        <label class="cz-chk" style="margin:4px 0 0"><input type="checkbox" id="gTraslado"> como cortesía</label></div>
       <div><label>&nbsp;</label><label class="cz-chk" style="margin:0"><input type="checkbox" id="anticipo" checked> Anticipo: la cobertura</label></div>
       <div><label>Boleta de honorarios</label><select id="boleta"><option value="si">Sí (bruteada)</option><option value="no">No</option></select></div>
       <div><label>Retención (%)</label><input id="retencion" type="number" step="0.01" value="15.25"></div>
@@ -8648,12 +8657,20 @@ PANEL_COTIZADOR = r"""<main class="cotz">
       <div><label>Galería de selección (horas)</label><input id="plazoGaleria" type="number" min="1" value="48"></div>
     </div>
     <div class="cz-f" style="margin-top:8px">
+      <div style="grid-column:1/-1"><label>Cuenta para esta cotización</label>
+        <select id="pSel"><option value="">— Escribir los datos —</option></select></div>
       <div><label>Titular</label><input id="pTitular" placeholder="Nombre"></div>
       <div><label>RUT</label><input id="pRut"></div>
       <div><label>Banco</label><input id="pBanco" placeholder="BCI"></div>
-      <div><label>Tipo y N° cuenta</label><input id="pCuenta"></div>
-      <div style="grid-column:1/-1"><label>Correo para comprobante</label><input id="pMail" value="renzob.deportes@gmail.com"></div>
+      <div><label>Tipo de cuenta</label><select id="pTipo"><option value="">—</option>
+        <option>Cuenta corriente</option><option>Cuenta vista</option><option>Cuenta RUT</option><option>Cuenta de ahorro</option></select></div>
+      <div><label>N° de cuenta</label><input id="pNumero" inputmode="numeric"></div>
+      <div><label>Correo para comprobante</label><input id="pMail" value="renzob.deportes@gmail.com"></div>
     </div>
+    <p style="margin:6px 0 0;display:flex;gap:6px;flex-wrap:wrap">
+      <button type="button" class="btn hueco" id="pGuardar">Guardar esta cuenta</button>
+      <button type="button" class="btn hueco" id="pBorrar">Borrar la cuenta elegida</button></p>
+    <p class="cz-ayuda">Las cuentas quedan guardadas solo en este navegador.</p>
   </fieldset>
 
   <fieldset><legend>7. Liquidación final (después del evento)</legend>
@@ -8681,7 +8698,9 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 "use strict";
 const $ = id => document.getElementById(id);
 const CLAVE = "rbdeportes_cotizador_v1";
-const PAGO = ["pTitular","pRut","pBanco","pCuenta","pMail"];
+const PAGO = ["pTitular","pRut","pBanco","pTipo","pNumero","pMail"];
+// varias cuentas de banco, guardadas aparte (solo en este navegador)
+const CLAVE_CUENTAS = "rbdeportes_cuentas_v1";
 
 const NIVELES = TARIFAS.niveles;
 
@@ -8692,7 +8711,7 @@ const PRESETS = {
   lista: {packFotos:"liga",durPartido:"60",simult:"{}",lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
-          gSel:false,volumen:0,boleta:"si",
+          gSel:false,gExcl:false,gTraslado:false,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
@@ -8700,7 +8719,7 @@ const PRESETS = {
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
           packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
-          gSel:false,volumen:0,
+          gSel:false,gExcl:false,gTraslado:false,volumen:0,
           boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
 };
 
@@ -8823,10 +8842,13 @@ function calcular(){
   const fotosL = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tL,0);
   const fotosC = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tC,0);
   const ajustes = [];
-  if(exclPct) ajustes.push({grupo:"Fotos",concepto:`Pack exclusivo (+${exclPct} %)`,detalle:"Sin venta individual posterior",
-                            cant:null,tL:fotosL*exclPct/100,tC:fotosC*exclPct/100});
+  // la exclusividad como cortesia: se muestra a precio de lista y no se cobra
+  const exclC = $("gExcl").checked ? 0 : exclPct;
+  if(exclPct) ajustes.push({grupo:"Fotos",concepto:`Pack exclusivo (+${exclPct} %)`,
+                            detalle:"Sin venta individual posterior" + (exclC ? "" : " · cortesía"),
+                            cant:null,tL:fotosL*exclPct/100,tC:fotosC*exclC/100,cortesia:!exclC});
   if(volPct){
-    const baseL = fotosL*(1+exclPct/100), baseC = fotosC*(1+exclPct/100);
+    const baseL = fotosL*(1+exclPct/100), baseC = fotosC*(1+exclC/100);
     ajustes.push({grupo:"Fotos",concepto:`Descuento por volumen (${volPct} %)`,detalle:`${totalFotos} fotos`,
                   cant:null,tL:-baseL*volPct/100,tC:-baseC*volPct/100,desc:true});
   }
@@ -8851,7 +8873,9 @@ function calcular(){
   }
 
   const tras = num("traslado");
-  if(tras) L.push({grupo:"Otros",concepto:"Traslado y estacionamiento",detalle:"",cant:null,tL:tras,tC:tras});
+  const trasG = $("gTraslado").checked;
+  if(tras) L.push({grupo:"Otros",concepto:"Traslado y estacionamiento",detalle:trasG ? "Cortesía" : "",
+                   cant:null,tL:tras,tC:trasG ? 0 : tras,cortesia:trasG});
 
   // Hora pasada: tolerancia 15 min, despues bloques de 20 min iniciados a 1/3 de la hora
   let pasada = null;
@@ -8917,6 +8941,7 @@ function render(){
   const niveles = [["basica",num("lBasica"),num("cBasica")],["completa",num("lCompleta"),num("cCompleta")],["pro",num("lPro"),num("cPro")]]
     .map(([k,l,c]) => `<div class="cz-nivel ${k==='completa'?'cz-reco':''}">${k==='completa'?'<span class="cz-tag">RECOMENDADA</span>':''}
       <h4>${NIVELES[k].nombre}</h4><p class="cz-p">${pu(l,c)} <small>por foto</small></p>
+      <p class="cz-resol">${NIVELES[k].resolucion[0]} · ${NIVELES[k].resolucion[1].toLocaleString("es-CL")} px en el borde largo</p>
       <ul>${NIVELES[k].items.map(i=>`<li>${i}</li>`).join("")}</ul></div>`).join("");
 
   // condiciones de venta posterior
@@ -8991,7 +9016,8 @@ function render(){
       ${$("pTitular").value.trim() ? `<dt>Titular</dt><dd>${v("pTitular")}</dd>` : ""}
       ${$("pRut").value.trim() ? `<dt>RUT</dt><dd>${v("pRut")}</dd>` : ""}
       ${$("pBanco").value.trim() ? `<dt>Banco</dt><dd>${v("pBanco")}</dd>` : ""}
-      ${$("pCuenta").value.trim() ? `<dt>Cuenta</dt><dd>${v("pCuenta")}</dd>` : ""}
+      ${$("pTipo").value ? `<dt>Tipo de cuenta</dt><dd>${v("pTipo")}</dd>` : ""}
+      ${$("pNumero").value.trim() ? `<dt>N° de cuenta</dt><dd>${v("pNumero")}</dd>` : ""}
       ${$("pMail").value.trim() ? `<dt>Comprobante</dt><dd>${v("pMail")}</dd>` : ""}</dl>`
       : `<p class="cz-cond">Se envían junto con la confirmación.</p>`}</div>
     <div class="cz-caja"><h3>Resumen</h3><dl>
@@ -9032,9 +9058,42 @@ function aplicar(d){
     if(e.type === "checkbox") e.checked = !!val; else e.value = val; });
 }
 function cargar(){
-  try{ const d = JSON.parse(localStorage.getItem(CLAVE) || "null"); if(d){ aplicar(d); return true; } }catch(_){}
+  try{ const d = JSON.parse(localStorage.getItem(CLAVE) || "null");
+    if(d){ if(d.pCuenta && !d.pNumero) d.pNumero = d.pCuenta;   // el campo viejo "Tipo y N° cuenta"
+           aplicar(d); return true; } }catch(_){}
   return false;
 }
+
+// ---------- cuentas de banco guardadas ----------
+function cuentas(){ try{ return JSON.parse(localStorage.getItem(CLAVE_CUENTAS) || "[]") || []; }catch(_){ return []; } }
+function pintarCuentas(sel){
+  const cs = cuentas();
+  $("pSel").innerHTML = '<option value="">— Escribir los datos —</option>' + cs.map((c,i) =>
+    `<option value="${i}">${esc([c.pBanco, c.pTipo, c.pNumero && "N° " + c.pNumero].filter(Boolean).join(" · ") || "Cuenta " + (i+1))}</option>`).join("");
+  $("pSel").value = sel == null ? "" : String(sel);
+}
+$("pSel").addEventListener("change", () => {
+  const c = cuentas()[+$("pSel").value];
+  if(c) PAGO.forEach(id => { $(id).value = c[id] || ""; });
+  render();
+});
+$("pGuardar").addEventListener("click", () => {
+  const cs = cuentas(), c = {}; PAGO.forEach(id => c[id] = $(id).value.trim());
+  if(!c.pNumero){ alert("Falta el N° de cuenta."); return; }
+  // si es la misma cuenta (banco y numero) se actualiza; si no, se agrega
+  let i = cs.findIndex(x => x.pBanco === c.pBanco && x.pNumero === c.pNumero);
+  if(i < 0){ cs.push(c); i = cs.length - 1; } else cs[i] = c;
+  try{ localStorage.setItem(CLAVE_CUENTAS, JSON.stringify(cs)); }catch(_){}
+  pintarCuentas(i);
+});
+$("pBorrar").addEventListener("click", () => {
+  const i = $("pSel").value; if(i === "") return;
+  if(!confirm("¿Borrar esta cuenta de las guardadas?")) return;
+  const cs = cuentas(); cs.splice(+i, 1);
+  try{ localStorage.setItem(CLAVE_CUENTAS, JSON.stringify(cs)); }catch(_){}
+  pintarCuentas(null);
+});
+pintarCuentas(null);
 
 document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
   aplicar(PRESETS[b.dataset.preset]); render();
@@ -11412,6 +11471,7 @@ def test():
         # la tabla de niveles: cada nivel suma los de antes (5 basicas en los
         # tres, 3 completas en dos, 4 profesionales en uno) = 25 checks
         assert tar.count('class="tf-si"') == 25, tar.count('class="tf-si"')
+        assert "2.560 px" in tar and tar.count("3.840 px") == 2, "faltan las resoluciones"
         assert "Todo lo de" not in tar.split('class="tf-tabla"')[1].split("</table>")[0]
         # la calculadora: un pack chico por pack, mas el de a tu medida
         assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
@@ -11445,6 +11505,8 @@ def test():
         cz_ = c.get("/panel/cotizador").get_data(as_text=True)
         assert "const TARIFAS" in cz_ and 'id="durPartido"' in cz_ and 'id="czBloques"' in cz_
         assert 'id="canchas"' not in cz_ and 'id="descHora"' in cz_
+        assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gTraslado", "pSel", "pTipo", "pNumero"))
+        assert 'id="pCuenta"' not in cz_
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
         assert c.get("/panel/tarifas").status_code == 200
