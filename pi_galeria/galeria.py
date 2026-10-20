@@ -1872,12 +1872,13 @@ def calculadora():
 @app.get("/tarifas")
 def tarifas_publicas():
     """Cuanto cobro y que entrego, con una calculadora que termina en WhatsApp.
-    Los precios salen de TARIFAS y se muestran con la boleta incluida."""
+    Los precios salen de tarifas() y se muestran con la boleta incluida."""
+    t = tarifas()
     return _viz(TARIFAS_PUB, seccion="tarifas", indexar=True,
                 titulo="Tarifas para ligas \u00b7 rb.fotos",
                 desc="Cobertura de ligas y torneos: packs de fotos editadas, "
                      "precios finales con boleta incluida y calculadora.",
-                tarifas=TARIFAS, bruto=bruto)
+                tarifas=t, bruto=lambda n, a=1: bruto(n, t["retencion"], a))
 
 
 @app.get("/eventos")
@@ -3873,6 +3874,61 @@ def ver_logo(nombre):
     return send_file(f, max_age=3600)
 
 
+@app.get("/panel/tarifas")
+def tarifas_form():
+    t = tarifas()
+
+    def val(ruta):
+        d, k = _ruta(t, ruta)
+        return d[k]
+    return render_template_string(BASE_HTML, titulo="Tarifas \u00b7 panel",
+        cuerpo=render_template_string(
+            PANEL_TARIFAS, CAMPOS=CAMPOS_TARIFAS, t=t, val=val, pesos=pesos,
+            B=lambda n, a=1: bruto(n, t["retencion"], a),
+            aviso=request.args.get("aviso", "")))
+
+
+@app.post("/panel/tarifas")
+def guardar_tarifas():
+    """Guarda solo lo que difiere del default, como los textos: asi un precio
+    que nunca tocaste sigue al codigo. Un campo invalido conserva lo de antes."""
+    editadas, malos = _tarifas_editadas(), []
+    for _grupo, campos in CAMPOS_TARIFAS:
+        for ruta, etiqueta in campos:
+            crudo = (request.form.get(ruta) or "").strip().replace(",", ".")
+            if not crudo:
+                continue
+            try:
+                v = float(crudo)
+            except ValueError:
+                malos.append(etiqueta)
+                continue
+            es_pct = ruta.endswith("_pct") or ruta in ("retencion", "anticipo")
+            if v < 0 or v != v or (es_pct and v >= 100):
+                malos.append(etiqueta)
+                continue
+            v = int(v) if v == int(v) else v
+            d, k = _ruta(TARIFAS_DEF, ruta)
+            if v == d[k]:
+                editadas.pop(ruta, None)
+            else:
+                editadas[ruta] = v
+    cx = db()
+    cx.execute("DELETE FROM texto WHERE clave = 'tarifas'")
+    if editadas:
+        cx.execute("INSERT INTO texto (clave, valor) VALUES ('tarifas', ?)",
+                   (json.dumps(editadas),))
+    cx.commit()
+    return redirect(url_for("tarifas_form", aviso=", ".join(malos) or "ok"))
+
+
+@app.post("/panel/tarifas/restaurar")
+def restaurar_tarifas():
+    db().execute("DELETE FROM texto WHERE clave = 'tarifas'")
+    db().commit()
+    return redirect(url_for("tarifas_form"))
+
+
 @app.get("/panel/cotizador")
 def cotizador():
     """La calculadora de cotizaciones para organizadores. Solo panel: Caddy
@@ -3880,7 +3936,7 @@ def cotizador():
     return render_template_string(
         BASE_HTML, titulo="Cotizador \u00b7 panel",
         cuerpo=render_template_string(PANEL_CSS + PANEL_BARRA)
-        + "<script>const TARIFAS = %s;</script>" % json.dumps(TARIFAS)
+        + "<script>const TARIFAS = %s;</script>" % json.dumps(tarifas())
         + PANEL_COTIZADOR)
 
 
@@ -3911,7 +3967,8 @@ def guardar_textos():
 
 @app.post("/panel/textos/restaurar")
 def restaurar_textos():
-    db().execute("DELETE FROM texto")
+    # las tarifas viven en la misma tabla y no son un texto: se quedan
+    db().execute("DELETE FROM texto WHERE clave != 'tarifas'")
     db().commit()
     return redirect(url_for("textos_form"))
 
@@ -4096,7 +4153,7 @@ PANEL_BARRA = """<nav class="pbarra">
 {% set sec = request.path.split('/')[2] if request.path.count('/') > 1 else '' %}
 <a class="logo" href="/panel">rb<span>.</span>fotos</a>
 <div class="links">
-<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas','revision','revision-foto','cotizador') }}"
+<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas','revision','revision-foto','cotizador','tarifas') }}"
   >Galerias</a>
 <a href="/panel/revision" class="{{ 'on' if sec in ('revision','revision-foto') }}">Revision</a>
 <a href="/panel/carpetas" class="{{ 'on' if sec == 'carpetas' }}">Carpetas</a>
@@ -4105,6 +4162,7 @@ PANEL_BARRA = """<nav class="pbarra">
 <a href="/panel/textos" class="{{ 'on' if sec == 'textos' }}">Textos</a>
 <a href="/panel/logos" class="{{ 'on' if sec == 'logos' }}">Logos</a>
 <a href="/panel/cotizador" class="{{ 'on' if sec == 'cotizador' }}">Cotizador</a>
+<a href="/panel/tarifas" class="{{ 'on' if sec == 'tarifas' }}">Tarifas</a>
 </div>
 <form class="buscaid" method="get" action="/panel/buscar">
 <input name="id" placeholder="ID del pedido" maxlength="6" size="9"
@@ -6100,7 +6158,7 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 </main>
 <div class="viz">""" + PIE + """</div>"""
 
-# La pagina publica de tarifas (20/10/2026). Todo precio sale de TARIFAS y se
+# La pagina publica de tarifas (20/10/2026). Todo precio sale de tarifas() y se
 # muestra con la boleta incluida (bruto): por foto redondeado a $10, lo demas
 # a $100. La calculadora hace la cuenta neta y brutea el total una sola vez,
 # como el cotizador del panel, y termina en un WhatsApp con el pedido escrito.
@@ -7647,23 +7705,29 @@ queda: el fondo blanco de un JPG se ve como un cuadrado.</p>
 {% else %}<p style="opacity:.4">Todavia no subiste ninguno.</p>{% endif %}
 </main>"""
 
-# Las tarifas para ligas, en pesos y SIN la retencion de la boleta. Las leen el
-# cotizador del panel (como JSON) y la pagina publica /tarifas: un precio se
-# cambia aca y queda igual en los dos. La pagina publica muestra los precios
-# con la boleta incluida (bruteados), el cotizador hace la cuenta exacta.
-TARIFAS = {
+# Las tarifas para ligas, en pesos y SIN la retencion de la boleta. Esto es
+# el default: lo que Renzo cambia en /panel/tarifas se guarda en la tabla texto
+# (clave "tarifas", JSON {ruta: valor}, solo lo que difiere de aca) y lo pisa.
+# tarifas() arma el diccionario final con los precios derivados ya calculados;
+# de ahi leen la pagina publica /tarifas y el cotizador del panel (como JSON).
+TARIFAS_DEF = {
     "hora": 8000,
     "canchas_incluidas": 2, "cancha_extra_pct": 15,
-    # por foto, pack Personalizado: +20 % sobre 200/390/700 y sin descuento
-    "foto": {"basica": 240, "completa": 470, "pro": 840},
+    # precio por foto DENTRO de un pack. El pedido a medida lleva medida_pct
+    # encima y no tiene descuento: tarifas() lo deja en "foto".
+    "foto_pack": {"basica": 200, "completa": 390, "pro": 700},
+    "medida_pct": 20,
+    # cada pack: fotos de cada nivel y su descuento sobre foto_pack. Con
+    # 3/3,5/5 % y redondeo a $1.000 dan los 25.000/43.000/75.000 del 19/10/2026
     "packs": {
-        "esencial": {"nombre": "Esencial", "q": [70, 30, 0], "precio": 25000,
+        "esencial": {"nombre": "Esencial", "q": [70, 30, 0], "desc_pct": 3,
                      "horas": 2},
-        "liga": {"nombre": "Liga", "q": [90, 50, 10], "precio": 43000,
+        "liga": {"nombre": "Liga", "q": [90, 50, 10], "desc_pct": 3.5,
                  "horas": 3, "reco": True},
-        "full": {"nombre": "Full", "q": [140, 85, 25], "precio": 75000,
+        "full": {"nombre": "Full", "q": [140, 85, 25], "desc_pct": 5,
                  "horas": 5},
     },
+    "redondeo_pack": 1000,
     "niveles": {
         "basica": {"nombre": "Edición básica", "items": [
             "Balance de blancos (temperatura y matiz)", "Exposición y contraste",
@@ -7684,11 +7748,144 @@ TARIFAS = {
     "anticipo": 30, "entrega_dias": 4, "galeria_horas": 48,
 }
 
+# Lo que se edita en /panel/tarifas, por seccion: (ruta en TARIFAS_DEF, etiqueta).
+# Solo numeros: los nombres de los packs y los niveles siguen en el codigo.
+CAMPOS_TARIFAS = (
+    ("Cobertura", (
+        ("hora", "Valor de la hora ($)"),
+        ("canchas_incluidas", "Canchas incluidas sin recargo"),
+        ("cancha_extra_pct", "Recargo por cada cancha extra (%)"))),
+    ("Precio por foto", (
+        ("foto_pack.basica", "B\u00e1sica, dentro de un pack ($)"),
+        ("foto_pack.completa", "Completa, dentro de un pack ($)"),
+        ("foto_pack.pro", "Profesional, dentro de un pack ($)"),
+        ("medida_pct", "Recargo del pedido a medida (%)"))),
+) + tuple(
+    ("Pack " + P["nombre"], (
+        ("packs.%s.q.0" % k, "Fotos b\u00e1sicas"),
+        ("packs.%s.q.1" % k, "Fotos completas"),
+        ("packs.%s.q.2" % k, "Fotos profesionales"),
+        ("packs.%s.desc_pct" % k, "Descuento del pack (%)"),
+        ("packs.%s.horas" % k, "Horas para las que se sugiere")))
+    for k, P in TARIFAS_DEF["packs"].items()
+) + (
+    ("Redondeo", (
+        ("redondeo_pack", "Redondear el precio de los packs a ($)"),)),
+    ("Extras", (
+        ("logo", "Logo o marco de la liga ($)"),
+        ("partidos", "Separaci\u00f3n por partidos ($)"),
+        ("exclusivo_pct", "Recargo venta exclusiva, sobre las fotos (%)"),
+        ("sel_foto", "Selecci\u00f3n personal, por foto ($)"),
+        ("sel_min", "Selecci\u00f3n personal, m\u00ednimo ($)"))),
+    ("Pago y entrega", (
+        ("retencion", "Retenci\u00f3n de la boleta de honorarios (%)"),
+        ("anticipo", "Anticipo para reservar (%)"),
+        ("entrega_dias", "Entrega, d\u00edas h\u00e1biles desde la selecci\u00f3n"),
+        ("galeria_horas", "Galer\u00eda con marca de agua, horas"))),
+)
 
-def bruto(neto, a=1):
-    """El precio con la retencion de la boleta encima, redondeado a `a` pesos:
-    lo que el cliente transfiere para que a Renzo le quede `neto`."""
-    return int(round(neto / (1 - TARIFAS["retencion"] / 100) / a) * a)
+
+def _ruta(d, ruta):
+    """'packs.liga.q.0' -> (la lista q de liga, 0): el contenedor y la clave."""
+    partes = ruta.split(".")
+    for x in partes[:-1]:
+        d = d[int(x)] if isinstance(d, list) else d[x]
+    return d, (int(partes[-1]) if isinstance(d, list) else partes[-1])
+
+
+def _tarifas_editadas():
+    fila = db().execute("SELECT valor FROM texto WHERE clave = 'tarifas'").fetchone()
+    try:
+        return json.loads(fila["valor"]) if fila else {}
+    except ValueError:
+        return {}
+
+
+def tarifas():
+    """TARIFAS_DEF pisado por lo editado en el panel, con lo derivado ya
+    calculado: "foto" (precio a medida por foto) y "precio" de cada pack."""
+    t = json.loads(json.dumps(TARIFAS_DEF))          # copia profunda
+    for ruta, v in _tarifas_editadas().items():
+        try:
+            d, k = _ruta(t, ruta)
+            d[k] = v
+        except (KeyError, IndexError, ValueError, TypeError):
+            pass              # un campo que ya no existe en el codigo
+    fp = t["foto_pack"]
+    t["foto"] = {k: int(round(v * (1 + t["medida_pct"] / 100) / 10) * 10)
+                 for k, v in fp.items()}
+    r = t["redondeo_pack"] or 1
+    for P in t["packs"].values():
+        lista = (P["q"][0] * fp["basica"] + P["q"][1] * fp["completa"]
+                 + P["q"][2] * fp["pro"])
+        P["precio"] = int(round(lista * (1 - P["desc_pct"] / 100) / r) * r)
+    return t
+
+
+def bruto(neto, ret, a=1):
+    """El precio con la retencion `ret` (%) de la boleta encima, redondeado a
+    `a` pesos: lo que el cliente transfiere para que a Renzo le quede `neto`."""
+    return int(round(neto / (1 - ret / 100) / a) * a)
+
+
+PANEL_TARIFAS = PANEL_CSS + PANEL_BARRA + """<main>
+<style>
+.tfz{display:grid;gap:2rem;grid-template-columns:minmax(0,1fr) minmax(0,24rem);align-items:start}
+.tfz fieldset{border:1px solid #2a2a2a;border-radius:8px;padding:.9rem 1rem 1rem;margin:0 0 1rem}
+.tfz legend{padding:0 .4rem;opacity:.8;font-size:.9rem}
+.tfz .cols{display:grid;gap:.6rem .9rem;grid-template-columns:repeat(auto-fill,minmax(13rem,1fr))}
+.tfz label.campo{margin:0}
+.tfz input{width:100%}
+.tfz .res{position:sticky;top:5rem;border:1px solid #2a2a2a;border-radius:8px;padding:1rem 1.1rem}
+.tfz .res table{width:100%;border-collapse:collapse;font-size:.88rem}
+.tfz .res td{padding:.3rem .2rem;border-top:1px solid #222}
+.tfz .res td:not(:first-child){text-align:right;white-space:nowrap}
+.tfz .res th{text-align:right;font-weight:400;opacity:.55;font-size:.75rem;padding:.2rem}
+.tfz .res th:first-child{text-align:left}
+.tfz .ok{color:#b8e986}.tfz .malo{color:#ff8a9b}
+@media (max-width:900px){.tfz{grid-template-columns:1fr}.tfz .res{position:static}}
+</style>
+<h1 class="tit">Tarifas</h1>
+<p style="opacity:.55;font-size:.9rem;max-width:68ch">Los precios van <b>sin</b> la boleta: la p&aacute;gina
+p&uacute;blica les suma la retenci&oacute;n. Los packs se calculan solos: sus fotos por el precio dentro de
+pack, menos su descuento. El pedido a medida es el precio dentro de pack m&aacute;s su recargo. Al guardar
+cambian la p&aacute;gina <a href="/tarifas" target="_blank" rel="noopener">/tarifas</a> y el
+<a href="/panel/cotizador">cotizador</a>.</p>
+{% if aviso == 'ok' %}<p class="ok">Guardado.</p>{% elif aviso %}<p class="malo">No guard&eacute;
+estos campos (n&uacute;mero inv&aacute;lido, negativo o un porcentaje de 100 o m&aacute;s): {{ aviso }}</p>{% endif %}
+<div class="tfz">
+<form method="post" action="/panel/tarifas">
+{% for grupo, campos in CAMPOS %}<fieldset><legend>{{ grupo }}</legend><div class="cols">
+{% for ruta, etiqueta in campos %}
+<label class="campo"><span>{{ etiqueta }}</span>
+<input name="{{ ruta }}" value="{{ val(ruta) }}" inputmode="decimal" autocomplete="off"></label>
+{% endfor %}</div></fieldset>{% endfor %}
+<p style="position:sticky;bottom:1rem;margin:1rem 0 0;display:flex;gap:.6rem;flex-wrap:wrap">
+<button class="btn">Guardar las tarifas</button></p>
+</form>
+<aside class="res">
+<h3 style="margin:0 0 .6rem">As&iacute; queda</h3>
+<table>
+<tr><th></th><th>Neto</th><th>Con boleta</th></tr>
+<tr><td>Hora</td><td>{{ pesos(t.hora) }}</td><td>{{ pesos(B(t.hora, 10)) }}</td></tr>
+{% for k, n in (("basica", "B\u00e1sica"), ("completa", "Completa"), ("pro", "Profesional")) %}
+<tr><td>{{ n }} en pack / a medida</td><td>{{ pesos(t.foto_pack[k]) }} / {{ pesos(t.foto[k]) }}</td><td>{{ pesos(B(t.foto[k], 10)) }}</td></tr>
+{% endfor %}
+{% for k, P in t.packs.items() %}{% set medida = P.q[0] * t.foto.basica + P.q[1] * t.foto.completa + P.q[2] * t.foto.pro %}
+<tr><td>Pack {{ P.nombre }} &middot; {{ P.q|sum }} fotos<br><small style="opacity:.55">a medida
+{{ pesos(medida) }}, ahorra {{ ((1 - P.precio / medida) * 100)|round(1) if medida else 0 }} %</small></td>
+<td>{{ pesos(P.precio) }}</td><td>{{ pesos(B(P.precio, 100)) }}</td></tr>
+{% endfor %}
+{% set L = t.packs.liga %}
+<tr><td>Fecha t&iacute;pica: {{ L.horas }} h + Liga</td><td>{{ pesos(L.horas * t.hora + L.precio) }}</td>
+<td>{{ pesos(B(L.horas * t.hora + L.precio, 100)) }}</td></tr>
+</table>
+</aside>
+</div>
+<form method="post" action="/panel/tarifas/restaurar" style="margin:2.5rem 0 1rem"
+  onsubmit="return confirm('Volver TODAS las tarifas a las del codigo?')">
+<button class="btn mal">Volver a las tarifas originales</button></form>
+</main>"""
 
 
 # El cotizador para organizadores de ligas (19/10/2026). Va crudo y NO pasa
@@ -7698,9 +7895,9 @@ def bruto(neto, a=1):
 # Reglas de cobro, acordadas con Renzo:
 # - Niveles por foto: Basica 200 / Completa 390 / Profesional 700. Completa es
 #   la que se empuja: va marcada "Recomendada".
-# - Packs (19/10/2026): Esencial 100 fotos $25.000, Liga 150 $43.000
-#   (recomendado), Full 250 $75.000. Personalizado = por foto +20 %
-#   (240/470/840) y sin descuento: es el precio de lista de la boleta.
+# - Packs (19/10/2026): Esencial 100 fotos, Liga 150 (recomendado), Full 250.
+#   Su precio sale de tarifas(); Personalizado = por foto + medida_pct y sin
+#   descuento: es el precio de lista de la boleta. Se editan en /panel/tarifas.
 # - La cobertura se cobra por hora. No hay "hora extra": la hora vale lo
 #   acordado. Hora pasada: si se sigue fotografiando despues del termino, 15 min
 #   de tolerancia y despues cada bloque de 20 min iniciado a 1/3 de la hora.
@@ -10617,9 +10814,30 @@ def test():
         tar = c.get("/tarifas").get_data(as_text=True)
         assert DEFAULTS["tar_bajada"] not in c.get("/").get_data(as_text=True)
         assert DEFAULTS["tar_bajada"] in tar
-        # precios con boleta: la hora de 8.000 neta se publica a 9.440
-        assert bruto(8000, 10) == 9440 and pesos(9440) in tar
-        assert pesos(bruto(TARIFAS["packs"]["liga"]["precio"], 100)) in tar
+        # precios con boleta: la hora de 8.000 neta se publica a 9.440, y el
+        # pack Liga (90x200 + 50x390 + 10x700 = 44.500, -3,5 % = 43.000) a 50.700
+        assert bruto(8000, 15.25, 10) == 9440 and "$9.440" in tar
+        assert "$50.700" in tar, "el pack Liga no salio de 43.000 neto"
+        assert "const TARIFAS" in c.get("/panel/cotizador").get_data(as_text=True)
+        # el editor del panel: subir la hora mueve la pagina publica; un campo
+        # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
+        assert c.get("/panel/tarifas").status_code == 200
+        r = c.post("/panel/tarifas", data={"hora": "10000", "anticipo": "abc"})
+        assert "abc" not in r.headers["Location"] and "Anticipo" in \
+            urllib.parse.unquote_plus(r.headers["Location"]), r.headers["Location"]
+        tar = c.get("/tarifas").get_data(as_text=True)
+        assert "$11.800" in tar and "$9.440" not in tar, "la hora no se movio"
+        c.post("/panel/textos/restaurar")
+        assert "$11.800" in c.get("/tarifas").get_data(as_text=True), \
+            "restaurar los textos se llevo las tarifas"
+        c.post("/panel/tarifas", data={"hora": "8000"})
+        assert db().execute("SELECT 1 FROM texto WHERE clave = 'tarifas'"
+                            ).fetchone() is None, "quedo guardado un valor igual al default"
+        c.post("/panel/tarifas", data={"foto_pack.completa": "450"})
+        assert "$50.700" not in c.get("/tarifas").get_data(as_text=True), \
+            "subir la completa no movio el pack Liga"
+        c.post("/panel/tarifas/restaurar")
+        assert "$50.700" in c.get("/tarifas").get_data(as_text=True)
         assert DEFAULTS["mi_titulo"] in c.get("/sobre-mi").get_data(as_text=True)
         assert c.get("/panel/textos").status_code == 200
         assert DEFAULTS["hero_titulo"] in c.get("/").get_data(as_text=True)
