@@ -8,6 +8,7 @@ The scoring is absolute across the entire session (not per-burst).
 """
 
 import json
+import math
 import os
 
 import numpy as np
@@ -15,6 +16,7 @@ from typing import Optional
 
 from autocull.config import AnalysisConfig, DEFAULT_CONFIG
 from autocull.analyzers.pose import evaluate_pose
+from autocull.extractors.metadata import get_iso_or_default
 
 
 def _rank_map(indices, all_results, getter):
@@ -46,6 +48,43 @@ def _rank_map(indices, all_results, getter):
     ranks[order] = np.arange(n)
     ranks = ranks / (n - 1) * 100.0
     return {indices[k]: float(ranks[k]) for k in range(n)}
+
+
+# A band smaller than this merges into the next ISO up: the median of 8 photos is noise.
+_MIN_PHOTOS_PER_ISO_BAND: int = 40
+
+
+def _iso_bands(indices, all_results) -> list[list[int]]:
+    """Split result indices into ISO bands (whole stops: 100, 200, 400…) for the sharpness cuts and ranks.
+
+    Every sharpness metric falls with ISO, sharp or not — noise plus in-camera NR. On the F4 of
+    17/10/2026 (sunset at ISO 100, night at ISO 8000) the median ``snr_sharpness`` went 1849 → 97 and
+    one session-wide percentile threw out 62% of the ISO 8000 half; 33 of Renato's 40 picks in there
+    were sharp at 100%. Within a band a photo competes with frames shot in the same light.
+    """
+    by_stop: dict[int, list[int]] = {}
+    for i in indices:
+        iso = get_iso_or_default(all_results[i].get("exif") or {})
+        by_stop.setdefault(round(math.log2(iso / 100)), []).append(i)
+
+    bands, current = [], []
+    for stop in sorted(by_stop):
+        current += by_stop[stop]
+        if len(current) >= _MIN_PHOTOS_PER_ISO_BAND:
+            bands.append(current)
+            current = []
+    if current:  # small leftover at the top joins the last full band
+        if bands:
+            bands[-1] += current
+        else:
+            bands.append(current)
+    return bands
+
+
+def _banded_rank_map(indices, all_results, getter):
+    """``_rank_map`` computed within each ISO band, so ISO doesn't decide the sharpness rank."""
+    return {k: v for band in _iso_bands(indices, all_results)
+            for k, v in _rank_map(band, all_results, getter).items()}
 
 
 # Ball-proximity decay scale, in multiples of the player's own bbox height.
@@ -358,22 +397,16 @@ def compute_final_scores(
         if r["tier1"]["tier1_pass"]:
             tier1_passed_indices.append(i)
 
-    # ── Percentile-based Tier 1 rejection (sharpness + blur) ──────────
-    if tier1_passed_indices:
-        # Collect sharpness scores from ALL photos (including Tier 1 pass candidates)
-        all_sharpness = np.array([
-            all_results[i]["tier1"]["snr_sharpness"] for i in tier1_passed_indices
-        ])
-        all_blur = np.array([
-            all_results[i]["tier1"]["fft_blur"] for i in tier1_passed_indices
-        ])
+    # ── Tier 1 rejection (sharpness + blur): far below the median of the ISO band ──
+    # A fraction of the median, not a percentile: a percentile rejects a fixed share even when the
+    # whole band is sharp (the sunset of the F4 lost 30% of sharp frames that way).
+    for band in _iso_bands(tier1_passed_indices, all_results):
+        sharpness_threshold = config.sharpness_reject_ratio * np.median(
+            [all_results[i]["tier1"]["snr_sharpness"] for i in band])
+        blur_threshold = config.blur_reject_ratio * np.median(
+            [all_results[i]["tier1"]["fft_blur"] for i in band])
 
-        # Calculate percentile thresholds
-        sharpness_threshold = np.percentile(all_sharpness, config.sharpness_reject_percentile)
-        blur_threshold = np.percentile(all_blur, config.blur_reject_percentile)
-
-        # Apply percentile-based rejection
-        for i in tier1_passed_indices:
+        for i in band:
             r = all_results[i]
             if r["tier1"]["snr_sharpness"] < sharpness_threshold:
                 r["tier1"]["tier1_pass"] = False
@@ -382,7 +415,7 @@ def compute_final_scores(
                 r["tier1"]["tier1_pass"] = False
                 r["tier1"]["tier1_reject_reason"] = "motion_blur_fft"
 
-    # ── Percentile-based Tier 2 rejection (subject sharpness) ─────────
+    # ── Tier 2 rejection (subject sharpness), same rule ───────────────
     tier2_passed_indices = []
     for i, r in enumerate(all_results):
         if r["tier1"]["tier1_pass"] and r.get("tier2") and r["tier2"]["tier2_pass"]:
@@ -399,16 +432,11 @@ def compute_final_scores(
         if all_results[i]["tier2"].get("protagonist_confident", True)
     ]
 
-    if confident_indices:
-        subject_snr_scores = np.array([
-            all_results[i]["tier2"]["best_subject_snr"] for i in confident_indices
-        ])
+    for band in _iso_bands(confident_indices, all_results):
+        subject_snr_threshold = config.subject_snr_reject_ratio * np.median(
+            [all_results[i]["tier2"]["best_subject_snr"] for i in band])
 
-        subject_snr_threshold = np.percentile(
-            subject_snr_scores, config.subject_snr_reject_percentile
-        )
-
-        for i in confident_indices:
+        for i in band:
             r = all_results[i]
             if r["tier2"]["best_subject_snr"] < subject_snr_threshold:
                 r["tier2"]["tier2_pass"] = False
@@ -431,13 +459,14 @@ def compute_final_scores(
         and (r.get("tier2") is None or r["tier2"]["tier2_pass"])
     ]
 
-    # Percentile-rank maps for the metrics that previously saturated
-    rank_global = _rank_map(composite_indices, all_results,
-                            lambda r: r["tier1"]["snr_sharpness"])
-    rank_fft = _rank_map(composite_indices, all_results,
-                         lambda r: r["tier1"]["fft_blur"])
-    rank_subject = _rank_map(composite_indices, all_results,
-                             lambda r: (r.get("tier2") or {}).get("best_subject_snr", 0.0))
+    # Percentile-rank maps for the metrics that previously saturated — within each ISO band, or the
+    # sunset frames outrank every night frame on sharpness alone
+    rank_global = _banded_rank_map(composite_indices, all_results,
+                                   lambda r: r["tier1"]["snr_sharpness"])
+    rank_fft = _banded_rank_map(composite_indices, all_results,
+                                lambda r: r["tier1"]["fft_blur"])
+    rank_subject = _banded_rank_map(composite_indices, all_results,
+                                    lambda r: (r.get("tier2") or {}).get("best_subject_snr", 0.0))
 
     for i, r in enumerate(all_results):
         score = 0.0
@@ -622,6 +651,32 @@ if __name__ == "__main__":
     assert pick_protagonist([], [], _shape, _cfg) == 0
     assert pick_protagonist([left], [], _shape, _cfg) == 0
     print("pick_protagonist: OK (size/centrality, ball override, degenerate)")
+
+    # ── Sharpness cuts: far below the median of the ISO band ───────────────
+    # Sunset at ISO 100 scores ~10x the sharp night frames at ISO 8000, as on the F4 of 17/10/2026.
+    # A session-wide 15th percentile rejected the sharp night; a per-band percentile still rejected 15%
+    # of each band. Only the one soft frame of each light may go.
+    def _photo(name, iso, snr):
+        return {"filename": name, "exif": {"iso": iso},
+                "tier1": {"snr_sharpness": snr, "fft_blur": 0.7, "tier1_pass": True, "tier1_reject_reason": None},
+                "tier2": None}
+
+    _rng = np.random.default_rng(0)
+    _session = ([_photo(f"day{k}", 100, s) for k, s in enumerate(_rng.uniform(1500, 2000, 100))]
+                + [_photo(f"night{k}", 8000, s) for k, s in enumerate(_rng.uniform(90, 160, 100))]
+                + [_photo("night_soft", 8000, 20.0), _photo("day_soft", 100, 300.0)])
+    _by_name = {r["filename"]: r for r in compute_final_scores(_session)}
+    _blur_rej = lambda prefix: sum(r["reject_reason"] == "global_blur_snr"
+                                   for n, r in _by_name.items() if n.startswith(prefix))
+    assert _by_name["night_soft"]["reject_reason"] == "global_blur_snr"
+    assert _by_name["day_soft"]["reject_reason"] == "global_blur_snr"  # 300 beats every night frame, still soft for ISO 100
+    assert _blur_rej("night") == 1 and _blur_rej("day") == 1, (_blur_rej("night"), _blur_rej("day"))
+
+    # Bands: whole stops; a band under the minimum merges upward, a small top leftover merges down.
+    _mix = [_photo(f"a{k}", 100, 1) for k in range(50)] + [_photo(f"b{k}", 800, 1) for k in range(10)] \
+        + [_photo(f"c{k}", 1600, 1) for k in range(40)] + [_photo(f"d{k}", 8000, 1) for k in range(5)]
+    assert [len(b) for b in _iso_bands(list(range(len(_mix))), _mix)] == [50, 55]
+    print(f"per-ISO sharpness cuts: OK (night {_blur_rej('night')}/101, day {_blur_rej('day')}/101 rejected)")
 
     # Quick test with synthetic data
     test_results = [

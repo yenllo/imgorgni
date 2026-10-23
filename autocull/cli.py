@@ -39,7 +39,7 @@ def main():
     parser.add_argument("input_dir", type=str, nargs="?", help="Directory containing images")
     parser.add_argument("--dry-run", action="store_true", help="Only analyze, do not move files or write XMP")
     parser.add_argument("--threshold", type=float, default=30.0, help="Percentile threshold for rejection (default: 30)")
-    parser.add_argument("--sharpness-percentile", type=float, default=15.0, help="Tier 1 sharpness reject percentile")
+    parser.add_argument("--sharpness-ratio", type=float, default=0.40, help="Tier 1: reject below this fraction of the ISO band's median sharpness")
     parser.add_argument("--min-persons", type=int, default=1, help="Minimum persons required for PASS (default: 1)")
     parser.add_argument("--workers", type=int, default=0, help="Number of parallel workers (0 = auto)")
     parser.add_argument("--backend", type=str, choices=["auto", "cpu", "directml", "npu"], default="auto", help="YOLO backend")
@@ -79,7 +79,7 @@ def main():
     # Configuration
     config = AnalysisConfig()
     config.final_reject_percentile = args.threshold
-    config.sharpness_reject_percentile = args.sharpness_percentile
+    config.sharpness_reject_ratio = args.sharpness_ratio
     config.min_persons = args.min_persons
     config.num_workers = args.workers
     config.yolo_backend = args.backend

@@ -26,7 +26,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 class AnalyzeRequest(BaseModel):
     folder: str
     threshold: float = 30.0
-    sharpness_percentile: float = 15.0
+    sharpness_ratio: float = 0.40
     min_persons: int = 1
     workers: int = 0
 
@@ -73,7 +73,7 @@ def create_app() -> FastAPI:
         job_id = jobs.start_analysis(
             folder,
             threshold=req.threshold,
-            sharpness_percentile=req.sharpness_percentile,
+            sharpness_ratio=req.sharpness_ratio,
             min_persons=req.min_persons,
             workers=req.workers,
         )

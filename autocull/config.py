@@ -54,14 +54,15 @@ class AnalysisConfig:
     })
 
     # ── Tier 1: Quick Filters ───────────────────────────────────────────
-    # Sharpness: percentile-based rejection (absolute across session)
-    # Photos below this percentile of SNR sharpness score → REJECT
-    sharpness_reject_percentile: float = 15.0
+    # Sharpness: REJECT only frames far below the median of their ISO band (scorer._iso_bands), as a
+    # fraction of that median. No fixed quota: a band where everything is sharp loses nothing.
+    # Calibrated on the F4 of 17/10/2026 at 100%: sharp frames never went under 0.46x, 0.31-0.33x
+    # were visibly soft, misfocused ones sat at 0.1x.
+    sharpness_reject_ratio: float = 0.40
 
-    # Blur (FFT): high-freq energy threshold.
-    # Below this → likely motion blur / trepidation
-    # This is relative — set after first pass calibration
-    blur_reject_percentile: float = 10.0
+    # Blur (FFT): same rule. The metric spans a narrow range: sharp frames stayed >= 0.79x the band
+    # median, defocused/blurred ones fell to 0.66-0.71x.
+    blur_reject_ratio: float = 0.75
 
     # Exposure: underexposure detection
     # Reject if >60% of pixels are in [0-15] range (severely dark)
@@ -109,9 +110,9 @@ class AnalysisConfig:
         "centrality": 0.20,      # photographers put the subject near the centre
     })
 
-    # Subject sharpness: SNR threshold for the player's bounding box
-    # Photos where the best subject's SNR < this → REJECT
-    subject_snr_reject_percentile: float = 25.0
+    # Subject sharpness: REJECT when the protagonist's SNR is under this fraction of the band median.
+    # F4 17/10/2026: focus on the net/fence behind the player sat at 0.14-0.28x; sharp from ~0.36x.
+    subject_snr_reject_ratio: float = 0.30
 
     # Subject exposure: minimum mean brightness in the player's bbox
     subject_min_brightness: float = 35.0

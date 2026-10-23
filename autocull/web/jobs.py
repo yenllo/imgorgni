@@ -35,7 +35,7 @@ def get_job(job_id: str) -> Optional[dict]:
 
 
 def start_analysis(folder: str, threshold: float = 30.0,
-                   sharpness_percentile: float = 15.0,
+                   sharpness_ratio: float = 0.40,
                    min_persons: int = 1, workers: int = 0) -> str:
     """Kick off analysis of *folder* in a background thread.
 
@@ -58,14 +58,14 @@ def start_analysis(folder: str, threshold: float = 30.0,
 
     config = AnalysisConfig()
     config.final_reject_percentile = threshold
-    config.sharpness_reject_percentile = sharpness_percentile
+    config.sharpness_reject_ratio = sharpness_ratio
     config.min_persons = min_persons
     config.num_workers = workers
     config.__post_init__()
 
     config_snapshot = {
         "final_reject_percentile": threshold,
-        "sharpness_reject_percentile": sharpness_percentile,
+        "sharpness_reject_ratio": sharpness_ratio,
         "min_persons": min_persons,
     }
 

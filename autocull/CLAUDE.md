@@ -17,7 +17,7 @@ $AC = "C:\Renzo\Proyectos\Autocull\venv\Scripts\python.exe"
 & $AC -m autocull <carpeta> --undo      # revierte el último move (usa _autocull_undo.json)
 & $AC -m autocull <carpeta> --from-csv autocull_report.csv  # recalcula umbral sin re-analizar
 ```
-Flags CLI útiles: `--threshold` (percentil de corte final, def 30), `--sharpness-percentile` (def 15),
+Flags CLI útiles: `--threshold` (percentil de corte final, def 30), `--sharpness-ratio` (def 0.40, fracción de la mediana del tramo de ISO),
 `--min-persons` (def 1), `--xmp` (sidecars Lightroom para rechazos), `--workers`, `--backend`.
 
 Python 3.12. onnxruntime **CPU** (sin DirectML/NPU → siempre CPU).
@@ -70,9 +70,18 @@ es central y explica por qué las decisiones finales se calculan *después* de p
     tamaño/centro, y el programa **no rechaza** por él: esas fotos caen a los filtros globales y al percentil
     final, que no dependen de saber quién es el sujeto.
 - **Scoring final (`scoring/scorer.py::compute_final_scores`, una sola vez con toda la sesión):**
-  1. Corte por percentil de nitidez y blur globales (Tier 1 diferido).
-  2. Corte por percentil de SNR del sujeto (Tier 2) — **solo entre las fotos con `protagonist_confident`**;
+  1. Corte de nitidez y blur globales (Tier 1 diferido).
+  2. Corte de SNR del sujeto (Tier 2) — **solo entre las fotos con `protagonist_confident`**;
      las demás ni se rechazan ni fijan el umbral (no se juzga a un sujeto que no se sabe cuál es).
+  - **Desde el 22/10/2026 los tres cortes NO son percentiles:** bota solo lo que queda bajo una fracción de
+    la mediana de su **tramo de ISO** (`sharpness_reject_ratio` 0.40, `blur_reject_ratio` 0.75,
+    `subject_snr_reject_ratio` 0.30; tramos = `_iso_bands`, pasos enteros 100/200/400…, los de <40 fotos se
+    juntan con el siguiente). Los `_rank_map` de nitidez del compuesto también van por tramo. Por qué: las
+    tres métricas caen con el ISO aunque la foto esté nítida, y un percentil bota una cuota fija aunque todo
+    esté nítido. En la F4 del 17/10 (atardecer a ISO 100, noche a ISO 8000) el percentil de sesión botaba
+    ~680 fotos, el 61 % de las nocturnas, y 40 de las 100 de Renato, casi todas nítidas a 100 %. Con la
+    fracción de la mediana bota 18 (revisadas: movidas, foco en la reja/malla, 1/6 s) y 1 de Renato.
+    Umbrales calibrados mirando a 100 % en esa fecha; recalibrar si cambia la cámara o el análisis.
   3. **Score compuesto** = suma ponderada (`config.score_weights`). Clave: las métricas de nitidez se
      convierten a **rank percentil dentro de la sesión** vía `_rank_map()`, no a multiplicadores fijos
      (que saturaban en el cap y dejaban de discriminar). Bonos por pelota/pose, penalización por ojos

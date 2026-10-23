@@ -75,10 +75,9 @@ PX_RENATO = 1024   # sus ~100 a 1280 px no caben en una sola lectura; a 1024 son
 # Autocull solo bota basura (3/10/2026). Con sus valores de siempre (cuotas fijas por percentil y 1 foto
 # por rafaga) pasaba el 6-19% del carrete y dejaba afuera 9 de cada 10 fotos que eligio Renato:
 # F1 13/9 -> 10 de 101, F2 26/9 -> 7 de 101 (48 cayeron como "duplicado de rafaga").
+# Los cortes de nitidez ya no son cuotas (22/10/2026): Autocull solo bota lo muy por debajo de la mediana
+# de su tramo de ISO, que es lo que aqui se buscaba con percentiles bajos.
 AUTOCULL_AJUSTES = {
-    "sharpness_reject_percentile": 5.0,     # era 15: solo lo claramente movido o fuera de foco
-    "blur_reject_percentile": 3.0,          # era 10
-    "subject_snr_reject_percentile": 10.0,  # era 25
     "final_reject_percentile": 0.0,         # era 30: sin cuota final, el corte lo hacen Haiku y Sonnet
     "burst_keep": 3,                        # era 1: las 3 mejores de cada rafaga; Claude no repite jugada
 }
