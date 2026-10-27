@@ -8680,6 +8680,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
         <option value="si">Sí, las comparte</option>
         <option value="no">No, no las comparte</option>
       </select>
+      <label class="cz-chk" style="margin-top:6px"><input type="checkbox" id="busquedaCara"> Búsqueda por cara en la galería de venta</label>
     </div>
     <div id="bloqueExclusivo" style="margin-top:8px">
       <label>Recargo por exclusividad (% sobre las fotos)</label>
@@ -8779,7 +8780,7 @@ const PRESETS = {
   lista: {packFotos:"liga",durPartido:"60",simult:"{}",lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
-          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,volumen:0,boleta:"si",
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false,tipoEvento:"liga"},
   // cumpleanos y eventos sociales: su hora y sus precios; sin basica, sin
@@ -8794,7 +8795,7 @@ const PRESETS = {
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
           packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
-          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,volumen:0,
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,volumen:0,
           boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00",tipoEvento:"liga"}
 };
 
@@ -9067,6 +9068,9 @@ function render(){
     // que nadie diga despues que no sabia: el cliente avisa, y quien no quiera
     // aparecer pide que saquen sus fotos de la venta
     venta += `<li><b>Aviso a los asistentes:</b> al aceptar esta cotización, el cliente se compromete a informar a todos los ${r.social ? "invitados" : "jugadores, apoderados y representantes"} que la galería se publicará después del evento para su venta individual. Quien no quiera aparecer puede pedírmelo y retiro sus fotos de la venta.</li>`;
+    // la busqueda por cara la implementa Renzo en la galeria (26/10/2026); aca
+    // solo se ofrece en la cotizacion
+    if($("busquedaCara").checked) venta += `<li><b>Búsqueda por cara:</b> en la galería de venta cada ${quien} podrá encontrar sus fotos buscando por su cara, sin revisar el evento completo.</li>`;
     if(c === "si") venta += `<li>El cliente indicó que <b>compartirá con los ${quienes} las fotos que compró</b>: esas fotos quedan fuera de la venta individual, para que nadie pague por una foto que ya tiene.</li>`;
     else if(c === "no") venta += `<li>El cliente indicó que <b>no compartirá</b> las fotos que compró: todas las fotos del evento pueden quedar a la venta individual.</li>`;
   }
@@ -9174,6 +9178,7 @@ function resumenWsp(){
   if(r.ahorro>0) t.push(`Precio de lista ${pesos(r.subL)}. Tu descuento: ${pesos(r.ahorro)}`);
   t.push(`*Total: ${pesos(r.total)}*`);
   if(r.anticipo>0) t.push(`Anticipo (la cobertura): ${pesos(r.anticipo)} · Saldo: ${pesos(r.saldo)}`);
+  if(r.pack === "abierto" && $("busquedaCara").checked) t.push(`• Galería de venta con búsqueda por cara: cada ${r.social ? "invitado" : "jugador"} encuentra sus fotos buscando por su cara`);
   if(r.pack === "abierto") t.push("", `_Galería abierta: al aceptar, te comprometes a avisar a ${r.social ? "los invitados" : "jugadores, apoderados y representantes"} que la galería se publica después del evento para venta individual. Quien no quiera aparecer me avisa y saco sus fotos de la venta._`);
   return t.join("\n");
 }
@@ -11643,6 +11648,7 @@ def test():
         assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gKm", "gEstac", "pSel", "pTipo", "pNumero"))
         assert 'id="pCuenta"' not in cz_
         assert 'id="km"' in cz_ and 'id="estac"' in cz_ and 'id="traslado"' not in cz_
+        assert 'id="busquedaCara"' in cz_
         assert tarifas()["km"] == 200
         # eventos sociales: su hora y sus packs, con la misma regla de packs.
         # Celebracion: 90x590 + 10x990 = 63.000, -3,5 % = 60.795 -> 61.000
