@@ -8228,6 +8228,39 @@ TARIFAS_DEF = {
                  "horas": 5},
     },
     "redondeo_pack": 1000,
+    # Cumpleanos y eventos sociales (26/10/2026): la hora vale mas porque no es
+    # cubrir una jornada, es estar atento a lo que piden y a lo que nadie pide,
+    # dirigir grupos y elegir yo las fotos. Solo completa y profesional, las dos
+    # con retoque de rostros. Sus packs siguen la misma regla que los de ligas.
+    "social": {
+        "hora": 15000,
+        "foto_pack": {"basica": 0, "completa": 590, "pro": 990},
+        "medida_pct": 20,
+        "packs": {
+            "intimo": {"nombre": "Íntimo", "q": [0, 50, 0], "desc_pct": 3,
+                       "horas": 2},
+            "celebracion": {"nombre": "Celebración", "q": [0, 90, 10],
+                            "desc_pct": 3.5, "horas": 3, "reco": True},
+            "completo": {"nombre": "Completo", "q": [0, 130, 20],
+                         "desc_pct": 5, "horas": 4},
+        },
+        "niveles": {
+            "completa": {"nombre": "Edición completa", "resolucion": ["4K", 3840], "items": [
+                "Balance de blancos (temperatura y matiz)", "Exposición y contraste",
+                "Iluminaciones, sombras, blancos y negros", "Intensidad y saturación",
+                "Nivelado de imagen", "Eliminación de distracciones",
+                "Reducción de ruido manual", "Encuadre al protagonista",
+                "Limpieza leve de piel (granitos, brillos, ojeras) de los "
+                "protagonistas, máximo 2 por foto"]},
+            "pro": {"nombre": "Edición profesional", "resolucion": ["4K", 3840], "items": [
+                "Todo lo de la edición completa", "Reducción de ruido adaptada",
+                "Calibración de colores",
+                "Color grading: mezcla y atenuación de colores",
+                "Máscaras por sujeto/fondo para edición por zonas",
+                "Retoque de rostros protagonistas, hasta 5 por foto",
+                "Dodge & burn: luces y sombras en piel y rostro"]},
+        },
+    },
     "niveles": {
         # resolucion de entrega: [nombre, pixeles en el borde largo]
         "basica": {"nombre": "Edición básica", "resolucion": ["2K", 2560], "items": [
@@ -8279,6 +8312,19 @@ CAMPOS_TARIFAS = (
         ("packs.%s.desc_pct" % k, "Descuento del pack (%)"),
         ("packs.%s.horas" % k, "Horas para las que se sugiere")))
     for k, P in TARIFAS_DEF["packs"].items()
+) + (
+    ("Eventos sociales (cumpleaños, matrimonios)", (
+        ("social.hora", "Valor de la hora ($)"),
+        ("social.foto_pack.completa", "Completa, dentro de un pack ($)"),
+        ("social.foto_pack.pro", "Profesional, dentro de un pack ($)"),
+        ("social.medida_pct", "Recargo del pedido a medida (%)"))),
+) + tuple(
+    ("Social: pack " + P["nombre"], (
+        ("social.packs.%s.q.1" % k, "Fotos completas"),
+        ("social.packs.%s.q.2" % k, "Fotos profesionales"),
+        ("social.packs.%s.desc_pct" % k, "Descuento del pack (%)"),
+        ("social.packs.%s.horas" % k, "Horas para las que se sugiere")))
+    for k, P in TARIFAS_DEF["social"]["packs"].items()
 ) + (
     ("Redondeo", (
         ("redondeo_pack", "Redondear el precio de los packs a ($)"),)),
@@ -8339,14 +8385,14 @@ def tarifas():
         [it] + [j >= i for j in range(len(orden))]
         for i, k in enumerate(orden) for it in t["niveles"][k]["items"]
         if not it.startswith("Todo lo de")]
-    fp = t["foto_pack"]
-    t["foto"] = {k: int(round(v * (1 + t["medida_pct"] / 100) / 10) * 10)
-                 for k, v in fp.items()}
     r = t["redondeo_pack"] or 1
-    for P in t["packs"].values():
-        lista = (P["q"][0] * fp["basica"] + P["q"][1] * fp["completa"]
-                 + P["q"][2] * fp["pro"])
-        P["precio"] = int(round(lista * (1 - P["desc_pct"] / 100) / r) * r)
+    for sub in (t, t["social"]):        # ligas y eventos sociales, misma regla
+        fp = sub["foto_pack"]
+        sub["foto"] = {k: int(round(v * (1 + sub["medida_pct"] / 100) / 10) * 10)
+                       for k, v in fp.items()}
+        for P in sub["packs"].values():
+            lista = sum(P["q"][i] * fp[k] for i, k in enumerate(orden))
+            P["precio"] = int(round(lista * (1 - P["desc_pct"] / 100) / r) * r)
     return t
 
 
@@ -8519,6 +8565,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 .cotz table.cz-det tr.cz-tot td{font-weight:700;font-size:15px;border-top:2px solid var(--cz-tinta);border-bottom:none}
 .cotz .cz-hoja s{color:var(--cz-tenue)}
 .cotz .cz-cortesia{color:var(--cz-ok);font-weight:600}
+.cotz.es-social .solo-liga{display:none}
 .cotz .cz-bloques{display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(5.6rem,1fr))}
 .cotz .cz-bq{display:flex;flex-direction:column;gap:2px;font-size:.72rem;opacity:.85}
 .cotz .cz-bq input{padding:.25rem .4rem}
@@ -8567,26 +8614,30 @@ PANEL_COTIZADOR = r"""<main class="cotz">
   <div class="cz-presets">
     <button type="button" class="btn hueco" data-preset="lista">Precio de lista</button>
     <button type="button" class="btn hueco" data-preset="renato">Renato · Liga ExScuola</button>
+    <button type="button" class="btn hueco" data-preset="social">Lista · cumpleaños</button>
     <button type="button" class="btn hueco" id="limpiar">Nueva cotización</button>
   </div>
 
   <fieldset><legend>1. Cliente y evento</legend>
-    <div class="cz-f">
+    <label>Tipo de evento</label>
+    <select id="tipoEvento"><option value="liga">Liga o torneo</option>
+      <option value="social">Cumpleaños o evento social</option></select>
+    <div class="cz-f" style="margin-top:8px">
       <div><label>Organizador</label><input id="cliente" placeholder="Nombre"></div>
       <div><label>Liga / evento</label><input id="evento" placeholder="Liga ExScuola 2026-2"></div>
       <div><label>Fecha del evento</label><input id="fechaEvento" type="date"></div>
       <div><label>Lugar</label><input id="lugar" placeholder="Recinto, comuna"></div>
       <div><label>Inicio</label><input id="horaInicio" type="time" value="19:00"></div>
       <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
-      <div><label>Cada partido dura</label><select id="durPartido"><option value="20">20 min</option>
+      <div class="solo-liga"><label>Cada partido dura</label><select id="durPartido"><option value="20">20 min</option>
         <option value="30">30 min</option><option value="60" selected>60 min</option></select></div>
       <div><label>Valor de la hora</label><input id="horaLista" readonly tabindex="-1"></div>
       <div><label>Descuento a la hora (%)</label><input id="descHora" type="number" min="0" max="100" step="0.5" value="0"></div>
       <div><label>N° cotización</label><input id="numero"></div>
       <div><label>Válida por (días)</label><input id="validez" type="number" min="1" value="15"></div>
     </div>
-    <label style="margin-top:8px">Partidos a la vez en cada horario</label>
-    <div class="cz-bloques" id="czBloques"></div>
+    <div class="solo-liga"><label style="margin-top:8px">Partidos a la vez en cada horario</label>
+    <div class="cz-bloques" id="czBloques"></div></div>
     <input type="hidden" id="simult" value="{}">
   </fieldset>
 
@@ -8594,7 +8645,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     <label>Pack</label>
     <select id="packFotos"><option value="">Personalizado: precio por foto, sin descuento</option></select>
     <div class="cz-f cz-tres" style="margin-top:8px">
-      <div><label>Básica</label><input id="qBasica" type="number" min="0" value="64"></div>
+      <div class="solo-liga"><label>Básica</label><input id="qBasica" type="number" min="0" value="64"></div>
       <div><label>Completa</label><input id="qCompleta" type="number" min="0" value="36"></div>
       <div><label>Profesional</label><input id="qPro" type="number" min="0" value="0"></div>
     </div>
@@ -8604,7 +8655,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     <p class="cz-ayuda">Los packs ya traen su descuento. Este campo es para casos aparte, como un contrato de temporada.</p>
   </fieldset>
 
-  <fieldset><legend>3. Venta posterior</legend>
+  <fieldset class="solo-liga"><legend>3. Venta posterior</legend>
     <label>Tipo de pack</label>
     <select id="pack">
       <option value="abierto">Abierto: galería pública a la venta después del evento</option>
@@ -8625,7 +8676,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     </div>
   </fieldset>
 
-  <fieldset><legend>4. Add-ons</legend>
+  <fieldset class="solo-liga"><legend>4. Add-ons</legend>
     <label class="cz-chk"><input type="checkbox" id="aLogo"> Logo/marco del cliente + exportación para redes</label>
     <label class="cz-chk"><input type="checkbox" id="aPartidos"> Separación por partidos con conteo de fotos</label>
     <div class="cz-f" style="margin-top:4px"><div><label>N° de partidos (opcional)</label><input id="nPartidos" type="number" min="0" value=""></div></div>
@@ -8637,7 +8688,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     <table class="cz-precios">
       <tr><th></th><th>Lista</th><th>Cliente</th><th title="Cortesía: precio 0">Cort.</th></tr>
       <tr><td>Hora</td><td><input id="lHora" type="number" value="8000"></td><td><input id="cHora" type="number" value="8000"></td><td></td></tr>
-      <tr><td>Básica</td><td><input id="lBasica" type="number" value="240"></td><td><input id="cBasica" type="number" value="240"></td><td></td></tr>
+      <tr class="solo-liga"><td>Básica</td><td><input id="lBasica" type="number" value="240"></td><td><input id="cBasica" type="number" value="240"></td><td></td></tr>
       <tr><td>Completa</td><td><input id="lCompleta" type="number" value="470"></td><td><input id="cCompleta" type="number" value="470"></td><td></td></tr>
       <tr><td>Profesional</td><td><input id="lPro" type="number" value="840"></td><td><input id="cPro" type="number" value="840"></td><td></td></tr>
       <tr><td>Logo/marco</td><td><input id="lLogo" type="number" value="10000"></td><td><input id="cLogo" type="number" value="10000"></td><td><input type="checkbox" id="gLogo"></td></tr>
@@ -8702,9 +8753,10 @@ const PAGO = ["pTitular","pRut","pBanco","pTipo","pNumero","pMail"];
 // varias cuentas de banco, guardadas aparte (solo en este navegador)
 const CLAVE_CUENTAS = "rbdeportes_cuentas_v1";
 
-const NIVELES = TARIFAS.niveles;
-
-const T = TARIFAS;
+const T = TARIFAS, TS = TARIFAS.social;
+// packs y niveles cambian con el tipo de evento (liga o social)
+let NIVELES = T.niveles, PACKS = T.packs, modoPintado = "";
+const esSocial = () => $("tipoEvento").value === "social";
 const PRESETS = {
   // Los precios por foto de lista son los del pack Personalizado; los packs
   // cerrados tienen su precio en TARIFAS.packs. Todo sale de TARIFAS (Python).
@@ -8713,28 +8765,52 @@ const PRESETS = {
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
           gSel:false,gExcl:false,gTraslado:false,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
-          aLogo:false,aPartidos:false,aSeleccion:false},
+          aLogo:false,aPartidos:false,aSeleccion:false,tipoEvento:"liga"},
+  // cumpleanos y eventos sociales: su hora y sus precios; sin basica, sin
+  // partidos ni venta a jugadores (todo eso se esconde)
+  social: {tipoEvento:"social",packFotos:"celebracion",lHora:TS.hora,cHora:TS.hora,lBasica:0,cBasica:0,
+          lCompleta:TS.foto.completa,cCompleta:TS.foto.completa,lPro:TS.foto.pro,cPro:TS.foto.pro,qBasica:0,
+          pack:"exclusivo",recargoExcl:0,gExcl:false,aLogo:false,aPartidos:false,aSeleccion:false,
+          durPartido:"60",simult:"{}",volumen:0,boleta:"no",anticipo:true,plazo:T.entrega_dias,
+          horaInicio:"13:00",horaFin:"16:00",evento:""},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
   // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
           packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
           gSel:false,gExcl:false,gTraslado:false,volumen:0,
-          boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00"}
+          boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00",tipoEvento:"liga"}
 };
 
 // Packs cerrados (19/10/2026). Liga es el que se empuja. Su "lista" en la boleta
 // es lo que costaria armarlo foto a foto como Personalizado: ese contraste es
 // el decoy, el pack siempre sale mas barato que armarlo a mano.
-const PACKS = T.packs;
 
 const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
 const ent = id => Math.max(0, Math.round(num(id)));
 const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-Object.entries(PACKS).forEach(([k,P]) => $("packFotos").insertAdjacentHTML("beforeend",
-  `<option value="${k}">${P.nombre} · ${P.q[0]+P.q[1]+P.q[2]} fotos · ${pesos(P.precio)}${P.reco?" · recomendado":""}</option>`));
+// la lista de packs del tipo de evento elegido (se rehace al cambiar de tipo)
+function pintarModo(){
+  const m = $("tipoEvento").value;
+  if(m === modoPintado) return;
+  modoPintado = m;
+  const social = m === "social";
+  NIVELES = social ? TS.niveles : T.niveles;
+  PACKS = social ? TS.packs : T.packs;
+  document.querySelector("main.cotz").classList.toggle("es-social", social);
+  const elegido = $("packFotos").value;
+  $("packFotos").innerHTML = '<option value="">Personalizado: precio por foto, sin descuento</option>'
+    + Object.entries(PACKS).map(([k,P]) => `<option value="${k}">${P.nombre} · ${P.q[0]+P.q[1]+P.q[2]} fotos · ${pesos(P.precio)}${P.reco?" · recomendado":""}</option>`).join("");
+  $("packFotos").value = PACKS[elegido] ? elegido : "";
+}
+// cambiar el tipo de evento carga los precios de lista de ese tipo
+$("tipoEvento").addEventListener("change", () => {
+  const datos = {}; ["cliente","evento","fechaEvento","lugar","numero","validez","notas"].concat(PAGO).forEach(id => datos[id] = $(id).value);
+  aplicar(PRESETS[esSocial() ? "social" : "lista"]); aplicar(datos);
+});
+pintarModo();
 
 function minutos(h){ if(!h) return null; const [a,b] = h.split(":").map(Number); return a*60+b; }
 function duracion(ini, fin){ // en minutos, cruza medianoche
@@ -8784,6 +8860,8 @@ function numeroNuevo(){
 }
 
 function calcular(){
+  pintarModo();
+  const social = esSocial();
   const horas = duracion($("horaInicio").value, $("horaFin").value) / 60;
   // un pack cerrado fija las cantidades; Personalizado las deja libres
   const P = PACKS[$("packFotos").value];
@@ -8791,7 +8869,8 @@ function calcular(){
   const q = {basica:ent("qBasica"), completa:ent("qCompleta"), pro:ent("qPro")};
   const totalFotos = q.basica + q.completa + q.pro;
   const volPct = num("volumen");
-  const pack = $("pack").value;
+  // en social la galeria es privada: no hay venta a jugadores ni recargo
+  const pack = social ? "privado" : $("pack").value;
   const exclPct = pack === "exclusivo" ? num("recargoExcl") : 0;
 
   // Cada linea: concepto, detalle, cantidad, unidad lista, unidad cliente, total lista, total cliente
@@ -8810,7 +8889,7 @@ function calcular(){
         + (dH > 0 ? ` · descuento ${dH.toLocaleString("es-CL")} % a la hora` : ""), horas, num("lHora"), num("cHora"));
   // partidos a la vez, horario por horario: hasta 2 incluidos; cada uno extra
   // suma cancha_extra_pct de la hora, solo en los horarios que lo tienen
-  const bs = bloquesCz(); pintarBloquesCz(bs);
+  const bs = social ? [] : bloquesCz(); if(!social) pintarBloquesCz(bs);
   const S = simult(), dur = +$("durPartido").value, cpct = T.cancha_extra_pct;
   let hExtra = 0, partidos = 0, maxC = 1;
   for(const [t0,t1] of bs){
@@ -8823,7 +8902,7 @@ function calcular(){
                      detalle:`${T.canchas_incluidas} incluidos · +${cpct} % de la hora por cada uno extra, en su horario`,
                      cant:null,tL:hExtra*num("lHora")*cpct/100,tC:hExtra*num("cHora")*cpct/100});
   // partidos cortos: recargo sobre toda la cobertura
-  const dpct = T.duracion_pct[String(dur)] || 0;
+  const dpct = social ? 0 : (T.duracion_pct[String(dur)] || 0);
   if(dpct){
     const cob = L.filter(x=>x.grupo==="Cobertura");
     L.push({grupo:"Cobertura",concepto:`Partidos de ${dur} minutos (+${dpct} %)`,detalle:`${partidos} partidos en total`,
@@ -8832,7 +8911,7 @@ function calcular(){
 
   if(P){
     const armado = q.basica*num("lBasica") + q.completa*num("lCompleta") + q.pro*num("lPro");
-    linea("Fotos",`Pack ${P.nombre}`,`${q.basica} básicas · ${q.completa} completas · ${q.pro} profesionales · lista: armado foto a foto`,
+    linea("Fotos",`Pack ${P.nombre}`,(social ? "" : `${q.basica} básicas · `) + `${q.completa} completas · ${q.pro} profesionales · lista: armado foto a foto`,
           1, armado, P.precio);
   } else {
     if(q.basica)   linea("Fotos","Fotos con edición básica","", q.basica, num("lBasica"), num("cBasica"));
@@ -8854,14 +8933,14 @@ function calcular(){
   }
   ajustes.forEach(a => L.push(a));
 
-  if($("aLogo").checked) linea("Add-ons","Logo/marco del cliente","Incluye exportación adaptada a redes sociales",
+  if(!social && $("aLogo").checked) linea("Add-ons","Logo/marco del cliente","Incluye exportación adaptada a redes sociales",
                                1, num("lLogo"), num("cLogo"), $("gLogo").checked);
-  if($("aPartidos").checked){
+  if(!social && $("aPartidos").checked){
     const np = ent("nPartidos");
     linea("Add-ons","Separación por partidos", (np ? np + " partidos · " : "") + "con conteo de fotos por partido",
           1, num("lPartidos"), num("cPartidos"), $("gPartidos").checked);
   }
-  if($("aSeleccion").checked && totalFotos){
+  if(!social && $("aSeleccion").checked && totalFotos){
     // por tramos, como la pagina publica: el tramo que cubre las fotos del pedido
     const tr = T.seleccion, i = tr.findIndex(([cant]) => totalFotos <= cant);
     let pSel;
@@ -8898,7 +8977,7 @@ function calcular(){
   // con boleta va bruteado igual que el total
   const cob = L.filter(x=>x.grupo==="Cobertura").reduce((s,x)=>s+x.tC,0);
   const anticipo = $("anticipo").checked ? Math.min(total, Math.round(conBoleta ? cob/(1-ret) : cob)) : 0;
-  return {L, horas, q, totalFotos, pack, P, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
+  return {L, horas, q, totalFotos, pack, P, social, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
           ahorro: subL - subC, conBoleta, ret, pasada};
 }
 
@@ -8939,6 +9018,7 @@ function render(){
   // niveles de edicion (Completa marcada como recomendada)
   const pu = (l,c) => c < l ? `<s>${pesos(l)}</s> ${pesos(c)}` : pesos(c);
   const niveles = [["basica",num("lBasica"),num("cBasica")],["completa",num("lCompleta"),num("cCompleta")],["pro",num("lPro"),num("cPro")]]
+    .filter(([k]) => NIVELES[k])
     .map(([k,l,c]) => `<div class="cz-nivel ${k==='completa'?'cz-reco':''}">${k==='completa'?'<span class="cz-tag">RECOMENDADA</span>':''}
       <h4>${NIVELES[k].nombre}</h4><p class="cz-p">${pu(l,c)} <small>por foto</small></p>
       <p class="cz-resol">${NIVELES[k].resolucion[0]} · ${NIVELES[k].resolucion[1].toLocaleString("es-CL")} px en el borde largo</p>
@@ -8963,8 +9043,8 @@ function render(){
 
   $("hoja").innerHTML = `
   <div class="cz-cab">
-    <div><div class="cz-marca">RB.Deportes<span>_</span></div>
-      <div class="cz-datos-emisor">Fotografía deportiva · Santiago de Chile<br>@rb.deportes_ · renzob.deportes@gmail.com · +569 7375 6165</div></div>
+    <div><div class="cz-marca">${r.social ? "rb.fotos" : "RB.Deportes"}<span>_</span></div>
+      <div class="cz-datos-emisor">${r.social ? "Fotografía de eventos" : "Fotografía deportiva"} · Santiago de Chile<br>${r.social ? "rbfotos.studio" : "@rb.deportes_"} · renzob.deportes@gmail.com · +569 7375 6165</div></div>
     <div class="cz-num">${r.pasada ? "Liquidación" : "Cotización"} N°<b>${v("numero") || "—"}</b>
       Emitida ${new Date().toLocaleDateString("es-CL")}<br>Válida hasta ${valida}</div>
   </div>
@@ -8974,9 +9054,9 @@ function render(){
       <dt>Organizador</dt><dd>${v("cliente") || "—"}</dd>
       <dt>Evento</dt><dd>${v("evento") || "—"}</dd>
       <dt>Fecha</dt><dd>${fechaLarga($("fechaEvento").value)}</dd>
-      <dt>Horario</dt><dd>${v("horaInicio") || "--:--"} a ${v("horaFin") || "--:--"} hrs · partidos de ${$("durPartido").value} min</dd>
+      <dt>Horario</dt><dd>${v("horaInicio") || "--:--"} a ${v("horaFin") || "--:--"} hrs${r.social ? "" : " · partidos de " + $("durPartido").value + " min"}</dd>
       ${$("lugar").value.trim() ? `<dt>Lugar</dt><dd>${v("lugar")}</dd>` : ""}
-      <dt>Pack</dt><dd>${r.P ? r.P.nombre + " · " : ""}${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas</dd>
+      <dt>Pack</dt><dd>${r.P ? r.P.nombre + " · " : ""}${r.social ? "Galería privada" : (r.pack === "exclusivo" ? "Exclusivo" : "Abierto")} · ${r.totalFotos} fotos ${r.social ? "editadas" : "seleccionadas"}</dd>
     </dl></div>
     <div class="cz-total-caja"><small>Total a pagar</small><div class="cz-monto">${pesos(r.total)}</div>
       ${r.anticipo > 0 ? `<div class="cz-linea"><span>Anticipo para reservar (la cobertura)</span><span>${pesos(r.anticipo)}</span></div>
@@ -9000,6 +9080,15 @@ function render(){
 
   <h2>Cómo trabajo</h2>
   <ul class="cz-cond">
+    ${r.social ? `
+    <li>Cubro el evento completo: los momentos que me pidan, los que nadie pide y las fotos grupales con la familia y los invitados.</li>
+    <li>Yo elijo las mejores fotos y las entrego editadas en 4K (3.840 px en el borde largo), sin marca de agua, ${ent("plazo")} días hábiles después del evento, por galería privada o Google Drive.</li>
+    <li>La edición completa incluye limpieza leve de piel de hasta 2 protagonistas por foto; la profesional, retoque de hasta 5 rostros protagonistas.</li>
+    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si el evento se alarga y sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
+    ${avisoPasada}
+    <li>Las fotos son para el festejado, su familia y sus invitados: no se venden a terceros. Puedo usar algunas en mi portafolio, salvo que me pidan lo contrario.</li>
+    ${r.anticipo > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
+    ${$("notas").value.trim() ? `<li>${v("notas")}</li>` : ""}` : `
     <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} partidos a la vez sin recargo; desde el siguiente, +${T.cancha_extra_pct} % de la hora por cada uno, en el horario que lo tiene. Partidos de 30 minutos: +${T.duracion_pct["30"]} % de la cobertura; de 20 minutos: +${T.duracion_pct["20"]} %. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
     <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
     <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
@@ -9007,7 +9096,7 @@ function render(){
     ${venta}
     <li>Derechos de uso para las redes del club y de los jugadores. No se permite su venta ni uso comercial sin acuerdo previo.</li>
     ${r.anticipo > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
-    ${$("notas").value.trim() ? `<li>${v("notas")}</li>` : ""}
+    ${$("notas").value.trim() ? `<li>${v("notas")}</li>` : ""}`}
   </ul>
 
   <h2>Datos de pago</h2>
@@ -9021,12 +9110,12 @@ function render(){
       ${$("pMail").value.trim() ? `<dt>Comprobante</dt><dd>${v("pMail")}</dd>` : ""}</dl>`
       : `<p class="cz-cond">Se envían junto con la confirmación.</p>`}</div>
     <div class="cz-caja"><h3>Resumen</h3><dl>
-      <dt>Fotos</dt><dd>${r.q.basica} básicas · ${r.q.completa} completas · ${r.q.pro} profesionales</dd>
+      <dt>Fotos</dt><dd>${r.social ? "" : r.q.basica + " básicas · "}${r.q.completa} completas · ${r.q.pro} profesionales</dd>
       <dt>Boleta</dt><dd>${r.conBoleta ? "Sí, boleta de honorarios" : "No"}</dd>
       <dt>Total</dt><dd><b>${pesos(r.total)}</b></dd></dl></div>
   </div>
 
-  <div class="cz-pie"><span>RB.Deportes_ · @rb.deportes_</span><span>Valores en pesos chilenos</span></div>`;
+  <div class="cz-pie"><span>${r.social ? "rb.fotos · rbfotos.studio" : "RB.Deportes_ · @rb.deportes_"}</span><span>Valores en pesos chilenos</span></div>`;
 
   guardar();
 }
@@ -9035,7 +9124,7 @@ function resumenWsp(){
   const r = calcular();
   const t = [];
   t.push(`*Cotización ${$("numero").value}*`);
-  t.push(`${$("evento").value || "Evento"}: ${fechaLarga($("fechaEvento").value)}, ${$("horaInicio").value} a ${$("horaFin").value}, partidos de ${$("durPartido").value} min`);
+  t.push(`${$("evento").value || "Evento"}: ${fechaLarga($("fechaEvento").value)}, ${$("horaInicio").value} a ${$("horaFin").value}` + (esSocial() ? "" : `, partidos de ${$("durPartido").value} min`));
   t.push("");
   r.L.forEach(x => t.push(`• ${x.concepto}${x.cant!=null?` (${Number.isInteger(x.cant)?x.cant:x.cant.toLocaleString("es-CL")})`:""}: ${x.cortesia?"cortesía":(x.tC<0?"−"+pesos(-x.tC):pesos(x.tC))}`));
   if(r.conBoleta) t.push(`• Impuesto boleta: ${pesos(r.impuesto)}`);
@@ -9054,6 +9143,7 @@ function guardar(){
 }
 function aplicar(d){
   firmaCz = "";
+  if(d.tipoEvento){ $("tipoEvento").value = d.tipoEvento; pintarModo(); }
   Object.entries(d).forEach(([k,val]) => { const e = $(k); if(!e) return;
     if(e.type === "checkbox") e.checked = !!val; else e.value = val; });
 }
@@ -11507,6 +11597,11 @@ def test():
         assert 'id="canchas"' not in cz_ and 'id="descHora"' in cz_
         assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gTraslado", "pSel", "pTipo", "pNumero"))
         assert 'id="pCuenta"' not in cz_
+        # eventos sociales: su hora y sus packs, con la misma regla de packs.
+        # Celebracion: 90x590 + 10x990 = 63.000, -3,5 % = 60.795 -> 61.000
+        ts_ = tarifas()["social"]
+        assert ts_["hora"] == 15000 and ts_["packs"]["celebracion"]["precio"] == 61000, ts_["packs"]
+        assert ts_["foto"]["completa"] == 710 and 'id="tipoEvento"' in cz_
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
         assert c.get("/panel/tarifas").status_code == 200
