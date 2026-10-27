@@ -8950,10 +8950,12 @@ function calcular(){
   if(exclPct) ajustes.push({grupo:"Fotos",concepto:`Pack exclusivo (+${exclPct} %)`,
                             detalle:"Sin venta individual posterior" + (exclC ? "" : " · cortesía"),
                             cant:null,tL:fotosL*exclPct/100,tC:fotosC*exclC/100,cortesia:!exclC});
+  // el descuento rebaja solo lo que paga el cliente: si tambien rebajara la
+  // lista, la diferencia (el ahorro) no lo veria. Con 100 % salia 2,8 %.
   if(volPct){
-    const baseL = fotosL*(1+exclPct/100), baseC = fotosC*(1+exclC/100);
-    ajustes.push({grupo:"Fotos",concepto:`Descuento por volumen (${volPct} %)`,detalle:`${totalFotos} fotos`,
-                  cant:null,tL:-baseL*volPct/100,tC:-baseC*volPct/100,desc:true});
+    const baseC = fotosC*(1+exclC/100);
+    ajustes.push({grupo:"Fotos",concepto:`Descuento en las fotos (${volPct} %)`,detalle:`${totalFotos} fotos`,
+                  cant:null,tL:0,tC:-baseC*Math.min(100, volPct)/100,desc:true});
   }
   ajustes.forEach(a => L.push(a));
 
@@ -9023,7 +9025,7 @@ function render(){
   r.L.forEach(x => {
     if(x.grupo !== grupoAct){ grupoAct = x.grupo; filas += `<tr class="cz-grupo"><td colspan="5">${x.grupo}</td></tr>`; }
     const cant = x.cant == null ? "" : (Number.isInteger(x.cant) ? x.cant : x.cant.toLocaleString("es-CL"));
-    let unit = "", lista = x.tL !== x.tC ? `<s>${pesos(x.tL)}</s>` : "";
+    let unit = "", lista = x.tL !== x.tC && !x.desc ? `<s>${pesos(x.tL)}</s>` : "";
     if(x.uL != null){
       unit = x.cortesia ? `<span class="cz-cortesia">Cortesía</span>`
            : (x.uC < x.uL ? `<s>${pesos(x.uL)}</s> ${pesos(x.uC)}` : pesos(x.uC));
@@ -9098,7 +9100,10 @@ function render(){
     </div>
   </div>
 
-  ${r.ahorro > 0 ? `<div class="cz-ahorro"><span>Valor a precio de lista: <s style="color:inherit">${pesos(r.subL)}</s><br>${r.P ? "Con el pack " + r.P.nombre + " ahorra" : "Su tarifa preferente le ahorra"}</span>
+  ${r.ahorro > 0 ? `<div class="cz-ahorro"><span>Valor a precio de lista: <s style="color:inherit">${pesos(r.subL)}</s><br>${(() => { const lp = r.P && r.L.find(x => x.concepto === "Pack " + r.P.nombre);
+      // "con el pack" solo si el ahorro es nada mas que el del pack
+      return lp && Math.abs(r.ahorro - (lp.tL - lp.tC)) < 1 ? "Con el pack " + r.P.nombre + " ahorra"
+           : r.P ? "Su ahorro total" : "Su tarifa preferente le ahorra"; })()}</span>
     <span><b>${pesos(r.ahorro)}</b> (${pct.toLocaleString("es-CL")} %)</span></div>` : ""}
   ${avisoComparte}
 
