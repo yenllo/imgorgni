@@ -8567,6 +8567,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 .cotz table.cz-det tr.cz-tot td{font-weight:700;font-size:15px;border-top:2px solid var(--cz-tinta);border-bottom:none}
 .cotz .cz-hoja s{color:var(--cz-tenue)}
 .cotz .cz-cortesia{color:var(--cz-ok);font-weight:600}
+.cotz .cz-fijo{opacity:.6;cursor:default}
 .cotz.es-social .solo-liga{display:none!important}   /* le gana a label.cz-chk{display:flex} */
 .cotz .cz-bloques{display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(5.6rem,1fr))}
 .cotz .cz-bq{display:flex;flex-direction:column;gap:2px;font-size:.72rem;opacity:.85}
@@ -8690,15 +8691,15 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 
   <fieldset><legend>5. Precios: lista y cliente</legend>
     <table class="cz-precios">
-      <tr><th></th><th>Lista</th><th>Cliente</th><th title="Cortesía: precio 0">Cort.</th></tr>
-      <tr><td>Hora</td><td><input id="lHora" type="number" value="8000"></td><td><input id="cHora" type="number" value="8000"></td><td></td></tr>
-      <tr class="solo-liga"><td>Básica</td><td><input id="lBasica" type="number" value="240"></td><td><input id="cBasica" type="number" value="240"></td><td></td></tr>
-      <tr><td>Completa</td><td><input id="lCompleta" type="number" value="470"></td><td><input id="cCompleta" type="number" value="470"></td><td></td></tr>
-      <tr><td>Profesional</td><td><input id="lPro" type="number" value="840"></td><td><input id="cPro" type="number" value="840"></td><td></td></tr>
-      <tr><td>Logo/marco</td><td><input id="lLogo" type="number" value="10000"></td><td><input id="cLogo" type="number" value="10000"></td><td><input type="checkbox" id="gLogo"></td></tr>
-      <tr><td>Partidos</td><td><input id="lPartidos" type="number" value="3000"></td><td><input id="cPartidos" type="number" value="3000"></td><td><input type="checkbox" id="gPartidos"></td></tr>
+      <tr><th></th><th title="Sale de Panel → Tarifas">Lista</th><th>Cliente</th><th title="Cortesía: precio 0">Cort.</th></tr>
+      <tr><td>Hora</td><td><input id="lHora" type="number" value="8000" readonly tabindex="-1" class="cz-fijo"></td><td><input id="cHora" type="number" value="8000"></td><td></td></tr>
+      <tr class="solo-liga"><td>Básica</td><td><input id="lBasica" type="number" value="240" readonly tabindex="-1" class="cz-fijo"></td><td><input id="cBasica" type="number" value="240"></td><td></td></tr>
+      <tr><td>Completa</td><td><input id="lCompleta" type="number" value="470" readonly tabindex="-1" class="cz-fijo"></td><td><input id="cCompleta" type="number" value="470"></td><td></td></tr>
+      <tr><td>Profesional</td><td><input id="lPro" type="number" value="840" readonly tabindex="-1" class="cz-fijo"></td><td><input id="cPro" type="number" value="840"></td><td></td></tr>
+      <tr><td>Logo/marco</td><td><input id="lLogo" type="number" value="10000" readonly tabindex="-1" class="cz-fijo"></td><td><input id="cLogo" type="number" value="10000"></td><td><input type="checkbox" id="gLogo"></td></tr>
+      <tr><td>Partidos</td><td><input id="lPartidos" type="number" value="3000" readonly tabindex="-1" class="cz-fijo"></td><td><input id="cPartidos" type="number" value="3000"></td><td><input type="checkbox" id="gPartidos"></td></tr>
     </table>
-    <p class="cz-ayuda">Si el precio del cliente es menor que el de lista, la boleta muestra el descuento línea por línea y el ahorro total.</p>
+    <p class="cz-ayuda">La lista sale de Panel → Tarifas: es el precio a medida, contra el que se calcula el ahorro (también el de los packs). Para cobrarle distinto a un cliente, cambia la columna Cliente; la boleta muestra el descuento línea por línea.</p>
   </fieldset>
 
   <fieldset><legend>6. Traslado, boleta y pago</legend>
@@ -8870,6 +8871,13 @@ function numeroNuevo(){
 function calcular(){
   pintarModo();
   const social = esSocial();
+  // la lista sale siempre de las tarifas: el 26/10/2026 la completa social
+  // quedo a mano en $590 (el precio en pack) y el pack mostraba $500 de ahorro
+  // en vez de $6.500. Lo que se negocia va en la columna Cliente.
+  const TT = social ? TS : T;
+  [["lHora", $("tipoEvento").value === "matrimonio" ? TS.hora_matrimonio : TT.hora],
+   ["lBasica", TT.foto.basica], ["lCompleta", TT.foto.completa], ["lPro", TT.foto.pro],
+   ["lLogo", T.logo], ["lPartidos", T.partidos]].forEach(([id, val]) => { $(id).value = val; });
   const horas = duracion($("horaInicio").value, $("horaFin").value) / 60;
   // un pack cerrado fija las cantidades; Personalizado las deja libres
   const P = PACKS[$("packFotos").value];
@@ -11616,6 +11624,7 @@ def test():
         assert ts_["hora"] == 15000 and ts_["packs"]["celebracion"]["precio"] == 61000, ts_["packs"]
         assert ts_["foto"]["completa"] == 710 and 'id="tipoEvento"' in cz_
         assert ts_["hora_matrimonio"] == 20000 and 'value="matrimonio"' in cz_
+        assert re.search(r'id="lCompleta" type="number" value="\d+" readonly', cz_), "la lista se puede editar"
         assert "ojeras" not in json.dumps(ts_, ensure_ascii=False)
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
