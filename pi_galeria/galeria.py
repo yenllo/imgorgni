@@ -1431,6 +1431,10 @@ CAMPOS = (
          "trabajado.\n"
          "Cancelaci\u00f3n: con 48 horas de aviso se reprograma sin costo. Con "
          "menos, se retiene el anticipo.\n"
+         "Venta abierta: al contratar, el organizador se compromete a avisar a "
+         "jugadores, apoderados e invitados que la galer\u00eda se publica "
+         "despu\u00e9s del evento para venta individual. Quien no quiera "
+         "aparecer me lo pide y saco sus fotos de la venta.\n"
          "Traslado y estacionamiento: se cotizan seg\u00fan el lugar."),
     )),
     ("Como recibis tus fotos", (
@@ -9049,6 +9053,9 @@ function render(){
   } else {
     const c = $("comparte").value;
     venta = `<li><b>Pack abierto:</b> después de la entrega publicaré una galería con marca de agua donde los ${quienes} podrán comprar fotos de forma individual, a precios propios que no tienen relación con el cliente.</li>`;
+    // que nadie diga despues que no sabia: el cliente avisa, y quien no quiera
+    // aparecer pide que saquen sus fotos de la venta
+    venta += `<li><b>Aviso a los asistentes:</b> al aceptar esta cotización, el cliente se compromete a informar a todos los ${r.social ? "invitados" : "jugadores, apoderados y representantes"} que la galería se publicará después del evento para su venta individual. Quien no quiera aparecer puede pedírmelo y retiro sus fotos de la venta.</li>`;
     if(c === "si") venta += `<li>El cliente indicó que <b>compartirá con los ${quienes} las fotos que compró</b>: esas fotos quedan fuera de la venta individual, para que nadie pague por una foto que ya tiene.</li>`;
     else if(c === "no") venta += `<li>El cliente indicó que <b>no compartirá</b> las fotos que compró: todas las fotos del evento pueden quedar a la venta individual.</li>`;
   }
@@ -9153,6 +9160,7 @@ function resumenWsp(){
   if(r.ahorro>0) t.push(`Precio de lista ${pesos(r.subL)}. Tu descuento: ${pesos(r.ahorro)}`);
   t.push(`*Total: ${pesos(r.total)}*`);
   if(r.anticipo>0) t.push(`Anticipo (la cobertura): ${pesos(r.anticipo)} · Saldo: ${pesos(r.saldo)}`);
+  if(r.pack === "abierto") t.push("", `_Galería abierta: al aceptar, te comprometes a avisar a ${r.social ? "los invitados" : "jugadores, apoderados y representantes"} que la galería se publica después del evento para venta individual. Quien no quiera aparecer me avisa y saco sus fotos de la venta._`);
   return t.join("\n");
 }
 
@@ -11587,6 +11595,7 @@ def test():
         # la calculadora: un pack chico por pack, mas el de a tu medida
         assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
         assert "{pct30}" not in tar and "Partidos cortos:" in tar
+        assert "Venta abierta:" in tar and "Aviso a los asistentes" in c.get("/panel/cotizador").get_data(as_text=True)
         assert 'id="tf-dur"' in tar and 'id="tf-bloques"' in tar
         assert all(('id="%s"' % i) in tar for i in ("tf-fecha", "tf-nf", "tf-link", "tf-temp"))
         # un link compartido (con parametros) abre la misma pagina, sin romperla
