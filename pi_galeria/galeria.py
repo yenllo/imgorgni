@@ -1436,6 +1436,60 @@ CAMPOS = (
          "despu\u00e9s del evento para venta individual. Quien no quiera "
          "aparecer me lo pide y saco sus fotos de la venta.\n"
          "Traslado y estacionamiento: se cotizan seg\u00fan el lugar."),
+        ("tar_soc_rotulo", "Social: Rotulo de arriba", 1, "Eventos sociales y matrimonios"),
+        ("tar_soc_titulo", "Social: Titulo de la seccion", 1, "Tarifas para cumplea\u00f1os, eventos y matrimonios"),
+        ("tar_soc_bajada", "Social: Bajada", 3,
+         "Cobertura fotogr\u00e1fica dedicada para celebraciones, cumplea\u00f1os y matrimonios. "
+         "Estar atento a los momentos clave, dirigir fotos grupales y entregar recuerdos editados en alta resoluci\u00f3n 4K."),
+        ("tar_soc_ancla", "Social: Fecha tipica ({horas} {pack} {fotos} {total})", 2,
+         "Un evento t\u00edpico, {horas} horas de cobertura con el pack {pack} ({fotos} fotos en 4K): {total} en total."),
+        ("tar_soc_boton_calc", "Social: Boton a la calculadora", 1, "Calcular mi evento"),
+        ("tar_soc_boton_packs", "Social: Boton a los packs", 1, "Ver packs sociales"),
+        ("tar_soc_como_tit", "Social: Como funciona, titulo", 1, "C\u00f3mo se arma el precio"),
+        ("tar_soc_paso1_t", "Social: Paso 1, titulo", 1, "Cobertura por hora"),
+        ("tar_soc_paso1", "Social: Paso 1, texto ({hora} {hora_mat})", 3,
+         "{hora} por hora en cumplea\u00f1os y eventos sociales \u00b7 {hora_mat} por hora en matrimonios. "
+         "Sin l\u00edmite de disparos durante el tiempo contratado."),
+        ("tar_soc_paso2_t", "Social: Paso 2, titulo", 1, "Edici\u00f3n 4K y cuidado de piel"),
+        ("tar_soc_paso2", "Social: Paso 2, texto", 3,
+         "Todas las fotos se entregan en resoluci\u00f3n 4K. Edici\u00f3n completa con limpieza leve de piel, "
+         "o profesional con retoque fino de rostros y luces."),
+        ("tar_soc_paso3_t", "Social: Paso 3, titulo", 1, "Selecci\u00f3n y entrega"),
+        ("tar_soc_paso3", "Social: Paso 3, texto", 3,
+         "Recibes la galer\u00eda completa con marca de agua para elegir tus favoritas con calma, "
+         "o yo hago la selecci\u00f3n por ti."),
+        ("tar_soc_packs_rot", "Social: Packs, rotulo", 1, "Packs de fotos"),
+        ("tar_soc_packs_tit", "Social: Packs, titulo", 1, "Tres packs cerrados"),
+        ("tar_soc_packs_sub", "Social: Packs, bajada", 2,
+         "Fotos en resoluci\u00f3n 4K con retoque incluido. Salen m\u00e1s convenientes que armar el pedido foto a foto."),
+        ("tar_soc_reco", "Social: Etiqueta recomendado", 1, "Recomendado"),
+        ("tar_soc_nota", "Social: Nota bajo los packs ({completa} {pro})", 2,
+         "\u00bfPrefieres otra cantidad? Arma tu pedido a medida: {completa} la completa y {pro} la profesional."),
+        ("tar_soc_niv_rot", "Social: Niveles, rotulo", 1, "Niveles de edici\u00f3n"),
+        ("tar_soc_niv_tit", "Social: Niveles, titulo", 1, "Qu\u00e9 lleva cada foto"),
+        ("tar_soc_niv_sub", "Social: Niveles, bajada", 2,
+         "En eventos sociales y matrimonios el protagonismo son las personas. Ambas opciones van en 4K (3.840 px)."),
+        ("tar_soc_calc_rot", "Social: Calculadora, rotulo", 1, "Calculadora"),
+        ("tar_soc_calc_tit", "Social: Calculadora, titulo", 1, "Calcula tu evento o matrimonio"),
+        ("tar_soc_calc_sub", "Social: Calculadora, bajada", 2,
+         "Indica el tipo de evento, las horas y el pack que prefieres. El bot\u00f3n de abajo me env\u00eda la cotizaci\u00f3n por WhatsApp."),
+        ("tar_soc_boton_wsp", "Social: Boton de WhatsApp", 1, "Pedir este evento"),
+        ("tar_soc_cond_rot", "Social: Condiciones, rotulo", 1, "Condiciones"),
+        ("tar_soc_cond_tit", "Social: Condiciones, titulo", 1, "Lo que siempre va incluido, y la letra chica"),
+        ("tar_soc_incl_tit", "Social: Incluido, titulo", 1, "Siempre incluido"),
+        ("tar_soc_incl", "Social: Incluido ({galeria_horas} {entrega_dias})", 5,
+         "La cobertura completa del horario acordado, sin l\u00edmite de disparos\n"
+         "Galer\u00eda completa con marca de agua dentro de {galeria_horas} horas para elegir tus fotos con calma\n"
+         "Fotos seleccionadas, editadas en resoluci\u00f3n 4K, entregadas {entrega_dias} d\u00edas h\u00e1biles tras tu selecci\u00f3n\n"
+         "B\u00fasqueda por cara con IA para invitados en la galer\u00eda de venta abierta\n"
+         "Entrega digital privada en m\u00e1xima resoluci\u00f3n"),
+        ("tar_soc_letra_tit", "Social: Letra chica, titulo", 1, "Letra chica"),
+        ("tar_soc_letra", "Social: Letra chica ({hora} {hora_mat} {km})", 6,
+         "Reserva: al confirmar la fecha se pagan las horas de cobertura ({hora} en social, {hora_mat} en matrimonio); las fotos, contra entrega.\n"
+         "Si el evento se alarga: los primeros 15 minutos no se cobran. Despu\u00e9s, cada bloque de 20 minutos iniciado vale un tercio de la hora.\n"
+         "Cancelaci\u00f3n o reprogramaci\u00f3n: con 48 horas de aviso se reprograma sin costo. Con menos, se retiene el anticipo de reserva.\n"
+         "Venta abierta a invitados: si eliges venta abierta, te comprometes a avisar a los asistentes que la galer\u00eda se publicar\u00e1 para venta individual con b\u00fasqueda por rostro. Quien no quiera aparecer me lo pide y saco sus fotos de la venta.\n"
+         "Traslado y estacionamiento: {km} por km ida y vuelta; estacionamiento seg\u00fan el lugar."),
     )),
     ("Como recibis tus fotos", (
         ("como_titulo", "Titulo (vacio = no se muestra la seccion)", 1,
@@ -2026,9 +2080,9 @@ def tarifas_publicas():
     """Cuanto cobro y que entrego, con una calculadora que termina en WhatsApp.
     Los precios salen de tarifas() y van netos: la boleta se conversa aparte."""
     return _viz(TARIFAS_PUB, seccion="tarifas", indexar=True,
-                titulo="Tarifas para ligas \u00b7 rb.fotos",
-                desc="Cobertura de ligas y torneos: packs de fotos editadas, "
-                     "precios y calculadora.",
+                titulo="Tarifas para ligas, eventos y matrimonios \u00b7 rb.fotos",
+                desc="Cobertura de ligas deportivas, eventos, cumpleaños y matrimonios: packs de fotos editadas en 4K, "
+                     "precios y calculadora a WhatsApp.",
                 tarifas=tarifas(), redondo=lambda n, a=1: int(round(n / a) * a))
 
 
@@ -6578,11 +6632,25 @@ TARIFAS_PUB = BARRA + """<main class="viz">
   .tf-res{position:static}
 }
 @media (max-width:420px){.tf-tres{grid-template-columns:1fr 1fr}}
+.tf-secciones-nav{display:flex;gap:.75rem;margin:1.6rem 0 2rem;flex-wrap:wrap}
+.tf-sec-btn{display:inline-flex;align-items:center;gap:.5rem;padding:.65rem 1.1rem;background:var(--panel);
+  border:1px solid var(--linea2);border-radius:2px;color:var(--cal);font-size:.95rem;font-weight:500;
+  text-decoration:none;transition:border-color .2s,background .2s}
+.tf-sec-btn:hover{border-color:var(--cancha);color:var(--cancha)}
+.tf-sec-btn.on{border-color:var(--cancha);background:rgba(198,240,74,.08)}
+.tf-separador{border:0;border-top:1px solid var(--linea2);margin:4.5rem 0 3.5rem}
+.tfs-si{color:var(--cancha);font-weight:700;font-size:1.4rem;line-height:1}
 </style>
 {% set R = tarifas %}
 {% set F = R.foto %}
 {% set L = R.packs.liga %}
 
+<nav class="tf-secciones-nav" aria-label="Secciones de tarifas">
+  <a href="#deportes" class="tf-sec-btn on">⚽ Ligas y deportes</a>
+  <a href="#social" class="tf-sec-btn">🎉 Cumpleaños, eventos y matrimonios</a>
+</nav>
+
+<div id="deportes">
 <section class="bloque" style="max-width:52rem">
 {% if T.tar_rotulo %}<p class="rotulo">{{ T.tar_rotulo }}</p>{% endif %}
 <h1 class="tit">{{ T.tar_titulo }}</h1>
@@ -6737,6 +6805,165 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 </ul></div>
 </div>
 </section>
+</div>
+
+{% set S = R.social %}
+{% set FS = S.foto %}
+{% set SC = S.packs.celebracion %}
+
+<hr class="tf-separador" id="social">
+
+<div class="tf-seccion-social">
+<section class="bloque" style="max-width:52rem">
+{% if T.tar_soc_rotulo %}<p class="rotulo">{{ T.tar_soc_rotulo }}</p>{% endif %}
+<h2 class="tit" style="font-size:clamp(1.7rem,3.8vw,2.3rem);margin:.4rem 0 0">{{ T.tar_soc_titulo }}</h2>
+<p class="bajada">{{ T.tar_soc_bajada }}</p>
+{% if T.tar_soc_ancla %}<p class="tf-ancla">{{ tx('tar_soc_ancla', horas=SC.horas, pack=SC.nombre, fotos=SC.q|sum,
+  total=fuerte(pesos(SC.horas * S.hora + SC.precio))) }}</p>{% endif %}
+<p class="botones"><a class="wsp" href="#calcular-social">{{ T.tar_soc_boton_calc }}</a>
+<a class="wsp hueco" href="#packs-social">{{ T.tar_soc_boton_packs }}</a></p>
+</section>
+
+<section class="bloque">
+<div class="como">
+<h2>{{ T.tar_soc_como_tit }}</h2>
+<div class="paso"><b>{{ T.tar_soc_paso1_t }}</b><p>{{ tx('tar_soc_paso1', hora=pesos(S.hora),
+  hora_mat=pesos(S.hora_matrimonio)) }}</p></div>
+<div class="paso"><b>{{ T.tar_soc_paso2_t }}</b><p>{{ T.tar_soc_paso2 }}</p></div>
+<div class="paso"><b>{{ T.tar_soc_paso3_t }}</b><p>{{ T.tar_soc_paso3 }}</p></div>
+</div>
+</section>
+
+<section class="bloque" id="packs-social">
+{% if T.tar_soc_packs_rot %}<p class="rotulo">{{ T.tar_soc_packs_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_soc_packs_tit }}</h2>
+{% if T.tar_soc_packs_sub %}<p class="tf-sub">{{ T.tar_soc_packs_sub }}</p>{% endif %}
+<div class="tf-grid">
+{% for k, P in S.packs.items() %}
+{% set armado = P.q[1] * FS.completa + P.q[2] * FS.pro %}
+<div class="tf-card{{ ' reco' if P.reco }}">
+{% if P.reco and T.tar_soc_reco %}<span class="tf-tag">{{ T.tar_soc_reco }}</span>{% endif %}
+<h3>{{ P.nombre }}</h3>
+<p class="tf-precio">{{ pesos(P.precio) }}<small>{{ P.q|sum }} fotos editadas en 4K + cobertura</small></p>
+<ul class="tf-ul">
+<li><b>{{ P.q[1] }}</b> con edici&oacute;n completa (4K)</li>
+{% if P.q[2] %}<li><b>{{ P.q[2] }}</b> con edici&oacute;n profesional y retoque de rostros</li>{% endif %}
+<li>Sugerido para eventos de unas {{ P.horas }} horas</li>
+<li>Limpieza leve de piel en todas las fotos</li>
+</ul>
+<p class="tf-ahorro">Una por una: <s>{{ pesos(redondo(armado, 100)) }}</s> &middot;
+ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
+</div>
+{% endfor %}
+</div>
+{% if T.tar_soc_nota %}<p class="tf-nota">{{ tx('tar_soc_nota', completa=pesos(redondo(FS.completa, 10)),
+  pro=pesos(redondo(FS.pro, 10))) }}</p>{% endif %}
+</section>
+
+<section class="bloque">
+{% if T.tar_soc_niv_rot %}<p class="rotulo">{{ T.tar_soc_niv_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_soc_niv_tit }}</h2>
+{% if T.tar_soc_niv_sub %}<p class="tf-sub">{{ T.tar_soc_niv_sub }}</p>{% endif %}
+<div class="tf-tabla-wrap"><table class="tf-tabla">
+<thead><tr><th scope="col">Qu&eacute; se hace</th>
+{% for k in ("completa", "pro") %}<th scope="col" class="{{ 'reco' if k == 'completa' }}">
+{% if k == 'completa' and T.tar_niv_tag %}<small>{{ T.tar_niv_tag }}</small>{% endif %}
+{{ S.niveles[k].nombre.replace("Edición ", "")|capitalize }}</th>{% endfor %}</tr></thead>
+<tbody>{% for fila in S.tabla_niveles %}<tr><th scope="row">{{ fila[0] }}</th>
+{% for si in fila[1:] %}<td class="{{ 'reco' if loop.index == 1 }}">{% if si %}<span class="tfs-si" role="img" aria-label="Incluye">&#10003;</span>{% else %}<span class="tf-no" role="img" aria-label="No incluye">&mdash;</span>{% endif %}</td>{% endfor %}</tr>
+{% endfor %}
+<tr class="tf-resol"><th scope="row">Resoluci&oacute;n de entrega<small>en el borde largo de la foto</small></th>
+{% for k in ("completa", "pro") %}{% set RS = S.niveles[k].resolucion %}<td class="{{ 'reco' if k == 'completa' }}"><b>{{ RS[0] }}</b><small>{{ "{:,}".format(RS[1]).replace(",", ".") }} px</small></td>{% endfor %}</tr>
+</tbody>
+</table></div>
+</section>
+
+<section class="bloque" id="calcular-social">
+{% if T.tar_soc_calc_rot %}<p class="rotulo">{{ T.tar_soc_calc_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_soc_calc_tit }}</h2>
+{% if T.tar_soc_calc_sub %}<p class="tf-sub">{{ T.tar_soc_calc_sub }}</p>{% endif %}
+<div class="tf-calc">
+<form class="tf-form" id="tfs-form">
+  <div><label class="tf-l" for="tfs-tipo">Tipo de evento</label>
+    <select id="tfs-tipo">
+      <option value="social">🎉 Cumpleaños y eventos sociales &middot; {{ pesos(S.hora) }} / hora</option>
+      <option value="matrimonio">💍 Matrimonio &middot; {{ pesos(S.hora_matrimonio) }} / hora</option>
+    </select>
+  </div>
+  <div class="tf-dos">
+    <div><label class="tf-l" for="tfs-fecha">Fecha del evento</label>
+      <input id="tfs-fecha" type="date"></div>
+    <div class="tf-dos">
+      <div><label class="tf-l" for="tfs-ini">Hora inicio</label>
+        <input id="tfs-ini" type="time" value="14:00"></div>
+      <div><label class="tf-l" for="tfs-fin">Hora t&eacute;rmino</label>
+        <input id="tfs-fin" type="time" value="17:00"></div>
+    </div>
+  </div>
+  <div><p class="tf-ayuda" id="tfs-hinfo"></p></div>
+  <div><span class="tf-l">Packs de fotos (en 4K)</span>
+    <div class="tf-mini" role="radiogroup" aria-label="Pack de fotos sociales" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+    {% for k, P in S.packs.items() %}
+      <label class="tf-mp"><input type="radio" name="tfs-p" value="{{ k }}"{{ ' checked' if P.reco }}>
+        <i>Te lo recomiendo</i><b>{{ P.nombre }}</b><span>{{ P.q|sum }} fotos 4K</span>
+        <small>{{ P.q[1] }} completas{% if P.q[2] %} &middot; {{ P.q[2] }} profesionales{% endif %}</small>
+        <em>{{ pesos(P.precio) }}</em></label>
+    {% endfor %}
+      <label class="tf-mp"><input type="radio" name="tfs-p" value="">
+        <i>Te lo recomiendo</i><b>A tu medida</b><span>Eliges cu&aacute;ntas</span><em>por foto</em></label>
+    </div>
+  </div>
+  <div id="tfs-medida" hidden>
+    <div class="tf-dos">
+      <div><label class="tf-l" for="tfs-qc">Completas (4K) &middot; {{ pesos(FS.completa) }}</label><input id="tfs-qc" type="number" min="0" step="10" value="50" inputmode="numeric"></div>
+      <div><label class="tf-l" for="tfs-qp">Profesionales (4K) &middot; {{ pesos(FS.pro) }}</label><input id="tfs-qp" type="number" min="0" step="5" value="10" inputmode="numeric"></div>
+    </div>
+  </div>
+  <div><label class="tf-l" for="tfs-x">Venta de fotos a invitados</label>
+    <select id="tfs-x">
+      <option value="abierto">Abierta: los invitados pueden buscarse por cara y comprar sus fotos</option>
+      <option value="exclusivo">Exclusiva (+{{ R.exclusivo_pct }} % en fotos): solo t&uacute; recibes las fotos</option>
+    </select>
+    <p class="tf-ayuda">En venta abierta, la galer&iacute;a incluye reconocimiento facial por IA para que cada asistente encuentre sus fotos al instante.</p>
+  </div>
+  <div>
+    <span class="tf-l" style="display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem">Extras</span>
+    <label class="tf-chk"><input type="checkbox" id="tfs-xs"><span>Yo elijo las fotos por ti &middot; desde {{ pesos(R.seleccion[0][1]) }}<small>Seg&uacute;n cu&aacute;ntas fotos lleva tu pedido:
+      {% for cant, precio in R.seleccion %}hasta {{ cant }}, {{ pesos(precio) }}{{ " · " if not loop.last }}{% endfor %}.
+      Recibes directo la selección final editada sin revisar la galer&iacute;a.</small></span></label>
+    <div style="margin-top:.6rem"><label class="tf-l" for="tfs-km">Traslado (km de ida)</label>
+      <input id="tfs-km" type="number" min="0" step="1" value="0" placeholder="0 km" inputmode="numeric">
+      <p class="tf-ayuda">Ida y vuelta a {{ pesos(R.km) }} el km. Si es dentro de la zona urbana o conversado, déjalo en 0.</p></div>
+  </div>
+</form>
+<aside class="tf-res" aria-live="polite">
+  <span class="tf-l" style="font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo)">Total estimado</span>
+  <p class="tf-precio" id="tfs-tot">&mdash;</p>
+  <dl>
+    <dt id="tfs-dcl">Cobertura</dt><dd id="tfs-dc">&mdash;</dd>
+    <dt id="tfs-dfl">Fotos (4K)</dt><dd id="tfs-df">&mdash;</dd>
+    <dt>Extras</dt><dd id="tfs-de">&mdash;</dd>
+    <dt id="tfs-dal">Para reservar (las horas)</dt><dd id="tfs-da">&mdash;</dd>
+  </dl>
+  {% if wsp %}<a class="wsp" id="tfs-ir" href="https://wa.me/{{ wsp }}" rel="noopener">{{ T.tar_soc_boton_wsp }}</a>{% endif %}
+  <button type="button" class="wsp hueco" id="tfs-link">Copiar link para compartir</button>
+</aside>
+</div>
+</section>
+
+<section class="bloque">
+{% if T.tar_soc_cond_rot %}<p class="rotulo">{{ T.tar_soc_cond_rot }}</p>{% endif %}
+<h2 class="tf-h2">{{ T.tar_soc_cond_tit }}</h2>
+<div class="tf-cond">
+<div><h3>{{ T.tar_soc_incl_tit }}</h3><ul class="tf-ul">
+{% for l in txl('tar_soc_incl', galeria_horas=R.galeria_horas, entrega_dias=R.entrega_dias) %}<li>{{ l }}</li>{% endfor %}
+</ul></div>
+<div><h3>{{ T.tar_soc_letra_tit }}</h3><ul class="tf-ul">
+{% for l in txl('tar_soc_letra', negrita=True, hora=pesos(S.hora), hora_mat=pesos(S.hora_matrimonio), km=pesos(R.km)) %}<li>{{ l }}</li>{% endfor %}
+</ul></div>
+</div>
+</section>
+</div>
 
 <script>
 (function(){
@@ -6913,6 +7140,140 @@ $("tf-link").addEventListener("click", async () => {
   setTimeout(() => { b.textContent = "Copiar link para compartir"; }, 1800);
 });
 calcular();
+})();
+</script>
+
+<script>
+(function(){
+const R = {{ tarifas|tojson }}, S = R.social, WSP = {{ wsp|tojson }};
+const $ = id => document.getElementById(id);
+const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
+const b100 = n => Math.round(n);
+function tramo(n, tr){
+  if(n <= 0 || !tr.length) return 0;
+  for(const [cant, precio] of tr) if(n <= cant) return precio;
+  const [cant, precio] = tr[tr.length - 1];
+  return precio + Math.round((n - cant) * precio / cant / 100) * 100;
+}
+const n0 = (id, min) => Math.max(min || 0, parseFloat($(id).value) || 0);
+const minutos = t => { if(!t) return null; const [a, b] = t.split(":").map(Number); return a * 60 + b; };
+const radios = [...document.querySelectorAll('input[name="tfs-p"]')];
+let aMano = false;
+radios.forEach(r => r.addEventListener("input", () => { aMano = true; }));
+
+function calcularSoc(){
+  const esMat = $("tfs-tipo").value === "matrimonio";
+  const valorH = esMat ? S.hora_matrimonio : S.hora;
+  const a = minutos($("tfs-ini").value), b0 = minutos($("tfs-fin").value);
+  let h = 0;
+  if(a !== null && b0 !== null){
+    let d = b0 - a;
+    if(d <= 0) d += 1440;
+    h = d / 60;
+  }
+  const cob = h * valorH;
+  const hTxt = (Math.round(h * 100) / 100).toLocaleString("es-CL");
+  $("tfs-hinfo").textContent = !h ? "Indica la hora de inicio y término del evento."
+    : hTxt + " h de cobertura a " + pesos(valorH) + " la hora" + (esMat ? " (tarifa de matrimonios)" : " (cumpleaños y eventos sociales)");
+
+  const P = S.packs[(radios.find(r => r.checked) || {}).value];
+  $("tfs-medida").hidden = !!P;
+  radios.forEach(r => {
+    const card = r.closest(".tf-mp");
+    if(card) card.classList.toggle("on", r.checked);
+  });
+
+  const q = P ? P.q : [0, Math.round(n0("tfs-qc")), Math.round(n0("tfs-qp"))];
+  const n = q[1] + q[2];
+  let fotos = P ? P.precio : q[1] * S.foto.completa + q[2] * S.foto.pro;
+  const excl = $("tfs-x").value === "exclusivo";
+  if(excl) fotos *= 1 + R.exclusivo_pct / 100;
+
+  let extras = 0; const xs = [];
+  if($("tfs-xs").checked){
+    const pSel = tramo(n, R.seleccion);
+    extras += pSel;
+    xs.push("selección personal");
+  }
+  const km = n0("tfs-km");
+  if(km > 0){
+    const pKm = km * 2 * R.km;
+    extras += pKm;
+    xs.push("traslado " + km + " km ida y vuelta");
+  }
+
+  const total = b100(cob + fotos + extras);
+  $("tfs-tot").textContent = pesos(total);
+  $("tfs-dcl").textContent = h ? "Cobertura (" + hTxt + " h × " + pesos(valorH) + ")" : "Cobertura";
+  $("tfs-dc").textContent = pesos(b100(cob));
+  $("tfs-dfl").textContent = "Fotos (" + n + " en 4K)";
+  $("tfs-df").textContent = pesos(b100(fotos));
+  $("tfs-de").textContent = extras ? pesos(b100(extras)) : "—";
+  $("tfs-da").textContent = pesos(cob);
+
+  const f = $("tfs-fecha").value;
+  const fTxt = f ? new Date(f + "T12:00").toLocaleDateString("es-CL",
+    {weekday: "long", day: "numeric", month: "long"}).replace(",", "") : "";
+  const ir = $("tfs-ir");
+  if(ir){
+    const tipoTxt = esMat ? "un matrimonio" : "un cumpleaños / evento social";
+    const msg = "Hola Renzo, quiero cotizar " + tipoTxt
+      + (fTxt ? " para el " + fTxt : "")
+      + ": de " + $("tfs-ini").value + " a " + $("tfs-fin").value
+      + " (" + hTxt + " h), "
+      + (P ? "pack " + P.nombre + " (" + n + " fotos en 4K)"
+           : "fotos a mi medida (" + q[1] + " completas, " + q[2] + " profesionales en 4K)")
+      + ", venta a invitados " + (excl ? "exclusiva" : "abierta con búsqueda por cara")
+      + (xs.length ? ", con " + xs.join(", ") : "")
+      + ". Total estimado " + pesos(total)
+      + " (anticipo para reservar: " + pesos(cob) + ")"
+      + ". Detalle: " + linkCotizacionSoc();
+    ir.href = "https://wa.me/" + WSP + "?text=" + encodeURIComponent(msg);
+  }
+}
+
+$("tfs-form").addEventListener("submit", e => e.preventDefault());
+$("tfs-form").addEventListener("input", calcularSoc);
+$("tfs-form").addEventListener("change", calcularSoc);
+
+function linkCotizacionSoc(){
+  const q = new URLSearchParams();
+  q.set("stipo", $("tfs-tipo").value);
+  q.set("sini", $("tfs-ini").value);
+  q.set("sfin", $("tfs-fin").value);
+  const pk = (radios.find(r => r.checked) || {}).value || "";
+  q.set("sp", pk);
+  if(!pk){ q.set("sqc", $("tfs-qc").value); q.set("sqp", $("tfs-qp").value); }
+  if($("tfs-x").value !== "abierto") q.set("sx", $("tfs-x").value);
+  if($("tfs-xs").checked) q.set("sxs", "1");
+  if(n0("tfs-km") > 0) q.set("skm", $("tfs-km").value);
+  if($("tfs-fecha").value) q.set("sf", $("tfs-fecha").value);
+  return location.origin + "/tarifas?" + q + "#calcular-social";
+}
+
+const q0 = new URLSearchParams(location.search);
+if(q0.has("stipo") || q0.has("sini") || q0.has("sp")){
+  if(q0.has("stipo")) $("tfs-tipo").value = q0.get("stipo");
+  if(q0.has("sini")) $("tfs-ini").value = q0.get("sini");
+  if(q0.has("sfin")) $("tfs-fin").value = q0.get("sfin");
+  if(q0.has("sf")) $("tfs-fecha").value = q0.get("sf");
+  if(q0.has("sx")) $("tfs-x").value = q0.get("sx");
+  if(q0.has("sxs")) $("tfs-xs").checked = true;
+  if(q0.has("skm")) $("tfs-km").value = q0.get("skm");
+  if(q0.has("sqc")) $("tfs-qc").value = q0.get("sqc");
+  if(q0.has("sqp")) $("tfs-qp").value = q0.get("sqp");
+  const r = radios.find(r => r.value === q0.get("sp"));
+  if(r){ r.checked = true; aMano = true; }
+}
+
+$("tfs-link").addEventListener("click", async () => {
+  const u = linkCotizacionSoc(), b = $("tfs-link");
+  try{ await navigator.clipboard.writeText(u); b.textContent = "Link copiado"; }
+  catch(_){ prompt("Copia este link:", u); }
+  setTimeout(() => { b.textContent = "Copiar link para compartir"; }, 1800);
+});
+
+calcularSoc();
 })();
 </script>
 """ + PIE + """</main>"""
@@ -8393,6 +8754,11 @@ def tarifas():
     t["tabla_niveles"] = [
         [it] + [j >= i for j in range(len(orden))]
         for i, k in enumerate(orden) for it in t["niveles"][k]["items"]
+        if not it.startswith("Todo lo de")]
+    orden_soc = ("completa", "pro")
+    t["social"]["tabla_niveles"] = [
+        [it] + [j >= i for j in range(len(orden_soc))]
+        for i, k in enumerate(orden_soc) for it in t["social"]["niveles"][k]["items"]
         if not it.startswith("Todo lo de")]
     r = t["redondeo_pack"] or 1
     for sub in (t, t["social"]):        # ligas y eventos sociales, misma regla
@@ -11610,7 +11976,11 @@ def test():
         # la tabla de niveles: cada nivel suma los de antes (5 basicas en los
         # tres, 3 completas en dos, 4 profesionales en uno) = 25 checks
         assert tar.count('class="tf-si"') == 25, tar.count('class="tf-si"')
-        assert "2.560 px" in tar and tar.count("3.840 px") == 2, "faltan las resoluciones"
+        assert "2.560 px" in tar and tar.count("3.840 px") == 5, "faltan las resoluciones"
+        assert "$15.000" in tar and "$20.000" in tar, "faltan valores de hora social/matrimonio"
+        assert "Celebración" in tar and "Íntimo" in tar, "faltan packs sociales"
+        assert tar.count('class="tfs-si"') == 24, "fallaron checks de tabla social"
+        assert 'id="tfs-form"' in tar and 'id="tfs-tot"' in tar, "falta calculadora social"
         assert "Todo lo de" not in tar.split('class="tf-tabla"')[1].split("</table>")[0]
         # la calculadora: un pack chico por pack, mas el de a tu medida
         assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
