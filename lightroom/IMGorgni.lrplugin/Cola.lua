@@ -17,6 +17,8 @@ Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, camp
   sin tocar y con 0 estrellas: ese es el filtro para pasarle despues la macro del boton "Automatico".
 
 - receta: .lua de edicion_ig.py con ajustes y mascaras de IA por foto (ver cargar_receta). Opcional.
+- Archivos por trabajo junto a la cola, opcionales: color_<id>.tsv (modelo de color) y ajustes_<id>.tsv
+  (ruta TAB clave=valor...: la reduccion de ruido de la completa). Se aplican encima del preset.
 - previas: carpeta donde exportar JPEG para revisar; lado: lado largo en px (vacio = 1600, 0 = resolucion
   completa calidad 100). Antes de exportar se actualizan los ajustes de IA (actualizar_ia).
 
@@ -274,14 +276,18 @@ end
 -- 14/10/2026: al exportar, Lightroom frenaba con "Actualizaciones de IA recomendadas" (mascaras y ruido
 -- IA recien puestos) hasta que alguien apretaba Exportar. photo:updateAISettings() (SDK 13.3) lo hace
 -- antes; en un bloque de escritura propio por foto: en el mismo bloque que los ajustes no recalcula.
+-- 22/10/2026: solo las que tienen mascaras. Sin IA no hay nada que actualizar y aun asi tardaba: la prueba
+-- de ruido de la F4 (36 fotos, sin mascaras) se quedo mas de 25 min aca.
 local function actualizar_ia(catalogo, fotos)
 	local bien, mal = 0, 0
 	for _, p in ipairs(fotos) do
-		local ok = LrTasks.pcall(function()
-			catalogo:withWriteAccessDo("IMGorgni: actualizar IA", function() p:updateAISettings() end,
-				{ timeout = 300 })
-		end)
-		if ok then bien = bien + 1 else mal = mal + 1 end
+		if tiene_mascaras(p) then
+			local ok = LrTasks.pcall(function()
+				catalogo:withWriteAccessDo("IMGorgni: actualizar IA", function() p:updateAISettings() end,
+					{ timeout = 300 })
+			end)
+			if ok then bien = bien + 1 else mal = mal + 1 end
+		end
 	end
 	log("ajustes de IA actualizados: " .. bien .. " ok, " .. mal .. " con error")
 end
@@ -352,7 +358,34 @@ local function trabajo(catalogo, c)
 		end, { timeout = 600 })
 		detalle = detalle .. ", color del modelo en " .. n
 	end
-	local receta = (c[9] or "") ~= "" and cargar_receta(c[9]) or nil
+	-- Ajustes por foto (27/10/2026): ajustes_<id>.tsv = ruta TAB clave=valor TAB clave=valor...
+	-- Lo usa la reduccion de ruido manual de la completa (ruido_completa.py), que cambia foto a foto.
+	-- Sin la receta a proposito: la receta tambien recorta el borde del Denoise IA (encuadre_final).
+	local tsv_aj = BASE .. "\\ajustes_" .. id .. ".tsv"
+	if LrFileUtils.exists(tsv_aj) then
+		local por_foto = {}
+		for _, l in ipairs(lineas(tsv_aj)) do
+			local c = campos(l)
+			local a = {}
+			for i = 2, #c do
+				local k, v = c[i]:match("^([%w_]+)=(.*)$")
+				if k then a[k] = tonumber(v) or v end
+			end
+			por_foto[c[1]:lower()] = a
+		end
+		local n = 0
+		catalogo:withWriteAccessDo("IMGorgni: ajustes " .. id, function()
+			for _, p in ipairs(fotos) do
+				local a = por_foto[p:getRawMetadata("path"):lower()]
+				if a then
+					p:applyDevelopSettings(a, "Ajustes IMGorgni")
+					n = n + 1
+				end
+			end
+		end, { timeout = 600 })
+		detalle = detalle .. ", ajustes por foto en " .. n
+	end
+	local receta =(c[9] or "") ~= "" and cargar_receta(c[9]) or nil
 	if receta then -- antes de nivelar: si la receta trae el angulo de Renzo, nivelar no lo pisa
 		catalogo:withWriteAccessDo("IMGorgni: receta " .. id, function()
 			for _, p in ipairs(fotos) do

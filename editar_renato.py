@@ -1,6 +1,7 @@
 """Encola en Lightroom la seleccion de Renato de cada galeria donde apreto "Termine mi seleccion"
-(tabla seleccion_lista de la Pi). Favoritos -> "IMGorgni Basica"; EDICION COMPLETA -> "IMGorgni
-Completa base" (ruido IA) + nivelado. SIN exportar: Renzo revisa foto por foto y exporta el.
+(tabla seleccion_lista de la Pi). Favoritos -> "IMGorgni Basica"; EDICION COMPLETA -> "IMGorgni Basica"
++ nivelado + reduccion de ruido manual por foto (ruido_completa.py). SIN exportar: Renzo revisa foto por
+foto y exporta el.
 
 Hace lo mismo que el boton "Lista solicitada" del panel (solicitar_compra de galeria.py): RAW a
 <evento>/Compras/pedidos/<ID>-<lista> y entregados/<ID>-<lista>/RAW y /Export. Si el evento tiene copia local
@@ -29,7 +30,10 @@ ESPERA_MIN = 90                   # 100 RAW con presets y nivelado tardan minuto
 LOCAL = AQUI / "TrabajoFotografico"
 CATALOGO = r"C:\Fotos\otro\catalogos\Automatico\Automatico.lrcat"
 LR_EXE = r"C:\Program Files\Adobe\Adobe Lightroom Classic\Lightroom.exe"
-PRESETS = {"basicas": ("IMGorgni Basica", ""), "completas": ("IMGorgni Completa base", "si")}
+# Desde el 24/10/2026 la completa lleva ruido MANUAL por foto (ruido_por_foto); "IMGorgni Completa base"
+# traia Denoise IA, que ahora es de la profesional.
+PRESETS = {"basicas": ("IMGorgni Basica", ""), "completas": ("IMGorgni Basica", "si")}
+EV_TIPICA = 0.7  # exposicion que Renzo le dio a las completas de la F5 (mediana); sin modelo de color se usa esta
 
 # Corre en la Pi con el codigo de la galeria: mismo ID de pedido y misma copia que el boton.
 SOLICITAR = r'''
@@ -71,9 +75,12 @@ def pedido_local(p):
     ped.mkdir(parents=True, exist_ok=True)
     for sub in ("RAW", "Export"):
         (ev / "Compras" / "entregados" / p["carpeta"] / sub).mkdir(parents=True, exist_ok=True)
+    # La copia local puede venir con las carpetas de la tarjeta (RAW/110MSDCF/...): la F4 (20/10/2026)
+    # quedo con los pedidos vacios por buscar solo en RAW/.
+    locales = {f.name: f for f in (ev / "RAW").rglob("*") if f.is_file()}
     for raw in p["raws"]:
         nombre = raw.rsplit("/", 1)[1]
-        origen, destino = ev / "RAW" / nombre, ped / nombre
+        origen, destino = locales.get(nombre, ev / "RAW" / nombre), ped / nombre
         if origen.exists() and not destino.exists():
             shutil.copyfile(origen, destino.with_name(nombre + ".parcial"))
             os.replace(destino.with_name(nombre + ".parcial"), destino)
@@ -87,9 +94,10 @@ def log(*a):
 def color_modelo(jid, carpeta):
     """Temperatura, matiz y exposicion del modelo de color de Renzo (color_modelo.py) para cada RAW de la
     tanda -> _lightroom/color_<jid>.tsv, que el plugin aplica encima del preset. Solo si el modelo paso
-    la prueba (existe _color/activo); si algo falla, la tanda sigue con el preset solo."""
+    la prueba (existe _color/activo); si algo falla, la tanda sigue con el preset solo.
+    -> {ruta: exposicion predicha}, vacio sin modelo."""
     if not (AQUI / "_color" / "activo").exists():
-        return
+        return {}
     try:
         from color_modelo import predecir
         rutas = sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw")
@@ -98,8 +106,28 @@ def color_modelo(jid, carpeta):
             f"{r}\t{v['Temperature']}\t{v['Tint']}\t{v['Exposure2012']}\n" for r, v in pred.items()),
             encoding="utf-8")
         log(f"color del modelo para {len(pred)} fotos de {jid}")
+        return {str(r): float(v["Exposure2012"]) for r, v in pred.items()}
     except Exception as e:
         log(f"modelo de color fallo en {jid}, queda el preset solo: {e}")
+        return {}
+
+
+def ruido_por_foto(jid, carpeta, ev):
+    """Reduccion de ruido manual de la completa: mide cada RAW a tamaño de entrega con su exposicion
+    (ruido_completa.py) -> _lightroom/ajustes_<jid>.tsv (ruta TAB clave=valor...), que el plugin aplica
+    encima del preset. Las limpias (grupo A) no se tocan. Si falla, la tanda sigue sin reduccion."""
+    try:
+        from ruido_completa import grupo, ruido_raw
+        filas, cuenta = [], {}
+        for r in sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw"):
+            g, ajustes = grupo(ruido_raw(r, ev.get(str(r), EV_TIPICA)))
+            cuenta[g] = cuenta.get(g, 0) + 1
+            if ajustes:
+                filas.append("\t".join([str(r)] + [f"{k}={v}" for k, v in ajustes.items()]) + "\n")
+        (LR / f"ajustes_{jid}.tsv").write_text("".join(filas), encoding="utf-8")
+        log(f"ruido de {jid}: " + ", ".join(f"{g} {n}" for g, n in sorted(cuenta.items())))
+    except Exception as e:
+        log(f"medir el ruido fallo en {jid}, la completa queda sin reduccion: {e}")
 
 
 def pendientes():
@@ -175,7 +203,9 @@ def main():
         ped = pedido_local(p)
         if ped is None:  # sin copia local: Lightroom lee el pedido del NAS
             ped = raiz_trabajo() / Path(p["pedido"].split("/Galeria/Trabajo/", 1)[1])
-        color_modelo(jid, ped)
+        ev = color_modelo(jid, ped)
+        if tipo == "completas":
+            ruido_por_foto(jid, ped, ev)
         preset, nivelar = PRESETS[tipo]
         titulo = p["galeria"].replace("Seleccion ", "")
         cola += f"{jid}\t{ped}\t{preset}\t\t\t\t{titulo} - {p['codigo']} {tipo.capitalize()}\t{nivelar}\n"
