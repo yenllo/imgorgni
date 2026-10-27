@@ -8282,6 +8282,8 @@ TARIFAS_DEF = {
             "Máscaras por sujeto/fondo/campo para edición por zonas"]},
     },
     "logo": 10000, "partidos": 3000, "exclusivo_pct": 15,
+    # traslado por km (ida y vuelta): bencina ~$130/km en ciudad + TAG y desgaste
+    "km": 200,
     # seleccion personal por tramos (20/10/2026): [hasta N fotos, precio]. Se
     # cobra el tramo mas chico que cubra las fotos del pedido, con la misma
     # regla que los tramos de una galeria (precio_de)
@@ -8338,6 +8340,7 @@ CAMPOS_TARIFAS = (
         ("logo", "Logo o marco de la liga ($)"),
         ("partidos", "Separaci\u00f3n por partidos ($)"),
         ("exclusivo_pct", "Recargo venta exclusiva, sobre las fotos (%)"),
+        ("km", "Traslado: valor por km, ida y vuelta ($)"),
         )),
     ("Selecci\u00f3n personal, por tramos", tuple(
         c for i in range(len(TARIFAS_DEF["seleccion"])) for c in (
@@ -8708,8 +8711,10 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 
   <fieldset><legend>6. Traslado, boleta y pago</legend>
     <div class="cz-f">
-      <div><label>Traslado y estacionamiento ($)</label><input id="traslado" type="number" min="0" value="0">
-        <label class="cz-chk" style="margin:4px 0 0"><input type="checkbox" id="gTraslado"> como cortesía</label></div>
+      <div><label>Traslado: km de ida</label><input id="km" type="number" min="0" step="0.1" value="0" inputmode="decimal">
+        <label class="cz-chk" style="margin:4px 0 0"><input type="checkbox" id="gKm"> como cortesía</label></div>
+      <div><label>Estacionamiento ($)</label><input id="estac" type="number" min="0" value="0">
+        <label class="cz-chk" style="margin:4px 0 0"><input type="checkbox" id="gEstac"> como cortesía</label></div>
       <div><label>&nbsp;</label><label class="cz-chk" style="margin:0"><input type="checkbox" id="anticipo" checked> Anticipo: la cobertura</label></div>
       <div><label>Boleta de honorarios</label><select id="boleta"><option value="si">Sí (bruteada)</option><option value="no">No</option></select></div>
       <div><label>Retención (%)</label><input id="retencion" type="number" step="0.01" value="15.25"></div>
@@ -8774,7 +8779,7 @@ const PRESETS = {
   lista: {packFotos:"liga",durPartido:"60",simult:"{}",lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
-          gSel:false,gExcl:false,gTraslado:false,volumen:0,boleta:"si",
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false,tipoEvento:"liga"},
   // cumpleanos y eventos sociales: su hora y sus precios; sin basica, sin
@@ -8789,7 +8794,7 @@ const PRESETS = {
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
           packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
-          gSel:false,gExcl:false,gTraslado:false,volumen:0,
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,volumen:0,
           boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00",tipoEvento:"liga"}
 };
 
@@ -8970,10 +8975,14 @@ function calcular(){
           1, pSel, pSel, $("gSel").checked);
   }
 
-  const tras = num("traslado");
-  const trasG = $("gTraslado").checked;
-  if(tras) L.push({grupo:"Otros",concepto:"Traslado y estacionamiento",detalle:trasG ? "Cortesía" : "",
-                   cant:null,tL:tras,tC:trasG ? 0 : tras,cortesia:trasG});
+  // traslado: los km de ida (los de Google Maps) por 2, al valor del km de las
+  // tarifas; el estacionamiento va aparte. Los dos pueden ir de cortesia.
+  const km = num("km");
+  if(km > 0) linea("Otros","Traslado",`${km.toLocaleString("es-CL")} km de ida · ida y vuelta a ${pesos(T.km)} el km`,
+                   2*km, T.km, T.km, $("gKm").checked);
+  const est = num("estac"), estG = $("gEstac").checked;
+  if(est) L.push({grupo:"Otros",concepto:"Estacionamiento",detalle:estG ? "Cortesía" : "",
+                  cant:null,tL:est,tC:estG ? 0 : est,cortesia:estG});
 
   // Hora pasada: tolerancia 15 min, despues bloques de 20 min iniciados a 1/3 de la hora
   let pasada = null;
@@ -9179,6 +9188,7 @@ function aplicar(d){
 function cargar(){
   try{ const d = JSON.parse(localStorage.getItem(CLAVE) || "null");
     if(d){ if(d.pCuenta && !d.pNumero) d.pNumero = d.pCuenta;   // el campo viejo "Tipo y N° cuenta"
+           if(+d.traslado && !+d.estac){ d.estac = d.traslado; d.gEstac = d.gTraslado; }  // y "Traslado y estacionamiento"
            aplicar(d); return true; } }catch(_){}
   return false;
 }
@@ -11625,8 +11635,10 @@ def test():
         cz_ = c.get("/panel/cotizador").get_data(as_text=True)
         assert "const TARIFAS" in cz_ and 'id="durPartido"' in cz_ and 'id="czBloques"' in cz_
         assert 'id="canchas"' not in cz_ and 'id="descHora"' in cz_
-        assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gTraslado", "pSel", "pTipo", "pNumero"))
+        assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gKm", "gEstac", "pSel", "pTipo", "pNumero"))
         assert 'id="pCuenta"' not in cz_
+        assert 'id="km"' in cz_ and 'id="estac"' in cz_ and 'id="traslado"' not in cz_
+        assert tarifas()["km"] == 200
         # eventos sociales: su hora y sus packs, con la misma regla de packs.
         # Celebracion: 90x590 + 10x990 = 63.000, -3,5 % = 60.795 -> 61.000
         ts_ = tarifas()["social"]
