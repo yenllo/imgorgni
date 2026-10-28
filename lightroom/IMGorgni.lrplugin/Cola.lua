@@ -19,6 +19,7 @@ Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, camp
 - receta: .lua de edicion_ig.py con ajustes y mascaras de IA por foto (ver cargar_receta). Opcional.
 - Archivos por trabajo junto a la cola, opcionales: color_<id>.tsv (modelo de color) y ajustes_<id>.tsv
   (ruta TAB clave=valor...: la reduccion de ruido de la completa). Se aplican encima del preset.
+  En ajustes, rating=N pone N estrellas en vez de un ajuste de revelado.
 - previas: carpeta donde exportar JPEG para revisar; lado: lado largo en px (vacio = 1600, 0 = resolucion
   completa calidad 100). Antes de exportar se actualizan los ajustes de IA (actualizar_ia).
 
@@ -373,17 +374,24 @@ local function trabajo(catalogo, c)
 			end
 			por_foto[c[1]:lower()] = a
 		end
-		local n = 0
+		local n, con_estrellas = 0, 0
 		catalogo:withWriteAccessDo("IMGorgni: ajustes " .. id, function()
 			for _, p in ipairs(fotos) do
 				local a = por_foto[p:getRawMetadata("path"):lower()]
 				if a then
-					p:applyDevelopSettings(a, "Ajustes IMGorgni")
+					local estrellas = a.rating -- no es de revelado: va a los metadatos
+					a.rating = nil
+					if next(a) then p:applyDevelopSettings(a, "Ajustes IMGorgni") end
+					if estrellas then
+						p:setRawMetadata("rating", estrellas)
+						con_estrellas = con_estrellas + 1
+					end
 					n = n + 1
 				end
 			end
 		end, { timeout = 600 })
 		detalle = detalle .. ", ajustes por foto en " .. n
+		if con_estrellas > 0 then detalle = detalle .. ", estrellas en " .. con_estrellas end
 	end
 	local receta =(c[9] or "") ~= "" and cargar_receta(c[9]) or nil
 	if receta then -- antes de nivelar: si la receta trae el angulo de Renzo, nivelar no lo pisa

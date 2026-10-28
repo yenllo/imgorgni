@@ -115,7 +115,7 @@ def color_modelo(jid, carpeta):
 def ruido_por_foto(jid, carpeta, ev):
     """Reduccion de ruido manual de la completa: mide cada RAW a tamaño de entrega con su exposicion
     (ruido_completa.py) -> _lightroom/ajustes_<jid>.tsv (ruta TAB clave=valor...), que el plugin aplica
-    encima del preset. Las limpias (grupo A) no se tocan. Si falla, la tanda sigue sin reduccion."""
+    encima del preset. Si falla, la tanda sigue sin reduccion."""
     try:
         from ruido_completa import grupo, ruido_raw
         filas, cuenta = [], {}
