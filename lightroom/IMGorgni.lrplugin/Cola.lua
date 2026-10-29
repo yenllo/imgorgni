@@ -2,7 +2,7 @@
 
 Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, campos separados por TAB:
 
-	id	origen	preset_revelado	preset_exportacion	destino	marca_de_agua	coleccion	nivelar	receta	previas	lado
+	id	origen	preset_revelado	preset_exportacion	destino	marca_de_agua	coleccion	nivelar	receta	previas	lado	catalogo
 
 - origen: una carpeta (se importan todas sus fotos, recursivo) o un .txt con una ruta por linea.
 - preset_revelado: nombre del preset de Revelar a aplicar ("IMGorgni Basica"...). Vacio = no tocar
@@ -18,10 +18,12 @@ Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, camp
 
 - receta: .lua de edicion_ig.py con ajustes y mascaras de IA por foto (ver cargar_receta). Opcional.
 - Archivos por trabajo junto a la cola, opcionales: color_<id>.tsv (modelo de color) y ajustes_<id>.tsv
-  (ruta TAB clave=valor...: la reduccion de ruido de la completa). Se aplican encima del preset.
-  En ajustes, rating=N pone N estrellas en vez de un ajuste de revelado.
+  (ruta TAB clave=valor...). Se aplican encima del preset. En ajustes, rating=N pone N estrellas y
+  preset=Nombre aplica ese preset a esa foto (el Denoise de la completa, por escalon).
 - previas: carpeta donde exportar JPEG para revisar; lado: lado largo en px (vacio = 1600, 0 = resolucion
   completa calidad 100). Antes de exportar se actualizan los ajustes de IA (actualizar_ia).
+- catalogo: parte del nombre del catalogo donde corre ("Automatico"). Vacio = cualquiera. Con otro abierto
+  el trabajo queda pendiente para cuando se abra el correcto.
 
 Lo terminado queda en hechos.tsv (id, ok|error, detalle, cuando): un trabajo "ok" no se repite; uno
 con error se reintenta en la proxima corrida. Detalle en plugin.log. Al terminar escribe fin.txt, que
@@ -360,9 +362,10 @@ local function trabajo(catalogo, c)
 		detalle = detalle .. ", color del modelo en " .. n
 	end
 	-- Ajustes por foto (27/10/2026): ajustes_<id>.tsv = ruta TAB clave=valor TAB clave=valor...
-	-- Lo usa la reduccion de ruido manual de la completa (ruido_completa.py), que cambia foto a foto.
-	-- Sin la receta a proposito: la receta tambien recorta el borde del Denoise IA (encuadre_final).
+	-- preset=Nombre aplica ese preset de Revelar a esa foto: asi va el Denoise de la completa, por escalon
+	-- segun su ruido (ruido_completa.py, 28/10/2026). rating=N pone estrellas. El resto, applyDevelopSettings.
 	local tsv_aj = BASE .. "\\ajustes_" .. id .. ".tsv"
+	local con_denoise = {}
 	if LrFileUtils.exists(tsv_aj) then
 		local por_foto = {}
 		for _, l in ipairs(lineas(tsv_aj)) do
@@ -370,20 +373,33 @@ local function trabajo(catalogo, c)
 			local a = {}
 			for i = 2, #c do
 				local k, v = c[i]:match("^([%w_]+)=(.*)$")
-				if k then a[k] = tonumber(v) or v end
+				if k then
+					if v == "true" then a[k] = true elseif v == "false" then a[k] = false else a[k] = tonumber(v) or v end
+				end
 			end
 			por_foto[c[1]:lower()] = a
+		end
+		local presets = {}
+		for _, a in pairs(por_foto) do
+			if a.preset and not presets[a.preset] then
+				presets[a.preset] = preset_revelado(a.preset) or error("no existe el preset de revelado '" .. a.preset .. "'")
+			end
 		end
 		local n, con_estrellas = 0, 0
 		catalogo:withWriteAccessDo("IMGorgni: ajustes " .. id, function()
 			for _, p in ipairs(fotos) do
 				local a = por_foto[p:getRawMetadata("path"):lower()]
 				if a then
-					local estrellas = a.rating -- no es de revelado: va a los metadatos
-					a.rating = nil
+					local estrellas, nombre = a.rating, a.preset -- no son ajustes de revelado sueltos
+					a.rating, a.preset = nil, nil
+					if nombre then
+						p:applyDevelopPreset(presets[nombre], _PLUGIN, true) -- true: actualiza la IA (Denoise)
+						if nombre:find("Denoise") then con_denoise[#con_denoise + 1] = p end
+					end
 					if next(a) then p:applyDevelopSettings(a, "Ajustes IMGorgni") end
 					if estrellas then
-						p:setRawMetadata("rating", estrellas)
+						-- 0 no es valido ("Invalid rating: 0", 28/10/2026): sin estrellas es nil
+						p:setRawMetadata("rating", estrellas ~= 0 and estrellas or nil)
 						con_estrellas = con_estrellas + 1
 					end
 					n = n + 1
@@ -392,6 +408,7 @@ local function trabajo(catalogo, c)
 		end, { timeout = 600 })
 		detalle = detalle .. ", ajustes por foto en " .. n
 		if con_estrellas > 0 then detalle = detalle .. ", estrellas en " .. con_estrellas end
+		if #con_denoise > 0 then detalle = detalle .. ", Denoise en " .. #con_denoise end
 	end
 	local receta =(c[9] or "") ~= "" and cargar_receta(c[9]) or nil
 	if receta then -- antes de nivelar: si la receta trae el angulo de Renzo, nivelar no lo pisa
@@ -403,7 +420,13 @@ local function trabajo(catalogo, c)
 		end, { timeout = 600 })
 	end
 	if con_nivelado then detalle = detalle .. ", " .. nivelar(catalogo, fotos, id) .. " niveladas" end
-	if receta then detalle = detalle .. ", encuadre 3:2 en " .. encuadre_final(catalogo, fotos) end
+	-- el borde derecho es por la franja del Denoise del preset: sin preset no hay franja y el encuadre de
+	-- Renzo (ya nivelado) queda como esta (28/10/2026)
+	if receta and preset then detalle = detalle .. ", encuadre 3:2 en " .. encuadre_final(catalogo, fotos) end
+	-- el Denoise por foto tambien deja la franja del borde derecho: se recorta igual, despues del nivelado
+	if not receta and #con_denoise > 0 then
+		detalle = detalle .. ", borde del Denoise recortado en " .. encuadre_final(catalogo, con_denoise)
+	end
 	if receta then
 		local m = copiar_mascaras(catalogo, fotos, receta)
 		if m > 0 then detalle = detalle .. ", mascaras copiadas en " .. m end
@@ -444,11 +467,15 @@ end
 function M.procesar()
 	LrFileUtils.createAllDirectories(BASE)
 	local catalogo = LrApplication.activeCatalog()
+	local abierto = (catalogo:getPath() or ""):lower()
 	local hechos = terminados()
 	local n = 0
 	for _, linea in ipairs(lineas(COLA)) do
 		local c = campos(linea)
-		if c[1] ~= "" and not hechos[c[1]] then
+		-- 12: catalogo donde debe correr ("Automatico", "LigaExScuola"). Con otro abierto queda pendiente:
+		-- el 28/10/2026 convivian en la cola un trabajo para el catalogo de Renzo y otro que lo habria pisado.
+		local otro = (c[12] or "") ~= "" and not abierto:find(c[12]:lower(), 1, true)
+		if c[1] ~= "" and not hechos[c[1]] and not otro then
 			log("inicio " .. c[1])
 			local ok, res = LrTasks.pcall(trabajo, catalogo, c)
 			local detalle = tostring(res):gsub("[\t\r\n]", " ")

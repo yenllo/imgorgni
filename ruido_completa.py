@@ -1,14 +1,16 @@
-"""Reduccion de ruido MANUAL de la edicion completa, por foto, segun el ruido medido a tamaño de entrega.
+"""Reduccion de ruido de la edicion completa, por foto, segun el ruido medido a tamaño de entrega.
 
-Desde el 24/10/2026 la completa lleva reduccion manual (el Denoise IA es de la profesional). Una sola
-receta para todas no sirve: en la F5 las completas iban de ISO 200 limpio a ISO 8000 en modo APS-C, que al
-mismo ISO tiene ~1,5x el ruido del cuadro completo porque se amplia mas. Reducir donde no hay ruido solo
-ablanda la foto (lo que Renzo vio "plastico").
+28/10/2026: la completa lleva el Denoise IA de Lightroom con TOPE 30, dosificado por foto (la profesional usa
+0-100). La reduccion manual se descarto: editando la F5 Renzo vio que perdia demasiado detalle. Una sola cantidad
+para todas no sirve: en la F5 las completas iban de ISO 200 limpio a ISO 8000 en modo APS-C, que al mismo ISO
+tiene ~1,5x el ruido del cuadro completo porque se amplia mas.
 
 El ruido se mide como lo vera el cliente: RAW revelado sin reduccion, con la exposicion que lleva la foto,
-llevado a 3.840 px (el ancho de la completa), en las zonas lisas de sombras y medios tonos.
+llevado a 3.840 px (el ancho de la completa), en las zonas lisas de sombras y medios tonos. La cantidad va en un
+preset de Lightroom por escalon ("IMGorgni Denoise 10/20/30", solo "Quitar ruido"): Lightroom guarda la cantidad
+dentro de un bloque codificado y no se puede escribir directo.
 
-    python ruido_completa.py <carpeta> [--ev 0.6]   # grupo y ajustes de cada RAW
+    python ruido_completa.py <carpeta> [--ev 0.6]   # grupo y preset de cada RAW
     python ruido_completa.py                        # self-check
 """
 import sys
@@ -19,26 +21,15 @@ import numpy as np
 
 ANCHO_ENTREGA = 3840
 
-# (ruido minimo, grupo, ajustes de Lightroom). Grupos medidos con las 50 completas de la F5 (27/10/2026):
+# (ruido minimo, grupo, preset de Denoise). Grupos medidos con las 50 completas de la F5 (27/10/2026):
 # A ≤1,3 ISO 200-400 / B 1,9-3,0 ISO 500-1250 / C 3,6-5,5 ISO 6400-8000 FF / D 6,3-8,1 ISO 8000 APS-C.
-# Fuerza calibrada contra lo que Renzo entregaba con Denoise IA (completas de la F4, a 3.840 px): una primera
-# version (luminancia 0/15/25/35) le quedo corta "ahora que las veo"; con esta el ruido iguala la entrega
-# vieja (FF ISO alto 4,3 vs 4,1; ISO bajo 1,3 vs 1,0) y las caras se ven bien a 100 %. Detalle 55-65 y
-# mascara de enfoque alta para no perder bordes ni afilar el grano; grano leve en D. Mismos valores que los
-# presets "IMGorgni Ruido A/B/C/D".
+# Tope 30 para la completa (Renzo, 28/10/2026); antes entregaba ~50 en todas. En DSC02453 (D) el 30 queda limpio
+# y conserva la textura de cara y pelo.
 GRUPOS = [
-    (5.8, "D", dict(LuminanceSmoothing=55, LuminanceNoiseReductionDetail=65, LuminanceNoiseReductionContrast=20,
-                    ColorNoiseReduction=50, ColorNoiseReductionDetail=50, ColorNoiseReductionSmoothness=65,
-                    SharpenEdgeMasking=70, GrainAmount=10, GrainSize=15, GrainFrequency=50)),
-    (3.2, "C", dict(LuminanceSmoothing=45, LuminanceNoiseReductionDetail=60, LuminanceNoiseReductionContrast=15,
-                    ColorNoiseReduction=40, ColorNoiseReductionDetail=50, ColorNoiseReductionSmoothness=60,
-                    SharpenEdgeMasking=60)),
-    (1.5, "B", dict(LuminanceSmoothing=30, LuminanceNoiseReductionDetail=55, LuminanceNoiseReductionContrast=10,
-                    ColorNoiseReduction=35, ColorNoiseReductionDetail=50, ColorNoiseReductionSmoothness=55,
-                    SharpenEdgeMasking=45)),
-    (0.0, "A", dict(LuminanceSmoothing=15, LuminanceNoiseReductionDetail=55, LuminanceNoiseReductionContrast=0,
-                    ColorNoiseReduction=25, ColorNoiseReductionDetail=50, ColorNoiseReductionSmoothness=50,
-                    SharpenEdgeMasking=35)),
+    (5.8, "D", "IMGorgni Denoise 30"),
+    (3.2, "C", "IMGorgni Denoise 30"),
+    (1.5, "B", "IMGorgni Denoise 20"),
+    (0.0, "A", "IMGorgni Denoise 10"),
 ]
 
 
@@ -68,8 +59,8 @@ def ruido_raw(ruta, ev):
 
 
 def grupo(ruido):
-    """-> (grupo, ajustes). Sin medicion (foto sin zonas lisas): grupo A, la reduccion minima."""
-    return next((g, dict(a)) for minimo, g, a in GRUPOS if (ruido or 0.0) >= minimo)
+    """-> (grupo, preset de Denoise). Sin medicion (foto sin zonas lisas): grupo A, la reduccion minima."""
+    return next((g, p) for minimo, g, p in GRUPOS if (ruido or 0.0) >= minimo)
 
 
 def _prueba():
@@ -80,8 +71,9 @@ def _prueba():
         assert abs(medido - sigma) < 0.25 * sigma + 0.3, (sigma, medido)
         assert grupo(medido)[0] == esperado, (sigma, medido, grupo(medido)[0])
     assert grupo(None)[0] == "A"  # sin medicion: lo minimo
-    assert [grupo(n)[1]["LuminanceSmoothing"] for n in (1, 2, 4, 7)] == [15, 30, 45, 55]  # mas ruido, mas reduccion
-    print("ruido_completa: OK (ruido medido ~ sigma, grupos A-D, sin medicion va al minimo)")
+    cantidades = [int(grupo(n)[1].rsplit(" ", 1)[1]) for n in (1, 2, 4, 7)]
+    assert cantidades == sorted(cantidades) and max(cantidades) <= 30, cantidades  # mas ruido, mas; tope 30
+    print("ruido_completa: OK (ruido medido ~ sigma, grupos A-D, tope 30, sin medicion va al minimo)")
 
 
 if __name__ == "__main__":

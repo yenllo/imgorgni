@@ -1,6 +1,7 @@
 r"""Edicion completa automatica para Instagram, en Lightroom (14/10/2026).
 
     python edicion_ig.py <carpeta con los RAW> <id del trabajo> [--version N] [--abrir]
+        [--sin-denoise] [--sin-nivelar] [--sin-previas] [--fecha-catalogo "F5 - 24-10-2026"] [--coleccion X]
 
 Arma una RECETA por foto y la deja en la cola del plugin (Cola.lua), que la aplica en el catalogo
 Automatico y exporta vistas previas de 1.600 px a _lightroom\previas\<id>\ para revisarlas.
@@ -56,6 +57,14 @@ def ediciones_de_renzo(fecha):
     Lee una copia, nunca el original. Los -999999 (automatico sin calcular) no cuentan como valor."""
     copia = AQUI / "_color" / "liga_receta.lrcat"
     copia.write_bytes(CATALOGO.read_bytes())
+    # Con Lightroom abierto lo ultimo editado vive en el -wal: sin el, la receta leia la edicion de antes
+    # (28/10/2026: el nivelado que Renzo acababa de hacer no aparecia).
+    for ext in ("-wal", "-shm"):
+        origen, destino = Path(str(CATALOGO) + ext), Path(str(copia) + ext)
+        if origen.exists():
+            destino.write_bytes(origen.read_bytes())
+        elif destino.exists():
+            destino.unlink()
     c = sqlite3.connect(copia)
     q = """SELECT f.baseName, r.absolutePath || fo.pathFromRoot, s.text FROM Adobe_imageDevelopSettings s
            JOIN Adobe_images i ON i.id_local = s.image JOIN AgLibraryFile f ON f.id_local = i.rootFile
@@ -132,6 +141,8 @@ def receta(carpeta, limpiar=False, fecha_catalogo=None):
             base, de = dict(TIPICOS, **{"WhiteBalance": "Custom"}, **modelo[str(ruta)]), "modelo"
         aj = {k: 0 for k in BASICOS if "Adjustment" in k}   # todo el mezclador explicito: borra lo de v1/v2
         aj.update(base)
+        if any(k.startswith("Crop") for k in base):   # su nivelado/recorte: sin HasCrop no se ve en otro catalogo
+            aj["HasCrop"] = True
         if not any(k for k in base if "Adjustment" in k):
             aj.update(MEZCLADOR)
         for k in ("Temperature", "Exposure2012", "Tint"):   # lo que Renzo dejo en automatico
@@ -165,10 +176,15 @@ def main():
     datos, resumen = receta(carpeta, limpiar=version != "1", fecha_catalogo=arg("--fecha-catalogo"))
     archivo = LR / f"receta_{jid}.lua"
     archivo.write_text("return " + lua(datos) + "\n", encoding="utf-8")
-    previas = Path(arg("--salida", LR / "previas" / jid))
+    # --sin-previas: sin exportar (ni actualizar la IA, ~1 min/foto); Renzo la mira en Lightroom.
+    previas = "" if "--sin-previas" in sys.argv else Path(arg("--salida", LR / "previas" / jid))
     lado = arg("--lado", "")                        # "0" = resolucion completa
     coleccion = arg("--coleccion", f"{Path(carpeta).parent.name} Instagram (Claude)")
-    linea = f"{jid}\t{carpeta}\tIMGorgni Completa base\t\t\t\t{coleccion}\tsi\t{archivo}\t{previas}\t{lado}\n"
+    # Desde el 24/10/2026 el Denoise IA no va en la completa: --sin-denoise no aplica "IMGorgni Completa base"
+    # (la base es la edicion de Renzo de la receta). --sin-nivelar: Renzo ya nivelo y la receta trae su angulo.
+    preset = "" if "--sin-denoise" in sys.argv else "IMGorgni Completa base"
+    nivelar = "" if "--sin-nivelar" in sys.argv else "si"
+    linea = f"{jid}\t{carpeta}\t{preset}\t\t\t\t{coleccion}\t{nivelar}\t{archivo}\t{previas}\t{lado}\n"
     cola = (LR / "cola.tsv").read_text(encoding="utf-8")
     if f"\n{jid}\t" not in "\n" + cola:
         (LR / "cola.tsv").write_text(cola + linea, encoding="utf-8")

@@ -1,6 +1,7 @@
 """Encola en Lightroom la seleccion de Renato de cada galeria donde apreto "Termine mi seleccion"
 (tabla seleccion_lista de la Pi). Favoritos -> "IMGorgni Basica"; EDICION COMPLETA -> "IMGorgni Basica"
-+ nivelado + reduccion de ruido manual por foto (ruido_completa.py). SIN exportar: Renzo revisa foto por
++ su tono + Denoise IA por foto con tope 30 (ruido_completa.py); las dos con su modelo de color corregido
+por nivel y nivelado con Upright Nivel. SIN exportar: Renzo revisa foto por
 foto y exporta el.
 
 Hace lo mismo que el boton "Lista solicitada" del panel (solicitar_compra de galeria.py): RAW a
@@ -30,10 +31,23 @@ ESPERA_MIN = 90                   # 100 RAW con presets y nivelado tardan minuto
 LOCAL = AQUI / "TrabajoFotografico"
 CATALOGO = r"C:\Fotos\otro\catalogos\Automatico\Automatico.lrcat"
 LR_EXE = r"C:\Program Files\Adobe\Adobe Lightroom Classic\Lightroom.exe"
-# Desde el 24/10/2026 la completa lleva ruido MANUAL por foto (ruido_por_foto); "IMGorgni Completa base"
-# traia Denoise IA, que ahora es de la profesional.
-PRESETS = {"basicas": ("IMGorgni Basica", ""), "completas": ("IMGorgni Basica", "si")}
+# La completa lleva Denoise IA por foto con tope 30 (ajustes_por_foto, 28/10/2026); "IMGorgni Completa base"
+# traia Denoise a ~50 en todas, que ya no se entrega en la completa. El nivelado ya no es el de nivelar.py (columna
+# "si"): va Upright Nivel en ajustes_por_foto.
+PRESETS = {"basicas": ("IMGorgni Basica", ""), "completas": ("IMGorgni Basica", "")}
 EV_TIPICA = 0.7  # exposicion que Renzo le dio a las completas de la F5 (mediana); sin modelo de color se usa esta
+
+# Lo que Renzo corrige sobre el automatico, medido en la F5 contra su edicion final (28/10/2026, 110 fotos,
+# _salidas_locales/ediciones_renzo/F5_20261028). Revisar con cada fecha nueva.
+# - Encima del modelo de color: la basica la deja 0,15 EV mas oscura; la completa ~300 K mas calida (45 de 50).
+CORRECCION_COLOR = {"basicas": {"Exposure2012": -0.15}, "completas": {"Temperature": 300}}
+# - Tono de la completa: el contraste automatico es casi fijo (+6) y sus luces/sombras caen en un rango corto, asi
+#   que va su valor tipico (medianas: contraste 17, luces -77, sombras 70; luces en -75). Blancos y negros
+#   cambian con cada foto: esos los sigue poniendo el automatico.
+TONO_COMPLETA = {"Contrast2012": 17, "Highlights2012": -75, "Shadows2012": 70}
+# - Nivelado: Upright Nivel con restringir recorte, desde angulo 0. Contra su angulo final quedo a 0,41 grados de
+#   mediana y nunca se abstiene; nivelar.py daba 0,57 y no se atrevia en 1 de cada 5.
+NIVELADO = {"CropAngle": 0, "PerspectiveUpright": 2, "CropConstrainToWarp": 1}
 
 # Corre en la Pi con el codigo de la galeria: mismo ID de pedido y misma copia que el boton.
 SOLICITAR = r'''
@@ -91,17 +105,20 @@ def log(*a):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
 
 
-def color_modelo(jid, carpeta):
+def color_modelo(jid, carpeta, tipo="basicas"):
     """Temperatura, matiz y exposicion del modelo de color de Renzo (color_modelo.py) para cada RAW de la
-    tanda -> _lightroom/color_<jid>.tsv, que el plugin aplica encima del preset. Solo si el modelo paso
-    la prueba (existe _color/activo); si algo falla, la tanda sigue con el preset solo.
-    -> {ruta: exposicion predicha}, vacio sin modelo."""
+    tanda, con la correccion de su nivel (CORRECCION_COLOR) -> _lightroom/color_<jid>.tsv, que el plugin aplica
+    encima del preset. Solo si el modelo paso la prueba (existe _color/activo); si algo falla, la tanda sigue
+    con el preset solo. -> {ruta: exposicion predicha}, vacio sin modelo."""
     if not (AQUI / "_color" / "activo").exists():
         return {}
     try:
         from color_modelo import predecir
         rutas = sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw")
         pred = predecir(rutas)
+        for v in pred.values():
+            for k, d in CORRECCION_COLOR.get(tipo, {}).items():
+                v[k] = round(float(v[k]) + d, 2)
         (LR / f"color_{jid}.tsv").write_text("".join(
             f"{r}\t{v['Temperature']}\t{v['Tint']}\t{v['Exposure2012']}\n" for r, v in pred.items()),
             encoding="utf-8")
@@ -112,22 +129,26 @@ def color_modelo(jid, carpeta):
         return {}
 
 
-def ruido_por_foto(jid, carpeta, ev):
-    """Reduccion de ruido manual de la completa: mide cada RAW a tamaño de entrega con su exposicion
-    (ruido_completa.py) -> _lightroom/ajustes_<jid>.tsv (ruta TAB clave=valor...), que el plugin aplica
-    encima del preset. Si falla, la tanda sigue sin reduccion."""
-    try:
-        from ruido_completa import grupo, ruido_raw
-        filas, cuenta = [], {}
-        for r in sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw"):
-            g, ajustes = grupo(ruido_raw(r, ev.get(str(r), EV_TIPICA)))
-            cuenta[g] = cuenta.get(g, 0) + 1
-            if ajustes:
-                filas.append("\t".join([str(r)] + [f"{k}={v}" for k, v in ajustes.items()]) + "\n")
-        (LR / f"ajustes_{jid}.tsv").write_text("".join(filas), encoding="utf-8")
-        log(f"ruido de {jid}: " + ", ".join(f"{g} {n}" for g, n in sorted(cuenta.items())))
-    except Exception as e:
-        log(f"medir el ruido fallo en {jid}, la completa queda sin reduccion: {e}")
+def ajustes_por_foto(jid, carpeta, tipo, ev):
+    """-> _lightroom/ajustes_<jid>.tsv (ruta TAB clave=valor...), que el plugin aplica encima del preset y del
+    color. Todas: nivelado con Upright Nivel (NIVELADO). Completas, ademas: su tono (TONO_COMPLETA) y el Denoise
+    de su escalon (tope 30): mide cada RAW a tamaño de entrega con su exposicion (ruido_completa.py). Si medir
+    el ruido falla, la foto sigue sin reduccion."""
+    filas, cuenta = [], {}
+    for r in sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw"):
+        aj = dict(NIVELADO)
+        if tipo == "completas":
+            aj.update(TONO_COMPLETA)
+            try:
+                from ruido_completa import grupo, ruido_raw
+                aj["preset"] = grupo(ruido_raw(r, ev.get(str(r), EV_TIPICA)))[1]
+            except Exception as e:
+                log(f"medir el ruido fallo en {r.name}, queda sin reduccion: {e}")
+            cuenta[aj.get("preset", "sin Denoise")] = cuenta.get(aj.get("preset", "sin Denoise"), 0) + 1
+        filas.append("\t".join([str(r)] + [f"{k}={v}" for k, v in aj.items()]) + "\n")
+    (LR / f"ajustes_{jid}.tsv").write_text("".join(filas), encoding="utf-8")
+    log(f"ajustes de {jid}: {len(filas)} fotos con Upright Nivel"
+        + ("; " + ", ".join(f"{p} {n}" for p, n in sorted(cuenta.items())) if cuenta else ""))
 
 
 def pendientes():
@@ -203,12 +224,12 @@ def main():
         ped = pedido_local(p)
         if ped is None:  # sin copia local: Lightroom lee el pedido del NAS
             ped = raiz_trabajo() / Path(p["pedido"].split("/Galeria/Trabajo/", 1)[1])
-        ev = color_modelo(jid, ped)
-        if tipo == "completas":
-            ruido_por_foto(jid, ped, ev)
+        ev = color_modelo(jid, ped, tipo)
+        ajustes_por_foto(jid, ped, tipo, ev)
         preset, nivelar = PRESETS[tipo]
         titulo = p["galeria"].replace("Seleccion ", "")
-        cola += f"{jid}\t{ped}\t{preset}\t\t\t\t{titulo} - {p['codigo']} {tipo.capitalize()}\t{nivelar}\n"
+        # columna 12 = catalogo: solo corre en Automatico, nunca encima del catalogo de trabajo de Renzo
+        cola += f"{jid}\t{ped}\t{preset}\t\t\t\t{titulo} - {p['codigo']} {tipo.capitalize()}\t{nivelar}\t\t\t\tAutomatico\n"
         log(f"encolado {jid} ({tipo}): {len(p['raws'])} RAW en {ped}")
         nuevos += 1
     COLA.write_text(cola, encoding="utf-8")
