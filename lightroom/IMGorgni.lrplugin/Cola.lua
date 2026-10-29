@@ -185,6 +185,22 @@ local function cargar_receta(ruta)
 	return fn()
 end
 
+-- Si la foto ya trae un Denoise calculado (29/10/2026). Reaplicar un preset de Denoise mete un filtro nuevo y
+-- Lightroom vuelve a calcular la IA al exportar; mover la barra a mano no, porque mezcla el resultado ya hecho.
+-- El filtro viene en los ajustes como una tabla con Name = "Enhance" y Title ".../Filter/Title/Denoise".
+local function tiene_denoise(p)
+	local function busca(t, prof)
+		if prof > 6 then return false end
+		for _, v in pairs(t) do
+			if type(v) == "string" and (v == "Enhance" or v:find("Filter/Title/Denoise", 1, true)) then return true end
+			if type(v) == "table" and busca(v, prof + 1) then return true end
+		end
+		return false
+	end
+	local ok, hay = LrTasks.pcall(busca, p:getDevelopSettings(), 0)
+	return ok and hay
+end
+
 local function tiene_mascaras(p)
 	local m = p:getDevelopSettings().MaskGroupBasedCorrections
 	return type(m) == "table" and next(m) ~= nil -- # da 0 si no es lista: asi la v2 apilo mascaras
@@ -385,14 +401,19 @@ local function trabajo(catalogo, c)
 				presets[a.preset] = preset_revelado(a.preset) or error("no existe el preset de revelado '" .. a.preset .. "'")
 			end
 		end
-		local n, con_estrellas = 0, 0
+		local n, con_estrellas, ya_tenian = 0, 0, 0
 		catalogo:withWriteAccessDo("IMGorgni: ajustes " .. id, function()
 			for _, p in ipairs(fotos) do
 				local a = por_foto[p:getRawMetadata("path"):lower()]
 				if a then
 					local estrellas, nombre = a.rating, a.preset -- no son ajustes de revelado sueltos
 					a.rating, a.preset = nil, nil
-					if nombre then
+					if nombre and nombre:find("Denoise") and tiene_denoise(p) then
+						-- ya calculado: no se reaplica (obligaria a recalcular); se marca la cantidad que le toca
+						-- con estrellas (Denoise 10/20/30 -> 1/2/3) para que Renzo mueva la barra por grupo
+						estrellas = estrellas or math.floor((tonumber(nombre:match("(%d+)%s*$")) or 0) / 10)
+						ya_tenian = ya_tenian + 1
+					elseif nombre then
 						p:applyDevelopPreset(presets[nombre], _PLUGIN, true) -- true: actualiza la IA (Denoise)
 						if nombre:find("Denoise") then con_denoise[#con_denoise + 1] = p end
 					end
@@ -409,6 +430,7 @@ local function trabajo(catalogo, c)
 		detalle = detalle .. ", ajustes por foto en " .. n
 		if con_estrellas > 0 then detalle = detalle .. ", estrellas en " .. con_estrellas end
 		if #con_denoise > 0 then detalle = detalle .. ", Denoise en " .. #con_denoise end
+		if ya_tenian > 0 then detalle = detalle .. ", " .. ya_tenian .. " ya tenian Denoise (marcadas con estrellas, sin recalcular)" end
 	end
 	local receta =(c[9] or "") ~= "" and cargar_receta(c[9]) or nil
 	if receta then -- antes de nivelar: si la receta trae el angulo de Renzo, nivelar no lo pisa
@@ -423,8 +445,10 @@ local function trabajo(catalogo, c)
 	-- el borde derecho es por la franja del Denoise del preset: sin preset no hay franja y el encuadre de
 	-- Renzo (ya nivelado) queda como esta (28/10/2026)
 	if receta and preset then detalle = detalle .. ", encuadre 3:2 en " .. encuadre_final(catalogo, fotos) end
-	-- el Denoise por foto tambien deja la franja del borde derecho: se recorta igual, despues del nivelado
-	if not receta and #con_denoise > 0 then
+	-- el Denoise por foto tambien deja la franja del borde derecho: se recorta igual, despues del nivelado.
+	-- Solo en tandas automaticas (con preset base): sobre fotos ya terminadas por Renzo (29/10/2026, Denoise de la
+	-- F5 en su catalogo) moveria sus encuadres; ahi la franja la maneja el.
+	if not receta and preset and #con_denoise > 0 then
 		detalle = detalle .. ", borde del Denoise recortado en " .. encuadre_final(catalogo, con_denoise)
 	end
 	if receta then

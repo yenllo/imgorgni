@@ -1,6 +1,7 @@
 """Encola en Lightroom la seleccion de Renato de cada galeria donde apreto "Termine mi seleccion"
 (tabla seleccion_lista de la Pi). Favoritos -> "IMGorgni Basica"; EDICION COMPLETA -> "IMGorgni Basica"
-+ su tono + Denoise IA por foto con tope 30 (ruido_completa.py); las dos con su modelo de color corregido
++ su tono + encuadre al protagonista (encuadre_completa.py) + Denoise IA por foto con tope 30 (ruido_completa.py);
+las dos con su modelo de color corregido
 por nivel y nivelado con Upright Nivel. SIN exportar: Renzo revisa foto por
 foto y exporta el.
 
@@ -131,14 +132,17 @@ def color_modelo(jid, carpeta, tipo="basicas"):
 
 def ajustes_por_foto(jid, carpeta, tipo, ev):
     """-> _lightroom/ajustes_<jid>.tsv (ruta TAB clave=valor...), que el plugin aplica encima del preset y del
-    color. Todas: nivelado con Upright Nivel (NIVELADO). Completas, ademas: su tono (TONO_COMPLETA) y el Denoise
-    de su escalon (tope 30): mide cada RAW a tamaño de entrega con su exposicion (ruido_completa.py). Si medir
-    el ruido falla, la foto sigue sin reduccion."""
+    color. Todas: nivelado con Upright Nivel (NIVELADO). Completas, ademas: su tono (TONO_COMPLETA), el encuadre al
+    protagonista (encuadre_completa.py, sin rotar) y el Denoise de su escalon (tope 30): mide cada RAW a tamaño de
+    entrega con su exposicion (ruido_completa.py). Si medir el ruido falla, la foto sigue sin reduccion."""
+    from encuadre_completa import recorte
     filas, cuenta = [], {}
     for r in sorted(p for p in Path(carpeta).iterdir() if p.suffix.lower() == ".arw"):
         aj = dict(NIVELADO)
         if tipo == "completas":
             aj.update(TONO_COMPLETA)
+            l, d, t, b = recorte(r)
+            aj.update(CropLeft=l, CropRight=d, CropTop=t, CropBottom=b, HasCrop="true")
             try:
                 from ruido_completa import grupo, ruido_raw
                 aj["preset"] = grupo(ruido_raw(r, ev.get(str(r), EV_TIPICA)))[1]
