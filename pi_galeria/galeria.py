@@ -10381,6 +10381,15 @@ def test():
         pico = max(cm.getchannel("A").getdata())
         assert pico >= ALFA_MARCA - 6, ("marca casi invisible", ls, pico)
 
+    # calentar_ahora lo lanza con Popen y nadie le hace wait(): al terminar
+    # queda zombie, /proc/<pid> sigue existiendo y el panel decia "calentando"
+    # hasta que se reiniciaba el server (28/10/2026, Mundano). Si es hijo
+    # nuestro y ya termino, waitpid lo recoge.
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0]:
+            return False
+    except ChildProcessError:
+        pass                   # no es hijo de este proceso: decide /proc
     # con logo la marca dibuja algo distinto que sin logo, y el cache lo sabe
     a = preview(1, str(orig), MARCAS[0])
     b = preview(1, str(orig), MARCAS[0], logos=("liga.png",))
@@ -10988,6 +10997,10 @@ def test():
         d = cx.execute("SELECT cliente.email, descarga.foto_id, descarga.cual "
                        "FROM descarga JOIN cliente ON cliente.id = descarga.cliente_id "
                        "WHERE descarga.foto_id = ?", (id_uno,)).fetchall()
+    hijo = subprocess.Popen(["true"])                        # termina y queda zombie
+    _lock_calentando("ccal").write_text(str(hijo.pid))
+    time.sleep(0.5)
+    assert _calentando("ccal") is False, "un hijo zombie cuenta como calentando"
         cx.close()
         assert len(d) == 2, "se bajo dos veces y quedaron %d filas" % len(d)
         assert d[0]["email"] == "x@y.com" and d[0]["cual"] == "original", tuple(d[0])
