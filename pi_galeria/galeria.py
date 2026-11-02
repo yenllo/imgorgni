@@ -279,6 +279,14 @@ CREATE TABLE IF NOT EXISTS seleccion_lista (
     cuando     TEXT NOT NULL,
     PRIMARY KEY (galeria_id, cliente_id)
 );
+-- el resultado de una busqueda por selfie: solo que fotos salieron (JSON de
+-- foto.id). La selfie no se guarda, se borra apenas se calcula.
+CREATE TABLE IF NOT EXISTS busqueda_cara (
+    token      TEXT PRIMARY KEY,
+    galeria_id INTEGER NOT NULL REFERENCES galeria(id) ON DELETE CASCADE,
+    fotos      TEXT NOT NULL,
+    creada     TEXT NOT NULL
+);
 """
 
 
@@ -385,6 +393,9 @@ def conectar():
                       # entre ellos. Apagados: ninguna galeria que ya existe
                       # los estrena sola
                       ("comentarios", "INTEGER DEFAULT 0"),
+                      # boton "buscar mis fotos con una selfie"; ademas
+                      # necesita el indice caras/<slug>.npz
+                      ("buscar_cara", "INTEGER DEFAULT 0"),
                       # renglones del preset de Edicion que ESTA galeria no
                       # muestra, uno por linea y tal cual. NULL = la lista
                       # entera, como siempre
@@ -888,12 +899,32 @@ CALIDAD_WEBP = int(os.environ.get("GALERIA_CALIDAD_WEBP", 80))
 WEBP_OK = features.check("webp")      # Pillow sin libwebp: todo sigue en JPEG
 
 
+# Cuantas imagenes se generan en vivo a la vez. Con la galeria fria el navegador
+# pide decenas juntas (HTTP/2 por Cloudflare) y cada una abre un JPEG grande:
+# sin tope eso colgo la Pi el 31/10/2026 (1,8 GB de RAM), el watchdog la reinicio
+# y el 8TB no volvio. Las demas esperan su turno en vez de competir por memoria.
+TOPE_GENERANDO = int(os.environ.get("GALERIA_GENERANDO", 2))
+GENERANDO = threading.BoundedSemaphore(TOPE_GENERANDO)
+
+
 def guardar(im, destino, **jpeg):
-    """Guarda en el formato que dice la extension del destino: .webp o JPEG."""
-    if Path(destino).suffix == ".webp":
-        im.save(destino, "WEBP", quality=CALIDAD_WEBP, method=4)
-    else:
-        im.save(destino, "JPEG", **jpeg)
+    """Guarda en el formato que dice la extension del destino: .webp o JPEG.
+
+    A un temporal y despues os.replace: escribiendo directo, destino.exists()
+    daba True a media escritura (otra peticion servia media foto) y un cuelgue
+    dejaba esa foto truncada en el cache para siempre.
+    """
+    destino = Path(destino)
+    tmp = destino.with_name("%s.%d.%d.tmp" % (destino.name, os.getpid(),
+                                              threading.get_ident()))
+    try:
+        if destino.suffix == ".webp":
+            im.save(tmp, "WEBP", quality=CALIDAD_WEBP, method=4)
+        else:
+            im.save(tmp, "JPEG", **jpeg)
+        os.replace(tmp, destino)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def ruta_cache(ruta, texto, logos, ancho, factor, firma=None):
@@ -984,7 +1015,9 @@ def firmada(ruta, logo, pos, tam, ancho=None):
     """La copia firmada, cacheada. ancho=None es la que se entrega."""
     destino = ruta_firma(ruta, logo, pos, tam, ancho)
     if not destino.exists():
-        firmar(ruta, destino, logo, pos, tam, ancho)
+        with GENERANDO:
+            if not destino.exists():
+                firmar(ruta, destino, logo, pos, tam, ancho)
     return str(destino)
 
 
@@ -1039,7 +1072,9 @@ def preview(foto_id, ruta, texto=None, ancho=None, factor=0.042, logos=(),
     if webp:
         destino = destino.with_suffix(".webp")   # misma clave: la limpieza la encuentra
     if not destino.exists():
-        marcar(ruta, destino, texto, ancho, factor, logos, firma)
+        with GENERANDO:
+            if not destino.exists():    # otro hilo la pudo terminar en la espera
+                marcar(ruta, destino, texto, ancho, factor, logos, firma)
     return destino
 
 
@@ -1133,12 +1168,14 @@ def sin_marca(ruta, ancho=None, webp=False):
     if webp:
         destino = destino.with_suffix(".webp")
     if not destino.exists():
-        destino.parent.mkdir(parents=True, exist_ok=True)
-        im = Image.open(ruta)
-        im.draft("RGB", (ancho, ancho))                   # igual que marcar()
-        im = ImageOps.exif_transpose(im).convert("RGB")
-        im.thumbnail((ancho, ancho), Image.LANCZOS)
-        guardar(im, destino, quality=82, optimize=True, progressive=True)
+        with GENERANDO:
+            if not destino.exists():
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                im = Image.open(ruta)
+                im.draft("RGB", (ancho, ancho))           # igual que marcar()
+                im = ImageOps.exif_transpose(im).convert("RGB")
+                im.thumbnail((ancho, ancho), Image.LANCZOS)
+                guardar(im, destino, quality=82, optimize=True, progressive=True)
     return destino
 
 
@@ -1873,6 +1910,48 @@ def grupos_de(gid):
         "GROUP BY grupo ORDER BY grupo", (gid,)).fetchall()
 
 
+# ------------------------------------------------ busqueda por selfie
+# El indice (caras.npz de caras_evento.py, armado en el notebook) se copia a
+# caras/<slug>.npz. La galeria de venta usa el mismo del evento: las exportadas
+# conservan el DSC de camara, y por eso se empareja por ese prefijo.
+CARAS = BASE / "caras"
+
+
+def indice_caras(gal):
+    """El indice si la galeria tiene la busqueda prendida (ajustes) y existe."""
+    p = CARAS / f"{gal['slug']}.npz"
+    return p if gal["buscar_cara"] and p.is_file() else None
+
+
+def clave_camara(nombre):
+    """'DSC04159-Editar.jpg' y 'DSC04159.JPG' -> 'DSC04159'."""
+    stem = Path(nombre).stem
+    m = re.match(r"[A-Za-z_]*\d+", stem)
+    return (m.group(0) if m else stem).upper()
+
+
+def buscar_cara(gal, selfie):
+    """foto.id de esta galeria donde aparece la cara de *selfie*, o None si
+    la selfie no tiene cara. Corre caras_pi.py como proceso aparte con el
+    Python de venv_caras/ (el unico con onnxruntime): pide ~500 MB y asi la
+    memoria vuelve apenas termina. Tarda ~15 s en la Pi, 11 de ellos en
+    cargar librerias y modelo; dejarlo residente costaria esos 500 MB fijos."""
+    py = BASE / "venv_caras" / "bin" / "python"
+    hecho = subprocess.run(
+        [str(py if py.exists() else sys.executable), str(BASE / "caras_pi.py"),
+         str(indice_caras(gal)), str(selfie)],
+        capture_output=True, text=True, timeout=180)
+    if hecho.returncode != 0:
+        raise RuntimeError(hecho.stderr[-500:])
+    pares = json.loads(hecho.stdout)
+    if pares is None:
+        return None
+    sale = {clave_camara(a) for a, _s in pares}
+    return [r["id"] for r in db().execute(
+        "SELECT id, ruta FROM foto WHERE galeria_id = ?", (gal["id"],))
+        if clave_camara(r["ruta"]) in sale]
+
+
 def como_ordenar(args):
     """(clave, ASC|DESC) a partir de la query. Las mas elegidas arrancan al
     reves: ahi lo que interesa es el techo."""
@@ -2405,6 +2484,9 @@ def galeria(slug):
     grupo = request.args.get("grupo") or ""
     if grupo and grupo not in [g["grupo"] for g in grupos]:
         grupo = ""      # un ?grupo= inventado no filtra a la nada
+    # ?cara=<token>: el resultado de una busqueda por selfie de ESTA galeria
+    cara = db().execute("SELECT * FROM busqueda_cara WHERE token = ? AND galeria_id = ?",
+                        (request.args.get("cara") or "", gal["id"])).fetchone()
 
     rango = rango_captura(gal["id"])
     largo = int((rango[1] - rango[0]).total_seconds() // 60) if rango else 0
@@ -2450,6 +2532,9 @@ def galeria(slug):
     if grupo:
         donde += " AND foto.grupo = ?"
         args = args + (grupo,)
+    if cara:
+        donde += " AND foto.id IN (SELECT value FROM json_each(?))"
+        args = args + (cara["fotos"],)
     if rango and (vdesde > 0 or vhasta < largo):
         donde += " AND foto.tomada BETWEEN ? AND ?"
         args = args + (
@@ -2498,7 +2583,8 @@ def galeria(slug):
             "SELECT 1 FROM seleccion_lista WHERE galeria_id = ? AND cliente_id = ?",
             (gal["id"], cid)).fetchone() is not None,
         rango=rango, largo=largo, vdesde=vdesde, vhasta=vhasta,
-        grupos=grupos, grupo=grupo,
+        grupos=grupos, grupo=grupo, cara=cara, buscador=indice_caras(gal) is not None,
+        cara_error=request.args.get("cara_error"),
         t0=(rango[0].hour * 60 + rango[0].minute) if rango else 0, ncarro=db().execute(
             "SELECT COUNT(*) c FROM lista_foto "
             "JOIN lista ON lista.id = lista_foto.lista_id "
@@ -2542,6 +2628,34 @@ def entrar(slug):
     session["clientes"] = clientes
     session.permanent = True
     return redirect(url_for("galeria", slug=slug))
+
+
+@app.post("/g/<slug>/cara")
+def buscar_por_cara(slug):
+    gal = db().execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    if gal is None or indice_caras(gal) is None:
+        abort(404)
+    if gal["id"] not in entradas() or expirada(gal):
+        return redirect(url_for("galeria", slug=slug))
+    f = request.files.get("selfie")
+    if not f or not f.filename:
+        return redirect(url_for("galeria", slug=slug))
+    tmp = CARAS / f"selfie-{secrets.token_hex(8)}"
+    try:
+        f.save(tmp)
+        fotos = buscar_cara(gal, tmp)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as e:
+        app.logger.warning("busqueda por cara fallo en %s: %s", slug, e)
+        return redirect(url_for("galeria", slug=slug, cara_error="fallo") + "#abajo")
+    finally:
+        tmp.unlink(missing_ok=True)     # la selfie nunca se queda en la Pi
+    if fotos is None:
+        return redirect(url_for("galeria", slug=slug, cara_error="sin_cara") + "#abajo")
+    token = secrets.token_urlsafe(9)
+    db().execute("INSERT INTO busqueda_cara (token, galeria_id, fotos, creada) "
+                 "VALUES (?, ?, ?, ?)", (token, gal["id"], json.dumps(fotos), ahora_iso()))
+    db().commit()
+    return redirect(url_for("galeria", slug=slug, cara=token) + "#abajo")
 
 
 # ------------------------------------------------------ galeria de videos
@@ -4283,12 +4397,13 @@ def ajustes(slug):
     # "" es una eleccion valida: marca de solo logo
     nuevo_texto = texto if (texto in MARCAS or texto == "") else gal["marca_texto"]
     cx.execute("UPDATE galeria SET marca = ?, descargas = ?, marca_texto = ?, "
-               "venta = ?, raw_descarga = ?, comentarios = ? WHERE id = ?",
+               "venta = ?, raw_descarga = ?, comentarios = ?, buscar_cara = ? WHERE id = ?",
                (0 if request.form.get("sin_marca") else 1,
                 1 if request.form.get("descargas") else 0, nuevo_texto,
                 1 if request.form.get("venta") else 0,
                 1 if request.form.get("raw_descarga") else 0,
-                1 if request.form.get("comentarios") else 0, gal["id"]))
+                1 if request.form.get("comentarios") else 0,
+                1 if request.form.get("buscar_cara") else 0, gal["id"]))
 
     # que recibe el cliente: vacio = se usa el texto general
     for col in ENTREGA_COLS:
@@ -5573,6 +5688,7 @@ def panel(slug=None):
         BASE_HTML, cuerpo=render_template_string(
             PANEL_GAL, gal=gal, clientes=clientes, elegidas=elegidas,
             miradas=cobertura(cx, gal["id"]),
+            tiene_indice=(CARAS / f"{gal['slug']}.npz").is_file(),
             muestras_firma=muestras,
             estado=estado,
             tarifas=tramos(gal), pesos=pesos, precios_default=PRECIOS,
@@ -5729,6 +5845,13 @@ form.gate .btn{border-radius:0;width:100%;padding:.9rem;font-weight:400;
 .ordenar select{background:#141414;border:1px solid var(--linea2);color:var(--cal);
   border-radius:6px;padding:.45rem .7rem;font:inherit;font-size:.8rem;
   letter-spacing:.06em;text-transform:none}
+/* .ordenar form gana por especificidad: sin el prefijo quedaba en fila y
+   pegado al formulario de ordenar, encima del slider */
+.ordenar form.buscacara{flex-direction:column;gap:.5rem;margin:1.8rem 0 0}
+.ordenar .buscacara label{border:1px solid var(--cancha);border-radius:999px;
+  padding:.5rem 1.1rem;color:var(--cancha);cursor:pointer;letter-spacing:.12em}
+.ordenar .buscacara label:hover{color:#0b0f09;background:var(--cancha)}
+.buscacara small,.buscacara span{color:var(--humo);font-size:.75rem}
 .partidos{display:flex;gap:.45rem;justify-content:center;flex-wrap:wrap;
   margin:1.1rem 0 0}
 .partidos a{display:inline-flex;align-items:center;gap:.4rem;text-decoration:none;
@@ -7598,6 +7721,27 @@ lista y toca el corazon de la foto.</p>{% endif %}
 </span>{% endif %}
 <noscript><button class="btn">Ordenar</button></noscript>
 </form>
+{% if buscador %}<form method="post" action="/g/{{ gal['slug'] }}/cara"
+  enctype="multipart/form-data" class="buscacara" id="fcara">
+{# sin capture: el telefono ofrece camara o galeria. Solo jpeg/png: asi el
+   iPhone convierte su HEIC a JPEG antes de subir #}
+<label>Buscar mis fotos con una selfie
+<input type="file" name="selfie" accept="image/jpeg,image/png" hidden id="icara"></label>
+<span id="ocara" hidden>Buscando tu cara en las fotos, tarda unos 15 segundos...</span>
+<small>La selfie solo se usa para buscar y se borra al instante.</small>
+</form>
+<script>
+document.getElementById('icara').onchange = function () {
+  document.getElementById('ocara').hidden = false;
+  this.form.submit();
+};
+</script>
+{% if cara %}<p class="nota">Apareces en <b>{{ total }}</b> fotos.
+<a href="?por={{ por }}&amp;dir={{ 'desc' if dire == 'DESC' else 'asc' }}">ver todas</a></p>
+{% elif cara_error == 'sin_cara' %}<p class="nota">No encontramos una cara en esa foto.
+Prueba con una selfie de frente y con buena luz.</p>
+{% elif cara_error %}<p class="nota">No se pudo buscar ahora, intenta de nuevo en un rato.</p>
+{% endif %}{% endif %}
 {% if grupos %}<div class="partidos">
 <a href="?{{ 'por=' ~ por ~ '&dir=' ~ ('desc' if dire == 'DESC' else 'asc') }}"
   class="{{ 'on' if not grupo }}">Todos</a>
@@ -7754,6 +7898,7 @@ function masFotos() {
     u.searchParams.set("dir", DIR);
     // sin esto la segunda tanda trae fotos de los otros partidos
     if (GRUPO) u.searchParams.set("grupo", GRUPO);
+    if (CARA) u.searchParams.set("cara", CARA);
     // sin esto la segunda tanda llega sin filtrar y mete fotos de otras horas
     if (DESDE !== "0" || HASTA !== LARGO) {
       u.searchParams.set("desde", DESDE);
@@ -7818,6 +7963,7 @@ const DESDE = "{{ vdesde }}";
 const HASTA = "{{ vhasta }}";
 const LARGO = "{{ largo }}";
 const GRUPO = "{{ grupo }}";
+const CARA = "{{ cara['token'] if cara else '' }}";
 const POR = "{{ por }}";
 const DIR = "{{ 'desc' if dire == 'DESC' else 'asc' }}";
 const VENDE = {{ 'true' if vende else 'false' }};
@@ -9794,6 +9940,9 @@ el logo)</option>
   {{ 'checked' if gal['descargas'] }}> Permitir descargas</label>
 <label class="chk"><input type="checkbox" name="comentarios" value="1"
   {{ 'checked' if gal['comentarios'] }}> Permitir comentarios</label>
+<label class="chk"><input type="checkbox" name="buscar_cara" value="1"
+  {{ 'checked' if gal['buscar_cara'] }}> Búsqueda por selfie
+  {% if not tiene_indice %}<small>(falta el índice de caras del evento)</small>{% endif %}</label>
 <label class="chk"><input type="checkbox" name="raw_descarga" value="1"
   {{ 'checked' if gal['raw_descarga'] }}> Permitir descargar RAW</label>
 <label style="font-size:.85rem;opacity:.7">Tipo
@@ -10232,6 +10381,15 @@ def _calentando(slug):
         pid = int(p.read_text().strip())
     except (ValueError, OSError):
         return False
+    # calentar_ahora lo lanza con Popen y nadie le hace wait(): al terminar
+    # queda zombie, /proc/<pid> sigue existiendo y el panel decia "calentando"
+    # hasta que se reiniciaba el server (28/10/2026, Mundano). Si es hijo
+    # nuestro y ya termino, waitpid lo recoge.
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0]:
+            return False
+    except ChildProcessError:
+        pass                   # no es hijo de este proceso: decide /proc
     return Path("/proc/%d" % pid).exists()
 
 
@@ -10328,6 +10486,29 @@ def test():
     im = Image.open(dest)
     assert im.width == ANCHO_PREVIEW, im.size
     assert len(im.convert("RGB").getcolors(maxcolors=100000)) > 1, "no marco nada"
+    assert not list(tmp.glob("*.tmp")), "guardar dejo el temporal"
+
+    # con la galeria fria no se generan mas de TOPE_GENERANDO a la vez
+    activas, tope, candado = [0], [0], threading.Lock()
+    marcar_real = marcar
+
+    def marcar_contando(*a, **k):
+        with candado:
+            activas[0] += 1
+            tope[0] = max(tope[0], activas[0])
+        time.sleep(0.05)
+        marcar_real(*a, **k)
+        with candado:
+            activas[0] -= 1
+    globals()["marcar"] = marcar_contando
+    hilos = [threading.Thread(target=preview, args=(1, str(orig)), kwargs={"ancho": 300 + i})
+             for i in range(8)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    globals()["marcar"] = marcar_real
+    assert tope[0] == TOPE_GENERANDO, "generaron %d a la vez" % tope[0]
 
     # y el interruptor: la misma foto plana, sin marca, sale plana. Si algun
     # dia sin_marca() empieza a marcar, o /p/ deja de elegirla, esto falla.
@@ -10381,15 +10562,6 @@ def test():
         pico = max(cm.getchannel("A").getdata())
         assert pico >= ALFA_MARCA - 6, ("marca casi invisible", ls, pico)
 
-    # calentar_ahora lo lanza con Popen y nadie le hace wait(): al terminar
-    # queda zombie, /proc/<pid> sigue existiendo y el panel decia "calentando"
-    # hasta que se reiniciaba el server (28/10/2026, Mundano). Si es hijo
-    # nuestro y ya termino, waitpid lo recoge.
-    try:
-        if os.waitpid(pid, os.WNOHANG)[0]:
-            return False
-    except ChildProcessError:
-        pass                   # no es hijo de este proceso: decide /proc
     # con logo la marca dibuja algo distinto que sin logo, y el cache lo sabe
     a = preview(1, str(orig), MARCAS[0])
     b = preview(1, str(orig), MARCAS[0], logos=("liga.png",))
@@ -10825,6 +10997,10 @@ def test():
     assert _calentando("ccal") is True
     _lock_calentando("ccal").write_text("999999999")        # pid que no existe
     assert _calentando("ccal") is False
+    hijo = subprocess.Popen(["true"])                        # termina y queda zombie
+    _lock_calentando("ccal").write_text(str(hijo.pid))
+    time.sleep(0.5)
+    assert _calentando("ccal") is False, "un hijo zombie cuenta como calentando"
     _lock_calentando("ccal").unlink()
     cx.execute("DELETE FROM galeria WHERE slug = 'ccal'")
     cx.commit()
@@ -10997,10 +11173,6 @@ def test():
         d = cx.execute("SELECT cliente.email, descarga.foto_id, descarga.cual "
                        "FROM descarga JOIN cliente ON cliente.id = descarga.cliente_id "
                        "WHERE descarga.foto_id = ?", (id_uno,)).fetchall()
-    hijo = subprocess.Popen(["true"])                        # termina y queda zombie
-    _lock_calentando("ccal").write_text(str(hijo.pid))
-    time.sleep(0.5)
-    assert _calentando("ccal") is False, "un hijo zombie cuenta como calentando"
         cx.close()
         assert len(d) == 2, "se bajo dos veces y quedaron %d filas" % len(d)
         assert d[0]["email"] == "x@y.com" and d[0]["cual"] == "original", tuple(d[0])
@@ -11846,6 +12018,48 @@ def test():
         # un partido inventado muestra todas, no cero
         assert len(re.findall(r'/p/([0-9]+)"',
                               c.get("/g/ccc?grupo=Partido+9").get_data(as_text=True))) == 3
+
+    # ------------------------------------------------ busqueda por selfie
+    assert clave_camara("DSC04159-Editar.jpg") == clave_camara("x/DSC04159.JPG") == "DSC04159"
+    global CARAS, buscar_cara
+    CARAS = tmp / "caras"
+    CARAS.mkdir()
+    buscar_cara_real, vistas = buscar_cara, []
+
+    def buscar_falso(gal, selfie):          # sin modelos en el self-check
+        vistas.append(Path(selfie).exists())
+        return None if b"sin cara" in Path(selfie).read_bytes() else fids[:2]
+    buscar_cara = buscar_falso
+    with app.test_client() as c:
+        c.post("/g/ccc/entrar", data={"email": "x@y.com", "clave": "secreta"})
+        assert "Buscar mis fotos" not in c.get("/g/ccc").get_data(as_text=True), \
+            "ofrece buscar sin indice"
+        (CARAS / "ccc.npz").write_bytes(b"x")
+        assert "Buscar mis fotos" not in c.get("/g/ccc").get_data(as_text=True), \
+            "con el interruptor apagado no se ofrece"
+        cx = conectar()
+        cx.execute("UPDATE galeria SET buscar_cara = 1 WHERE slug = 'ccc'")
+        cx.commit()
+        cx.close()
+        assert "Buscar mis fotos" in c.get("/g/ccc").get_data(as_text=True)
+        r_ = c.post("/g/ccc/cara", data={"selfie": (io.BytesIO(b"jpg"), "yo.jpg")},
+                    content_type="multipart/form-data")
+        token = re.search(r"cara=([\w-]+)", r_.headers["Location"]).group(1)
+        html = c.get("/g/ccc?cara=" + token).get_data(as_text=True)
+        assert len(re.findall(r'/p/([0-9]+)"', html)) == 2, "no filtra por cara"
+        assert 'const CARA = "%s"' % token in html, "el scroll pierde el filtro"
+        assert vistas == [True] and not list(CARAS.glob("selfie-*")), "la selfie quedo en disco"
+        r_ = c.post("/g/ccc/cara", data={"selfie": (io.BytesIO(b"sin cara"), "a.jpg")},
+                    content_type="multipart/form-data")
+        assert "cara_error=sin_cara" in r_.headers["Location"]
+        # un token inventado (o de otra galeria) muestra todas
+        assert len(re.findall(r'/p/([0-9]+)"',
+                              c.get("/g/ccc?cara=nada").get_data(as_text=True))) == 3
+    with app.test_client() as c:            # sin entrar a la galeria no se busca
+        r_ = c.post("/g/ccc/cara", data={"selfie": (io.BytesIO(b"jpg"), "yo.jpg")},
+                    content_type="multipart/form-data")
+        assert r_.status_code == 302 and "cara=" not in r_.headers["Location"]
+    buscar_cara = buscar_cara_real
 
     cx = conectar()
     cx.execute("UPDATE foto SET grupo = NULL, grupo_col = NULL WHERE galeria_id = ?",
