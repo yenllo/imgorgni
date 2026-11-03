@@ -9155,8 +9155,9 @@ PANEL_COTIZADOR = r"""<main class="cotz">
       <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
       <div class="solo-liga"><label>Cada partido dura</label><select id="durPartido"><option value="20">20 min</option>
         <option value="30">30 min</option><option value="60" selected>60 min</option></select></div>
-      <div><label>Valor de la hora</label><input id="horaLista" readonly tabindex="-1"></div>
+      <div><label id="horaValorL">Valor de la hora ($)</label><input id="horaValor" type="number" min="0" step="500" inputmode="numeric"></div>
       <div><label>Descuento a la hora (%)</label><input id="descHora" type="number" min="0" max="100" step="0.5" value="0"></div>
+      <div><label>Recargo última hora (%)</label><input id="recargoUrg" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
       <div><label>N° cotización</label><input id="numero"></div>
       <div><label>Válida por (días)</label><input id="validez" type="number" min="1" value="15"></div>
     </div>
@@ -9292,14 +9293,14 @@ const PRESETS = {
   lista: {packFotos:"liga",durPartido:"60",simult:"{}",lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
-          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,volumen:0,boleta:"si",
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,recargoUrg:0,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false,tipoEvento:"liga"},
   // cumpleanos y eventos sociales: su hora y sus precios; sin basica, sin
   // partidos ni venta a jugadores (todo eso se esconde)
   social: {tipoEvento:"social",packFotos:"celebracion",lHora:TS.hora,cHora:TS.hora,lBasica:0,cBasica:0,
           lCompleta:TS.foto.completa,cCompleta:TS.foto.completa,lPro:TS.foto.pro,cPro:TS.foto.pro,qBasica:0,
-          pack:"abierto",recargoExcl:T.exclusivo_pct,gExcl:false,aLogo:false,aPartidos:false,aSeleccion:false,gSel:false,
+          pack:"abierto",recargoExcl:T.exclusivo_pct,recargoUrg:0,gExcl:false,aLogo:false,aPartidos:false,aSeleccion:false,gSel:false,
           durPartido:"60",simult:"{}",volumen:0,boleta:"no",anticipo:true,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           horaInicio:"13:00",horaFin:"16:00",evento:""},
   // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
@@ -9307,7 +9308,7 @@ const PRESETS = {
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
           packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
-          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,volumen:0,
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,recargoUrg:0,volumen:0,
           boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00",tipoEvento:"liga"}
 };
 
@@ -9371,6 +9372,7 @@ function pintarBloquesCz(bs){
 }
 // el descuento a la hora escribe el precio cliente de la hora (tabla de
 // precios); si se cambia ese precio a mano, el descuento se recalcula solo
+$("horaValor").addEventListener("input", () => { $("cHora").value = num("horaValor"); });
 $("descHora").addEventListener("input", () => {
   $("cHora").value = Math.round(num("lHora") * (1 - Math.min(100, num("descHora")) / 100));
 });
@@ -9419,7 +9421,9 @@ function calcular(){
 
   const hTxt = (Math.round(horas*100)/100).toLocaleString("es-CL");
   const dH = num("lHora") ? Math.max(0, Math.round((1 - num("cHora")/num("lHora"))*1000)/10) : 0;
-  $("horaLista").value = pesos(num("lHora")) + (dH > 0 ? " → " + pesos(num("cHora")) : "");
+  // el valor de la hora se edita aca o en la columna Cliente: son el mismo
+  $("horaValorL").textContent = "Valor de la hora ($) · lista " + pesos(num("lHora"));
+  if(document.activeElement !== $("horaValor")) $("horaValor").value = num("cHora");
   if(document.activeElement !== $("descHora")) $("descHora").value = dH;
   linea("Cobertura","Cobertura de la jornada",
         `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`
@@ -9444,6 +9448,14 @@ function calcular(){
     const cob = L.filter(x=>x.grupo==="Cobertura");
     L.push({grupo:"Cobertura",concepto:`Partidos de ${dur} minutos (+${dpct} %)`,detalle:`${partidos} partidos en total`,
             cant:null,tL:cob.reduce((s,x)=>s+x.tL,0)*dpct/100,tC:cob.reduce((s,x)=>s+x.tC,0)*dpct/100});
+  }
+  // solicitud de ultima hora: % variable sobre toda la cobertura. Es un cobro
+  // real, no un descuento: va igual en lista y cliente para no tocar el ahorro
+  const rec = Math.max(0, num("recargoUrg"));
+  if(rec){
+    const m = L.filter(x=>x.grupo==="Cobertura").reduce((s,x)=>s+x.tC,0)*rec/100;
+    L.push({grupo:"Cobertura",concepto:`Solicitud de última hora (+${rec} %)`,
+            detalle:"Recargo sobre la cobertura, por contratarse con poca anticipación",cant:null,tL:m,tC:m});
   }
 
   if(P){
@@ -9508,7 +9520,7 @@ function calcular(){
     const bloques = ex > 15 ? Math.ceil(ex/20) : 0;
     pasada = {ex: Math.max(0,ex), bloques};
     if(bloques) L.push({grupo:"Otros",concepto:"Hora pasada",detalle:`Terminé a las ${real} (${ex} min después) · bloques de 20 min a 1/3 de la hora`,
-                        cant:bloques,uL:num("lHora")/3,uC:num("cHora")/3,tL:bloques*num("lHora")/3,tC:bloques*num("cHora")/3});
+                        cant:bloques,uL:num("lHora")/3,uC:num("cHora")/3*(1+rec/100),tL:bloques*num("lHora")/3,tC:bloques*num("cHora")/3*(1+rec/100)});
   }
 
   const subL = L.reduce((s,x)=>s+x.tL,0), subC = L.reduce((s,x)=>s+x.tC,0);
@@ -9538,7 +9550,7 @@ function render(){
   r.L.forEach(x => {
     if(x.grupo !== grupoAct){ grupoAct = x.grupo; filas += `<tr class="cz-grupo"><td colspan="5">${x.grupo}</td></tr>`; }
     const cant = x.cant == null ? "" : (Number.isInteger(x.cant) ? x.cant : x.cant.toLocaleString("es-CL"));
-    let unit = "", lista = x.tL !== x.tC && !x.desc ? `<s>${pesos(x.tL)}</s>` : "";
+    let unit = "", lista = x.tL > x.tC && !x.desc ? `<s>${pesos(x.tL)}</s>` : "";
     if(x.uL != null){
       unit = x.cortesia ? `<span class="cz-cortesia">Cortesía</span>`
            : (x.uC < x.uL ? `<s>${pesos(x.uL)}</s> ${pesos(x.uC)}` : pesos(x.uC));
@@ -9641,7 +9653,7 @@ function render(){
       ? `<li>Yo elijo las mejores fotos y las entrego editadas en 4K (3.840 px en el borde largo), sin marca de agua, ${ent("plazo")} días hábiles después del evento, por galería privada o Google Drive.</li>`
       : `<li>Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para que elijan con calma. Las elegidas se entregan editadas en 4K (3.840 px en el borde largo), sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>`}
     <li>La edición completa incluye limpieza leve de piel de hasta 2 protagonistas por foto; la profesional, retoque de hasta 5 rostros protagonistas.</li>
-    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si el evento se alarga y sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
+    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si el evento se alarga y sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3*(1+Math.max(0,num("recargoUrg"))/100))} por bloque).</li>
     ${avisoPasada}
     ${venta}
     <li>Puedo usar algunas fotos en mi portafolio, salvo que me pidan lo contrario.</li>
@@ -9649,7 +9661,7 @@ function render(){
     ${$("notas").value.trim() ? `<li>${v("notas")}</li>` : ""}` : `
     <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} partidos a la vez sin recargo; desde el siguiente, +${T.cancha_extra_pct} % de la hora por cada uno, en el horario que lo tiene. Partidos de 30 minutos: +${T.duracion_pct["30"]} % de la cobertura; de 20 minutos: +${T.duracion_pct["20"]} %. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
     <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
-    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3)} por bloque).</li>
+    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3*(1+Math.max(0,num("recargoUrg"))/100))} por bloque).</li>
     ${avisoPasada}
     ${venta}
     <li>Derechos de uso para las redes del club y de los jugadores. No se permite su venta ni uso comercial sin acuerdo previo.</li>
@@ -12242,6 +12254,7 @@ def test():
         cz_ = c.get("/panel/cotizador").get_data(as_text=True)
         assert "const TARIFAS" in cz_ and 'id="durPartido"' in cz_ and 'id="czBloques"' in cz_
         assert 'id="canchas"' not in cz_ and 'id="descHora"' in cz_
+        assert 'id="horaValor"' in cz_ and 'id="recargoUrg"' in cz_ and 'id="horaLista"' not in cz_
         assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gKm", "gEstac", "pSel", "pTipo", "pNumero"))
         assert 'id="pCuenta"' not in cz_
         assert 'id="km"' in cz_ and 'id="estac"' in cz_ and 'id="traslado"' not in cz_
