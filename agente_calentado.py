@@ -29,7 +29,7 @@ AQUI = Path(__file__).resolve().parent
 sys.path.insert(0, str(AQUI))
 from calentar_local import raiz_local   # Y: en casa, Z: por Tailscale
 
-PI = "fotosnas"          # ~/.ssh/config lo apunta a la IP de Tailscale: anda en casa y afuera
+from calentar_local import host_pi   # fotosnas-lan en casa, fotosnas afuera
 CACHE = "/home/yenllo/galeria/cache"
 CADA = 30
 LOG = AQUI / "agente_calentado.log"
@@ -47,7 +47,7 @@ def log(msg):
 
 
 def ssh(cmd, timeout=40):
-    return subprocess.run(["ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", PI, cmd],
+    return subprocess.run(["ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", host_pi(), cmd],
                           capture_output=True, text=True, timeout=timeout,
                           creationflags=SIN_VENTANA)
 

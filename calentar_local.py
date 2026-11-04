@@ -22,12 +22,34 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from multiprocessing import Pool
 from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
-PI = "fotosnas"
+def host_pi(_cache=[]):
+    """`fotosnas-lan` si contesta; si no, `fotosnas` (Tailscale).
+
+    El comentario de ~/.ssh/config dice que el SSH es "solo canal de control,
+    los archivos no viajan por aca". Para el resto es cierto, pero ESTE script
+    manda las derivadas por ahi: 1,4 GB. Por Tailscale son 4-5 MB/s y se corta
+    a la mitad (26/10/2026: dos envios muertos, uno por "connection reset" a
+    los 7 min y otro por timeout). Por LAN, 8m55 de corrido y sin un error.
+
+    Se prueba una sola vez por proceso: si estas afuera, el intento fallido
+    cuesta 3 s y despues sigue todo por Tailscale como siempre.
+    """
+    if not _cache:
+        ok = subprocess.run(["ssh", "-o", "ConnectTimeout=3", "-o", "BatchMode=yes",
+                             "fotosnas-lan", "true"],
+                            capture_output=True).returncode == 0
+        _cache.append("fotosnas-lan" if ok else "fotosnas")
+        print("  Pi por %s" % _cache[0])
+    return _cache[0]
+
+
+PI = "fotosnas"          # respaldo; el camino real lo decide host_pi()
 PI_RAIZ = "/mnt/fotos/"
 PI_GALERIA = "/home/yenllo/galeria"
 # las derivadas viven en el SSD de la Pi y Samba no las comparte: se bajan por
@@ -37,29 +59,68 @@ PI_DERIVADAS = PI_GALERIA + "/derivadas/"
 # ponytail: por Tailscale se lee a ~2-5 MB/s; sirve para galerias chicas, una
 # de 5000 fotos son horas. Si molesta, que la Pi mande el draft ya reducido.
 RAICES = ("Y:/", "Z:/")
+# raiz -> el hilo que quedo trabado mirandola. Mientras siga vivo no se lanza
+# otro: agente_calentado.py llama cada 30 s, y en una noche de "Reconectando"
+# juntaria cientos de hilos colgados.
+_TRABADAS = {}
 
 
-def raiz_local():
+def raiz_local(tope=5):
     """La primera raiz que muestra el disco de verdad (con Fotos/ adentro).
-    Un share montado pero con el 8TB caido en la Pi se ve vacio: no cuenta."""
+    Un share montado pero con el 8TB caido en la Pi se ve vacio: no cuenta.
+
+    Una unidad de red caida no siempre avisa. En "No disponible" isdir da False
+    al toque (no tira OSError: se lo traga), pero en "Reconectando" se BLOQUEA:
+    el 20/9/2026 paso los 90 s sin volver, y como esto corre antes del primer
+    print el script parecia colgado. Por eso cada raiz se mira en un hilo y se
+    la espera `tope` segundos; si no contesto, cuenta como caida. El hilo
+    trabado no se puede cancelar: se lo abandona (es daemon)."""
     for r in RAICES:
-        try:
-            if os.path.isdir(r + "Fotos"):
-                return r
-        except OSError:          # unidad de red caida: "ya no esta disponible"
-            pass
+        if r in _TRABADAS and _TRABADAS[r].is_alive():
+            continue                 # sigue trabada desde la vez anterior
+        vista = []
+        h = threading.Thread(target=lambda p, v: v.append(os.path.isdir(p)),
+                             args=(r + "Fotos", vista), daemon=True)
+        h.start()
+        h.join(tope)
+        if h.is_alive():
+            _TRABADAS[r] = h
+        elif vista == [True]:
+            return r
     return None
+
+
+def demo():
+    """Check sin red: Y: en "Reconectando" (un isdir que no vuelve) no traba nada.
+        python -c "import calentar_local as c; c.demo()"
+    """
+    def isdir(p):
+        if p.startswith("Y:"):
+            time.sleep(60)
+        return True
+    real, os.path.isdir = os.path.isdir, isdir
+    try:
+        t = time.time()
+        assert raiz_local(tope=1) == "Z:/"
+        assert time.time() - t < 1.5, time.time() - t     # el tope, no los 60 s
+        t, hilos = time.time(), threading.active_count()
+        assert raiz_local(tope=1) == "Z:/"                # Y: sigue trabada:
+        assert time.time() - t < 0.5, time.time() - t     # ni se la espera
+        assert threading.active_count() == hilos          # ni se lanza otro hilo
+    finally:
+        os.path.isdir = real
+    print("ok: Y: colgada descartada al tope, eligio Z:")
 FUENTE_PI = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 TRABAJO = AQUI / "_cache_local"
 
 
 def ssh(cmd, **kw):
-    return subprocess.run(["ssh", PI, cmd], text=True, capture_output=True, **kw)
+    return subprocess.run(["ssh", host_pi(), cmd], text=True, capture_output=True, **kw)
 
 
 def pi_python(codigo):
     """Corre codigo en la Pi, con galeria.py importable, y devuelve su JSON."""
-    r = subprocess.run(["ssh", PI, "cd %s && python3 -" % PI_GALERIA],
+    r = subprocess.run(["ssh", host_pi(), "cd %s && python3 -" % PI_GALERIA],
                        input=codigo, text=True, capture_output=True)
     if r.returncode:
         sys.exit("fallo en la Pi:\n" + r.stderr[-1500:])
@@ -221,7 +282,7 @@ def main():
         deriv.mkdir(parents=True)
         print("  bajando %d derivadas de la Pi..." % len(rels))
         t = time.time()
-        tar = subprocess.Popen(["ssh", PI, "tar cf - -C %s --verbatim-files-from -T -"
+        tar = subprocess.Popen(["ssh", host_pi(), "tar cf - -C %s --verbatim-files-from -T -"
                                 % shlex.quote(PI_DERIVADAS)],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         ext = subprocess.Popen(["tar", "xf", "-", "-C", str(deriv)], stdin=tar.stdout)
@@ -236,11 +297,11 @@ def main():
         print("  bajadas en %.0f s" % (time.time() - t))
     fuente = TRABAJO / "DejaVuSans-Bold.ttf"
     if not fuente.exists():
-        subprocess.run(["scp", "-q", "%s:%s" % (PI, FUENTE_PI), str(fuente)], check=True)
+        subprocess.run(["scp", "-q", "%s:%s" % (host_pi(), FUENTE_PI), str(fuente)], check=True)
     logos = TRABAJO / "logos"
     if logos.exists():
         shutil.rmtree(logos)
-    subprocess.run(["scp", "-q", "-r", "%s:%s/logos" % (PI, PI_GALERIA), str(logos)])
+    subprocess.run(["scp", "-q", "-r", "%s:%s/logos" % (host_pi(), PI_GALERIA), str(logos)])
     logos.mkdir(exist_ok=True)
 
     t0 = time.time()
@@ -276,7 +337,7 @@ def main():
     print("  subiendo %d archivos (%.0f MB) a la Pi..." % (len(locales), mb))
     t1 = time.time()
     tar = subprocess.Popen(["tar", "cf", "-", "-C", str(salida), "."], stdout=subprocess.PIPE)
-    r = subprocess.run(["ssh", PI, "tar xf - -C %s/cache" % PI_GALERIA], stdin=tar.stdout)
+    r = subprocess.run(["ssh", host_pi(), "tar xf - -C %s/cache" % PI_GALERIA], stdin=tar.stdout)
     tar.wait()
     if r.returncode or tar.returncode:
         sys.exit("fallo la subida; la carpeta local queda en %s" % salida)
