@@ -1371,7 +1371,7 @@ CAMPOS = (
          "Ligas, fechas deportivas, actos y presentaciones. Cubro el partido "
          "entero y te lo entrego en una galeria privada, no en un pendrive con "
          "cuatro mil archivos."),
-        ("hero_boton_wsp", "Boton de WhatsApp", 1, "Escribime por WhatsApp"),
+        ("hero_boton_wsp", "Boton de WhatsApp", 1, "Escríbeme por WhatsApp"),
         ("hero_boton_ev", "Boton de eventos", 1, "Ver los eventos"),
         ("hero_boton_mi", "Boton de sobre mi", 1, "Sobre mi"),
         ("rotulo_eventos", "Rotulo de la franja de eventos", 1, "Eventos que cubri"),
@@ -1528,20 +1528,20 @@ CAMPOS = (
          "Venta abierta a invitados: si eliges venta abierta, te comprometes a avisar a los asistentes que la galer\u00eda se publicar\u00e1 para venta individual con b\u00fasqueda por rostro. Quien no quiera aparecer me lo pide y saco sus fotos de la venta.\n"
          "Traslado y estacionamiento: {km} por km ida y vuelta; estacionamiento seg\u00fan el lugar."),
     )),
-    ("Como recibis tus fotos", (
+    ("Como recibes tus fotos", (
         ("como_titulo", "Titulo (vacio = no se muestra la seccion)", 1,
-         "Como recibis tus fotos"),
+         "Como recibes tus fotos"),
         ("como1_t", "Paso 1, titulo", 1, "Entras al evento"),
         ("como1_p", "Paso 1, texto", 3,
          "Buscas tu fecha en la lista de eventos, o entras con el link que te "
          "paso. Dejas tu email y ves todas las fotos del dia."),
         ("como2_t", "Paso 2, titulo", 1, "Marcas las tuyas"),
         ("como2_p", "Paso 2, texto", 3,
-         "Vas marcando con el corazon las que queres. Yo veo esa seleccion del "
+         "Vas marcando con el corazon las que quieres. Yo veo esa seleccion del "
          "otro lado, asi no hay que ir y venir con numeros de archivo."),
         ("como3_t", "Paso 3, titulo", 1, "Pagas y te las llevas"),
         ("como3_p", "Paso 3, texto", 3,
-         "El total sale de cuantas marcaste. Transferis, me mandas el "
+         "El total sale de cuantas marcaste. Transfieres, me mandas el "
          "comprobante por WhatsApp y te las paso en calidad completa, de a una "
          "o en un ZIP."),
     )),
@@ -1552,12 +1552,12 @@ CAMPOS = (
          "Cada evento abre en su galeria. Entras con tu email, marcas las tuyas "
          "con el corazon y desde ahi las compras o las descargas, segun el evento."),
         ("ev_vacio", "Que decir cuando no hay ninguno publicado", 2,
-         "Todavia no hay eventos publicados aca. Escribime y te aviso cuando "
+         "Todavia no hay eventos publicados aca. Escríbeme y te aviso cuando "
          "suba el tuyo."),
     )),
     ("Dentro de un evento", (
-        ("gal_entrega_tit", "Titulo del bloque de que recibis", 1,
-         "Que recibis"),
+        ("gal_entrega_tit", "Titulo del bloque de que recibes", 1,
+         "Que recibes"),
         ("gal_precios_tit", "Titulo del bloque de precios", 1,
          "Precios de este evento"),
         ("gal_precios_nota", "Nota bajo los precios", 3,
@@ -1570,7 +1570,7 @@ CAMPOS = (
          "Todas son tuyas: mira, descarga y aprecia cada una de las fotos de "
          "este evento."),
     )),
-    ("Que recibis", (
+    ("Que recibes", (
         ("ent_resolucion_nom", "Etiqueta de la resolucion", 1, "Resolucion"),
         ("ent_resolucion", "Resolucion (si la galeria no pone la suya)", 1,
          "2K, 2560 x 1440 pixeles"),
@@ -1590,25 +1590,22 @@ CAMPOS = (
          "Balance de blancos (temperatura y matiz)\n"
          "Exposicion y contraste\n"
          "Iluminaciones, sombras, blancos y negros\n"
-         "Textura, claridad y neblina\n"
          "Intensidad y saturacion\n"
-         "Recorte de imagen"),
+         "Nivelado de imagen"),
         ("edicion_completa_nom", "Nombre del pack completo", 1,
          "Edicion completa"),
         ("edicion_completa", "Que incluye, una linea por item", 8,
          "Todo lo de la edicion basica\n"
-         "Mascaras y ajustes por zonas\n"
-         "Retoque de piel\n"
          "Eliminacion de distracciones\n"
-         "Reduccion de ruido (denoise)\n"
-         "Adapto el preset o estilo de la liga"),
+         "Reduccion de ruido con IA, dosificada segun cada foto\n"
+         "Encuadre al protagonista"),
     )),
     ("Pasos de la compra", (
         ("compra_paso1", "Paso 1 \u2014 {n} son las fotos, {total} el precio", 2,
-         "Me escribis por WhatsApp con el boton de aca abajo: el pedido va "
+         "Me escribes por WhatsApp con el boton de aca abajo: el pedido va "
          "armado."),
         ("compra_paso2", "Paso 2", 2,
-         "Te paso los datos, transferis {total} y me mandas el comprobante."),
+         "Te paso los datos, transfieres {total} y me mandas el comprobante."),
         ("compra_paso3", "Paso 3", 3,
          "Te entrego las {n} fotos en calidad indicada de la manera a "
          "preferir, y el logo PrimeLeague-RB.Deportes_"),
@@ -1619,14 +1616,14 @@ CAMPOS = (
          "Soy Renzo. Fotografio deporte amateur y eventos: ligas "
          "universitarias, fechas de futbol, actos y presentaciones.\n\n"
          "Trabajo con volumen. Una fecha son 300 fotos en veinte minutos, y de "
-         "ahi salen las diez que te importan a vos. Por eso arme mi propio "
+         "ahi salen las diez que te importan a ti. Por eso arme mi propio "
          "sistema de entrega en vez de mandar carpetas de Drive que nadie "
-         "termina de mirar: cada evento queda en una galeria donde vos marcas "
+         "termina de mirar: cada evento queda en una galeria donde tú marcas "
          "las tuyas y te las llevas.\n\n"
          "Y las fotos no viven en un servicio de terceros que manana cambia de "
          "precio o cierra: estan en un servidor mio."),
         ("mi_boton", "Boton al final (vacio = sin boton)", 1,
-         "Escribime por WhatsApp"),
+         "Escríbeme por WhatsApp"),
     )),
     ("Pie de todas las paginas", (
         ("pie", "Linea del pie", 1,
@@ -3501,7 +3498,7 @@ def poner_nombre(slug):
     cid = _cliente_de(slug)
     nombre = ((request.get_json(silent=True) or {}).get("nombre") or "").strip()[:60]
     if not nombre:
-        return jsonify(error="Escribi tu nombre"), 400
+        return jsonify(error="Escribe tu nombre"), 400
     cx = db()
     cx.execute("UPDATE cliente SET nombre = ? WHERE id = ?", (nombre, cid))
     cx.commit()
@@ -7452,8 +7449,8 @@ COMPRAR = """<header><b><a class="volver" href="/g/{{ gal['slug'] }}">&larr;
   >{{ l['nombre'] }} ({{ l['n'] }})</a>{% endfor %}</p>{% endif %}
 {% if n == 0 %}
 <p class="grande">Ninguna todavia</p>
-<p style="opacity:.6">Volve a la galeria y agrega al carrito las fotos que
-queres, o eleji arriba una de tus listas. El total se calcula solo.</p>
+<p style="opacity:.6">Vuelve a la galeria y agrega al carrito las fotos que
+quieres, o elige arriba una de tus listas. El total se calcula solo.</p>
 <p style="opacity:.5;font-size:.9rem;margin:0">Precios de este evento:
 {% for c, p in tarifas %}{{ c }} fotos {{ pesos(p) }}{% if not loop.last %}
 &middot; {% endif %}{% endfor %}</p>
@@ -7468,7 +7465,7 @@ galeria</a></p>
 <ol class="pasos3">{% for p in pasos %}{% if p %}<li>{{ p }}</li>{% endif %}{% endfor %}</ol>
 <p class="botones">
 {% if wsp %}<a class="wsp" href="https://wa.me/{{ wsp }}?text={{ msg|urlencode }}"
-  rel="noopener">Escribime por WhatsApp &rarr;</a>{% endif %}
+  rel="noopener">Escríbeme por WhatsApp &rarr;</a>{% endif %}
 <a class="wsp hueco" href="/g/{{ gal['slug'] }}">Seguir eligiendo</a></p>
 <p style="opacity:.35;font-size:.84rem;margin:1.8rem 0 0">Si agregas o sacas
 fotos, el total y el ID se actualizan aca.</p>
@@ -7482,7 +7479,7 @@ GATE = PIXIE + """<header class="pcab"><span class="tit"><b>{{ gal['nombre'] }}<
 {{ foto(url_tapa(gal), "100vw", alt="", fetchpriority="high") }}</div>{% endif %}
 <main><form class="gate" method="post" action="/g/{{ gal['slug'] }}/entrar">
 <h2 style="margin:0">{{ gal['nombre'] }}</h2>
-<p>Dejame tu email y entras a ver la galeria.</p>
+<p>Déjame tu email y entras a ver la galeria.</p>
 {% if error %}<p class="aviso">{{ error }}</p>{% endif %}
 <input type="email" name="email" placeholder="tu@email.com" required autofocus>
 <input name="nombre" placeholder="Tu nombre (opcional)" maxlength="60">
@@ -7496,7 +7493,7 @@ EXPIRADA = """<header><b>rb.fotos</b> <span>{{ gal['nombre'] }}</span></header>
 <main><div class="gate" style="text-align:center">
 <h2 style="margin:0">{{ gal['nombre'] }}</h2>
 <p style="opacity:.6">Esta galeria vencio y ya no esta disponible.<br>
-Si la necesitas de nuevo, escribime y la vuelvo a abrir.</p>
+Si la necesitas de nuevo, escríbeme y la vuelvo a abrir.</p>
 </div></main>"""
 
 VIDEOS = PIXIE + """<style>
@@ -7543,7 +7540,7 @@ Los videos se borran solos a los 30 dias. Los que marques con &#9825; quedan par
 siempre.</p>
 </section>
 {% if caido %}<p class="aviso" style="text-align:center;padding:3rem">La camara no
-responde ahora. Proba de nuevo en un rato.</p>
+responde ahora. Prueba de nuevo en un rato.</p>
 {% elif not items %}<p style="text-align:center;opacity:.6;padding:3rem">No hay
 visitas {{ 'guardadas' if que == 'guardados' else 'para mostrar' }}.</p>{% endif %}
 <div class="grid">{% for v in items %}<figure class="celda" style="margin:0"
@@ -7601,7 +7598,7 @@ vid.addEventListener("loadeddata", () => { carga.hidden = true; vid.hidden = fal
 vid.addEventListener("error", () => {
   if (vid.getAttribute("src")) {
     carga.hidden = false; vid.hidden = true;
-    txt.textContent = "No se pudo cargar el video. Proba de nuevo.";
+    txt.textContent = "No se pudo cargar el video. Prueba de nuevo.";
   }
 });
 document.querySelectorAll(".vid .celda").forEach(c => c.addEventListener("click", async ev => {
@@ -8164,7 +8161,7 @@ if (pcom) {
       <p style="margin:.2rem 0 0;white-space:pre-wrap">${esc(c.texto)}</p></div>`).join("")
       || `<p style="opacity:.55;margin:.2rem 0">Nadie comento esta foto todavia.</p>`;
     pcom.innerHTML += `<textarea id="ctxt" maxlength="500"
-      placeholder="Escribi un comentario"></textarea>
+      placeholder="Escribe un comentario"></textarea>
       <p style="margin:.4rem 0 0;text-align:right">
       <button class="btn" id="cenviar">Comentar</button></p>`;
     document.getElementById("cenviar").onclick = enviar;
@@ -8761,11 +8758,14 @@ TARIFAS_DEF = {
                 "Balance de blancos (temperatura y matiz)", "Exposición y contraste",
                 "Iluminaciones, sombras, blancos y negros", "Intensidad y saturación",
                 "Nivelado de imagen", "Eliminación de distracciones",
-                "Reducción de ruido manual", "Encuadre al protagonista",
+                "Reducción de ruido con IA, dosificada según cada foto",
+                "Encuadre al protagonista",
                 "Limpieza leve de piel (granitos, brillos) de los "
                 "protagonistas, máximo 2 por foto"]},
             "pro": {"nombre": "Edición profesional", "resolucion": ["4K", 3840], "items": [
-                "Todo lo de la edición completa", "Reducción de ruido adaptada",
+                "Todo lo de la edición completa",
+                "Reducción de ruido avanzada con IA, con la limpieza que "
+                "necesite cada foto",
                 "Calibración de colores",
                 "Color grading: mezcla y atenuación de colores",
                 "Máscaras por sujeto/fondo para edición por zonas",
@@ -8781,9 +8781,12 @@ TARIFAS_DEF = {
             "Intensidad y saturación", "Nivelado de imagen"]},
         "completa": {"nombre": "Edición completa", "resolucion": ["4K", 3840], "items": [
             "Todo lo de la edición básica", "Eliminación de distracciones",
-            "Reducción de ruido manual", "Encuadre al protagonista"]},
+            "Reducción de ruido con IA, dosificada según cada foto",
+            "Encuadre al protagonista"]},
         "pro": {"nombre": "Edición profesional", "resolucion": ["4K", 3840], "items": [
-            "Todo lo de la edición completa", "Reducción de ruido adaptada",
+            "Todo lo de la edición completa",
+            "Reducción de ruido avanzada con IA, con la limpieza que "
+            "necesite cada foto",
             "Calibración de colores",
             "Color grading: mezcla y atenuación de colores",
             "Máscaras por sujeto/fondo/campo para edición por zonas"]},
@@ -11853,7 +11856,7 @@ def test():
         assert "TransferNow" in html, "perdio los plazos generales"
         # y el pack de edicion se despliega con sus items
         assert DEFAULTS["edicion_completa_nom"] in html, "no nombro el pack"
-        assert "Retoque de piel" in html, "no listo lo que incluye la edicion"
+        assert "Encuadre al protagonista" in html, "no listo lo que incluye la edicion"
         assert "Balance de blancos" not in html, "mezclo el pack basico"
     # los campos sueltos: lo de la galeria pisa al general, lo vacio lo hereda
     with app.test_request_context():
@@ -11869,7 +11872,7 @@ def test():
         etiquetas = {f[0]: f for f in indicaciones(propia)}
         assert etiquetas[DEFAULTS["ent_resolucion_nom"]][1] == "4K nativo"
         ed = etiquetas[DEFAULTS["ent_edicion_nom"]]
-        assert ed[1] == DEFAULTS["edicion_basica_nom"] and len(ed[2]) == 6, ed
+        assert ed[1] == DEFAULTS["edicion_basica_nom"] and len(ed[2]) == 5, ed
 
         # los detalles: vacios no dibujan fila, con texto si
         assert DEFAULTS["ent_detalles_nom"] not in etiquetas

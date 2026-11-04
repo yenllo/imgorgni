@@ -73,9 +73,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Texto de Edición
         let descEdicion = "";
         if (tipoEdicion === "Basica") {
-            descEdicion = "Edición básica: ajustes de color, exposición y recorte.";
+            descEdicion = "Edición básica: balance de blancos, exposición, contraste, tonos y nivelado.";
         } else if (tipoEdicion === "Completa") {
-            descEdicion = "Edición completa: ajustes de color, exposición, recorte y reducción de ruido (detalles y nitidez).";
+            descEdicion = "Edición completa: todo lo de la básica, más eliminación de distracciones, reducción de ruido con IA según cada foto y encuadre al protagonista.";
+        } else if (tipoEdicion === "Profesional") {
+            descEdicion = "Edición profesional: todo lo de la completa, más reducción de ruido avanzada con IA, calibración de colores, color grading y máscaras por zonas.";
         } else {
             descEdicion = "Edición mixta según lo acordado.";
         }
