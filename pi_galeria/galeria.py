@@ -86,6 +86,10 @@ CATALOGO = Path(os.environ.get("GALERIA_CATALOGO", BASE / "catalogo.db"))
 # galeria: asi una fecha de una liga puede llevar su logo y el mio juntos.
 LOGOS = Path(os.environ.get("GALERIA_LOGOS", BASE / "logos"))
 MAX_LOGOS = 4
+# Portadas subidas desde el panel. En la SSD, como los logos: no son fotos de
+# la galeria, asi que no entran a la grilla ni se pueden comprar.
+TAPAS = Path(os.environ.get("GALERIA_TAPAS", BASE / "tapas"))
+PORTADA_POR_PAGINA = 60
 
 # La FIRMA es otra cosa que la marca de agua: va en la foto que se entrega,
 # a color y opaca, una sola vez en una esquina. La marca de agua protege el
@@ -352,6 +356,7 @@ def conectar():
     # comporta exactamente igual que antes de que existieran
     tiene = {r["name"] for r in cx.execute("PRAGMA table_info(galeria)")}
     for col, tipo in (("clave_hash", "TEXT"), ("portada_foto_id", "INTEGER"),
+                      ("portada_archivo", "TEXT"),
                       ("expira", "TEXT"), ("marca", "INTEGER DEFAULT 1"),
                       ("descargas", "INTEGER DEFAULT 0"),
                       # el boton RAW; 1 = como siempre, se apaga por galeria
@@ -396,6 +401,8 @@ def conectar():
                       # boton "buscar mis fotos con una selfie"; ademas
                       # necesita el indice caras/<slug>.npz
                       ("buscar_cara", "INTEGER DEFAULT 0"),
+                      # mas filas y mas juntas: para lo que queda a la venta
+                      ("marca_densa", "INTEGER DEFAULT 0"),
                       # renglones del preset de Edicion que ESTA galeria no
                       # muestra, uno por linea y tal cual. NULL = la lista
                       # entera, como siempre
@@ -832,7 +839,7 @@ def _pegar(capa, est, x, y):
 
 
 @lru_cache(maxsize=12)
-def capa_marca(w, h, texto, factor=0.042, logos=()):
+def capa_marca(w, h, texto, factor=0.042, logos=(), densa=False):
     """La capa de marca depende del tamaño, del texto y de los logos, no de
     la foto.
 
@@ -844,14 +851,17 @@ def capa_marca(w, h, texto, factor=0.042, logos=()):
     capa = Image.new("RGBA", (lado, lado), (0, 0, 0, 0))
     # la tapa se ve a sangre: ahi la marca tiene que ser proporcionalmente
     # mas chica que en una miniatura, o tapa la foto
-    est = _estampa(texto, max(12, int(w * factor)), logos)
-    paso_x = est.width + w * 0.14
-    paso_y = est.height * (2.2 if logos else 4.5)
+    # densa: letra mas chica (22 px a 1000 de ancho, elegida mirando fotos reales
+    # con la fuente de la Pi) para que tape poco aunque se repita mucho
+    est = _estampa(texto, max(12, int(w * factor * (0.53 if densa else 1))), logos)
+    paso_x = est.width + w * (0.025 if densa else 0.14)
+    paso_y = est.height * (1.8 if densa else 2.2 if logos else 4.5)
 
     y = 0
     fila = 0
     while y < lado:
-        x = -paso_x if fila % 2 else 0
+        # densa: filas intercaladas, sin eso quedan columnas limpias de texto
+        x = (-paso_x / 2 if densa else -paso_x) if fila % 2 else 0
         while x < lado:
             _pegar(capa, est, x, y)
             x += paso_x
@@ -864,7 +874,7 @@ def capa_marca(w, h, texto, factor=0.042, logos=()):
 
 
 def marcar(origen, destino, texto=None, ancho=None, factor=0.042, logos=(),
-           firma=None):
+           firma=None, densa=False):
     ancho = ancho or ANCHO_PREVIEW
     """Preview reducida con la marca en diagonal, compuesta sobre los pixeles.
 
@@ -883,7 +893,7 @@ def marcar(origen, destino, texto=None, ancho=None, factor=0.042, logos=(),
 
     out = Image.alpha_composite(
         im, capa_marca(im.width, im.height, MARCA if texto is None else texto,
-                       factor, tuple(logos))).convert("RGB")
+                       factor, tuple(logos), bool(densa))).convert("RGB")
     # la firma va DESPUES y sin rotar: es la misma que se estampa en la
     # entrega, para que lo que se ve al elegir sea lo que llega
     if firma:
@@ -927,14 +937,16 @@ def guardar(im, destino, **jpeg):
         tmp.unlink(missing_ok=True)
 
 
-def ruta_cache(ruta, texto, logos, ancho, factor, firma=None):
+def ruta_cache(ruta, texto, logos, ancho, factor, firma=None, densa=False):
     """Donde vive la preview de (foto, marca, firma, medida). Es una funcion
     aparte porque la limpieza necesita rearmar exactamente la misma clave: si
     la formula viviera solo dentro de preview(), borrar seria adivinar."""
     st = os.stat(ruta)
+    # densa solo entra si esta prendida: las claves de siempre no cambian y
+    # ninguna galeria pierde su calentado
     clave = hashlib.sha1(
-        f"{ruta}|{st.st_mtime_ns}|{texto}|{'|'.join(logos)}|{ancho}|{factor}|"
-        f"{firma}".encode()).hexdigest()
+        (f"{ruta}|{st.st_mtime_ns}|{texto}|{'|'.join(logos)}|{ancho}|{factor}|"
+         f"{firma}" + ("|densa" if densa else "")).encode()).hexdigest()
     return CACHE / clave[:2] / f"{clave}.jpg"
 
 
@@ -1031,7 +1043,7 @@ def preview_de(gal, foto_id, ruta, ancho=None):
     if gal["marca"] == 0:
         return sin_marca(ruta, ancho)
     return preview(foto_id, ruta, gal["marca_texto"], ancho,
-                   logos=logos_de(gal), firma=firma_de(gal))
+                   logos=logos_de(gal), firma=firma_de(gal), densa=gal["marca_densa"])
 
 
 def clave_preview_de(gal, ruta, ancho=None, logos=None, firma=None):
@@ -1047,7 +1059,7 @@ def clave_preview_de(gal, ruta, ancho=None, logos=None, firma=None):
     return ruta_cache(ruta, MARCA if texto is None else texto,
                       tuple(logos_de(gal) if logos is None else logos),
                       ancho or ANCHO_PREVIEW, 0.042,
-                      firma_de(gal) if firma is None else firma)
+                      firma_de(gal) if firma is None else firma, gal["marca_densa"])
 
 
 def entregable(ruta, firma):
@@ -1058,7 +1070,7 @@ def entregable(ruta, firma):
 
 
 def preview(foto_id, ruta, texto=None, ancho=None, factor=0.042, logos=(),
-            firma=None, webp=False):
+            firma=None, webp=False, densa=False):
     """Cachea por (ruta, mtime, texto de la marca, logos, ancho).
 
     El texto y los logos van en la clave a proposito: cambiar la marca de una
@@ -1068,17 +1080,17 @@ def preview(foto_id, ruta, texto=None, ancho=None, factor=0.042, logos=(),
     texto = MARCA if texto is None else texto
     ancho = ancho or ANCHO_PREVIEW
     logos = tuple(logos)
-    destino = ruta_cache(ruta, texto, logos, ancho, factor, firma)
+    destino = ruta_cache(ruta, texto, logos, ancho, factor, firma, densa)
     if webp:
         destino = destino.with_suffix(".webp")   # misma clave: la limpieza la encuentra
     if not destino.exists():
         with GENERANDO:
             if not destino.exists():    # otro hilo la pudo terminar en la espera
-                marcar(ruta, destino, texto, ancho, factor, logos, firma)
+                marcar(ruta, destino, texto, ancho, factor, logos, firma, densa)
     return destino
 
 
-def limpiar_cache(gid, texto, logos, firma=None):
+def limpiar_cache(gid, texto, logos, firma=None, densa=False):
     """Borra las previews de una galeria hechas con ESA marca.
 
     Sin esto, cada vez que tocas un logo el cache se queda con una copia
@@ -1091,12 +1103,15 @@ def limpiar_cache(gid, texto, logos, firma=None):
     # mas las de la tapa que piden la tarjeta (srcset) y la vista previa del
     # chat (og, 1200): sin ellas quedaban huerfanas al cambiar la marca
     medidas = MEDIDAS + tuple((w, 0.017) for w in ANCHOS + (1200,))
-    for f in db().execute("SELECT ruta FROM foto WHERE galeria_id = ?", (gid,)):
+    for f in db().execute(
+            "SELECT ruta FROM foto WHERE galeria_id = ? UNION ALL "
+            "SELECT ? || '/' || portada_archivo FROM galeria "
+            "WHERE id = ? AND portada_archivo IS NOT NULL", (gid, str(TAPAS), gid)):
         for ancho, factor in medidas:
             try:
                 p = ruta_cache(f["ruta"], MARCA if texto is None else texto,
                                tuple(logos), ancho or ANCHO_PREVIEW, factor,
-                               firma)
+                               firma, densa)
             except OSError:
                 break        # la foto ya no esta en el disco: nada que limpiar
             for q in (p, p.with_suffix(".webp")):
@@ -1214,7 +1229,7 @@ def foto_autorizada(foto_id, firmada=False):
     f = db().execute(
         "SELECT foto.*, galeria.slug, galeria.expira, galeria.marca, "
         "galeria.descargas, galeria.raw_descarga, galeria.marca_texto, galeria.logos, "
-        "galeria.firma, galeria.firma_pos, galeria.firma_tam FROM foto "
+        "galeria.marca_densa, galeria.firma, galeria.firma_pos, galeria.firma_tam FROM foto "
         "JOIN galeria ON galeria.id = foto.galeria_id WHERE foto.id = ?",
         (foto_id,)).fetchone()
     if f is None or expirada(f) or (
@@ -1470,8 +1485,8 @@ CAMPOS = (
          "menos, se retiene el anticipo.\n"
          "Venta abierta: al contratar, el organizador se compromete a avisar a "
          "jugadores, apoderados e invitados que la galer\u00eda se publica "
-         "despu\u00e9s del evento para venta individual. Quien no quiera "
-         "aparecer me lo pide y saco sus fotos de la venta.\n"
+         "despu\u00e9s del evento para venta individual, con b\u00fasqueda por "
+         "cara. Quien no quiera aparecer me lo pide y saco sus fotos de la venta.\n"
          "Traslado y estacionamiento: se cotizan seg\u00fan el lugar."),
         ("tar_soc_rotulo", "Social: Rotulo de arriba", 1, "Eventos sociales y matrimonios"),
         ("tar_soc_titulo", "Social: Titulo de la seccion", 1, "Tarifas para cumplea\u00f1os, eventos y matrimonios"),
@@ -1908,9 +1923,9 @@ def grupos_de(gid):
 
 
 # ------------------------------------------------ busqueda por selfie
-# El indice (caras.npz de caras_evento.py, armado en el notebook) se copia a
-# caras/<slug>.npz. La galeria de venta usa el mismo del evento: las exportadas
-# conservan el DSC de camara, y por eso se empareja por ese prefijo.
+# El indice se arma SIEMPRE en el notebook y queda en caras/<slug>.npz: lo sube
+# caras_galeria.py, que guarda la ruta entera de cada foto. El de Katty es anterior
+# (caras_evento.py): trae solo el nombre y se empareja por el DSC de camara.
 CARAS = BASE / "caras"
 
 
@@ -1925,6 +1940,40 @@ def clave_camara(nombre):
     stem = Path(nombre).stem
     m = re.match(r"[A-Za-z_]*\d+", stem)
     return (m.group(0) if m else stem).upper()
+
+
+def ids_de_caras(filas, pares):
+    """foto.id de las filas que salieron en la busqueda. Con ruta entera calza
+    exacto: los DSC se repiten entre carpetas y traerian fotos de otra persona."""
+    rutas = {a for a, _s in pares if "/" in a}
+    claves = {clave_camara(a) for a, _s in pares if "/" not in a}
+    return [r["id"] for r in filas if r["ruta"] in rutas or clave_camara(r["ruta"]) in claves]
+
+
+def estado_caras(gal):
+    """Lo que el panel muestra del analisis facial de esta galeria."""
+    slug = gal["slug"]
+    trabajando = CACHE / f"caras-trabajando-{slug}"
+    e = {"estado": None, "avance": "", "error": None, "fotos": None, "caras": None,
+         "hay": (CARAS / f"{slug}.npz").is_file()}
+    try:
+        e.update(json.loads((CARAS / f"{slug}.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        pass                       # el indice de Katty no tiene resumen
+    try:
+        e["error"] = (CACHE / f"caras-error-{slug}").read_text(encoding="utf-8").strip()
+    except (OSError, ValueError):
+        pass
+    if trabajando.exists() and notebook_viva():
+        e["estado"] = "corriendo"
+        try:
+            texto = trabajando.read_text().strip()
+            e["avance"] = texto if re.fullmatch(r"\d+/\d+", texto) else ""
+        except (OSError, ValueError):
+            pass
+    elif trabajando.exists() or (CACHE / f"caras-pedido-{slug}").exists():
+        e["estado"] = "pedido"     # notebook apagada o de dia: lo retoma sola
+    return e
 
 
 def buscar_cara(gal, selfie):
@@ -1943,10 +1992,8 @@ def buscar_cara(gal, selfie):
     pares = json.loads(hecho.stdout)
     if pares is None:
         return None
-    sale = {clave_camara(a) for a, _s in pares}
-    return [r["id"] for r in db().execute(
-        "SELECT id, ruta FROM foto WHERE galeria_id = ?", (gal["id"],))
-        if clave_camara(r["ruta"]) in sale]
+    return ids_de_caras(db().execute(
+        "SELECT id, ruta FROM foto WHERE galeria_id = ?", (gal["id"],)), pares)
 
 
 def como_ordenar(args):
@@ -2068,7 +2115,7 @@ def url_tapa(gal):
     el archivo de la foto o un logo con el mismo nombre. Para eso, cambiar la
     portada y volverla a poner.
     """
-    campos = ("portada_foto_id", "fotos", "marca", "marca_texto", "logos",
+    campos = ("portada_foto_id", "portada_archivo", "fotos", "marca", "marca_texto", "logos",
               "firma", "firma_pos", "firma_tam")
     ks = gal.keys()
     h = hashlib.sha1(repr([gal[k] if k in ks else None for k in campos])
@@ -2170,7 +2217,8 @@ def eventos_publicos():
     return _viz(EVENTOS, eventos=evs, seccion="eventos", indexar=True,
                 titulo="Eventos \u00b7 rb.fotos",
                 desc="%d eventos publicados" % len(evs) if evs else None,
-                og_img=("%sportada/%s?og=1&v=%s" % (request.url_root, evs[0]["slug"], evs[0]["portada_foto_id"])
+                og_img=("%sportada/%s?og=1&v=%s" % (request.url_root, evs[0]["slug"],
+                                                    evs[0]["portada_archivo"] or evs[0]["portada_foto_id"])
                         if evs else None))
 
 
@@ -2362,7 +2410,8 @@ def carpeta_publica(slug):
     return _viz(CARPETA, carpeta=c, eventos=evs,
                 titulo="%s \u00b7 rb.fotos" % c["nombre"],
                 desc="%d galerias" % len(evs),
-                og_img=("%sportada/%s?og=1&v=%s" % (request.url_root, evs[0]["slug"], evs[0]["portada_foto_id"])
+                og_img=("%sportada/%s?og=1&v=%s" % (request.url_root, evs[0]["slug"],
+                                                    evs[0]["portada_archivo"] or evs[0]["portada_foto_id"])
                         if evs else None))
 
 
@@ -2445,7 +2494,8 @@ def _tarjeta(gal, cuantas=None):
     partes = [p for p in (("%d fotos" % cuantas) if cuantas else None, dia) if p]
     img = None
     if tiene_tapa(gal):
-        img = "%sportada/%s?og=1&v=%s" % (request.url_root, gal["slug"], gal["portada_foto_id"])
+        img = "%sportada/%s?og=1&v=%s" % (request.url_root, gal["slug"],
+                                          gal["portada_archivo"] or gal["portada_foto_id"])
     return {"titulo": "Galeria de %s" % gal["nombre"],
             "desc": " \u00b7 ".join(partes) or "rb.fotos",
             "og_img": img}
@@ -3011,35 +3061,48 @@ def descargar(foto_id, cual="original"):
                      download_name=os.path.basename(ruta))
 
 
+def ruta_tapa(gal):
+    """El archivo de la tapa: la subida, la elegida o la primera foto. None si no hay.
+
+    Solo una foto de esa galeria: sin ese AND, un portada_foto_id apuntaria a
+    cualquier foto. Sin portada elegida cae en la primera: una galeria sin tapa
+    se veria rota, y elegir tapa es opcional a proposito.
+    """
+    if gal["portada_archivo"] and (TAPAS / gal["portada_archivo"]).is_file():
+        return str(TAPAS / gal["portada_archivo"])
+    f = db().execute(
+        "SELECT ruta FROM foto WHERE galeria_id = ? AND (? IS NULL OR id = ?) "
+        "ORDER BY orden, id LIMIT 1",
+        (gal["id"], gal["portada_foto_id"], gal["portada_foto_id"])).fetchone()
+    if f is None or not dentro_de_raiz(f["ruta"]) or not os.path.exists(f["ruta"]):
+        return None
+    return f["ruta"]
+
+
 @app.get("/portada/<slug>")
 def portada(slug):
     """La tapa se ve ANTES de entrar, asi que no pasa por foto_autorizada().
 
-    Es el preview marcado al agua, nunca el original, y solo si la foto es de
-    esa galeria: sin ese AND, un portada_foto_id apuntaria a cualquier foto.
+    Es el preview marcado al agua, nunca el original.
     """
     gal = db().execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
     if gal is None or expirada(gal):
         abort(404)
-    # sin portada elegida cae en la primera foto: una galeria sin tapa se veria
-    # rota, y elegir tapa es opcional a proposito
-    f = db().execute(
-        "SELECT * FROM foto WHERE galeria_id = ? AND (? IS NULL OR id = ?) "
-        "ORDER BY orden, id LIMIT 1",
-        (gal["id"], gal["portada_foto_id"], gal["portada_foto_id"])).fetchone()
-    if f is None or not dentro_de_raiz(f["ruta"]) or not os.path.exists(f["ruta"]):
+    ruta = ruta_tapa(gal)
+    if ruta is None:
         abort(404)
     # ?w= es la miniatura de la tarjeta de evento (srcset); sin el, la tapa
     # de siempre, que el gate usa de fondo a pantalla completa
     chica = _ancho_pedido()
     try:
         return servir_vidriera(
-            preview(f["id"], f["ruta"], gal["marca_texto"],
+            preview(gal["portada_foto_id"], ruta, gal["marca_texto"],
                     # ?og=1 la pide chica: WhatsApp descarta las imagenes
                     # pesadas y no dibuja ninguna vista previa
                     chica or (1200 if request.args.get("og") else ANCHO_TAPA),
-                    0.017, logos_de(gal), firma_de(gal), _webp_pedido())
-            if gal["marca"] else sin_marca(f["ruta"], chica, _webp_pedido()),
+                    0.017, logos_de(gal), firma_de(gal), _webp_pedido(),
+                    gal["marca_densa"])
+            if gal["marca"] else sin_marca(ruta, chica, _webp_pedido()),
             86400)
     except Exception:
         abort(404)
@@ -3215,9 +3278,9 @@ def cuenta_lista(cx, lid):
 
 
 def tiene_tapa(gal):
-    """Hay foto para la portada: la elegida, o la primera de la galeria."""
-    return db().execute("SELECT 1 FROM foto WHERE galeria_id = ? LIMIT 1",
-                        (gal["id"],)).fetchone() is not None
+    """Hay foto para la portada: la subida, la elegida o la primera de la galeria."""
+    return bool(gal["portada_archivo"]) or db().execute(
+        "SELECT 1 FROM foto WHERE galeria_id = ? LIMIT 1", (gal["id"],)).fetchone() is not None
 
 
 def _cliente_de(slug):
@@ -3762,10 +3825,12 @@ def borrar(slug):
     los emails y los me-gusta. El cache de previews queda y se reusa si
     volves a publicar las mismas fotos."""
     cx = db()
-    if cx.execute("SELECT 1 FROM galeria WHERE slug = ?", (slug,)).fetchone() is None:
+    gal = cx.execute("SELECT portada_archivo FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    if gal is None:
         abort(404)
     cx.execute("DELETE FROM galeria WHERE slug = ?", (slug,))
     cx.commit()
+    _soltar_tapa(gal)
     return redirect(url_for("panel"))
 
 
@@ -3818,6 +3883,20 @@ def calentar_ahora(slug):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
         _lock_calentando(slug).write_text(str(p.pid))
+    return redirect(url_for("panel", slug=slug))
+
+
+@app.post("/panel/<slug>/caras")
+def analizar_caras(slug):
+    """Solo deja el pedido. El analisis corre en el notebook, de noche y en casa
+    (agente_calentado.py + caras_galeria.py); la Pi no tiene como hacerlo."""
+    gal = db().execute("SELECT venta FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    if gal is None or not gal["venta"]:
+        abort(404)
+    CACHE.mkdir(parents=True, exist_ok=True)
+    (CACHE / f"caras-error-{slug}").unlink(missing_ok=True)
+    if not (CACHE / f"caras-trabajando-{slug}").exists():
+        (CACHE / f"caras-pedido-{slug}").write_text(ahora_iso())
     return redirect(url_for("panel", slug=slug))
 
 
@@ -4394,13 +4473,15 @@ def ajustes(slug):
     # "" es una eleccion valida: marca de solo logo
     nuevo_texto = texto if (texto in MARCAS or texto == "") else gal["marca_texto"]
     cx.execute("UPDATE galeria SET marca = ?, descargas = ?, marca_texto = ?, "
-               "venta = ?, raw_descarga = ?, comentarios = ?, buscar_cara = ? WHERE id = ?",
+               "venta = ?, raw_descarga = ?, comentarios = ?, buscar_cara = ?, "
+               "marca_densa = ? WHERE id = ?",
                (0 if request.form.get("sin_marca") else 1,
                 1 if request.form.get("descargas") else 0, nuevo_texto,
                 1 if request.form.get("venta") else 0,
                 1 if request.form.get("raw_descarga") else 0,
                 1 if request.form.get("comentarios") else 0,
-                1 if request.form.get("buscar_cara") else 0, gal["id"]))
+                1 if request.form.get("buscar_cara") else 0,
+                1 if request.form.get("marca_densa") else 0, gal["id"]))
 
     # que recibe el cliente: vacio = se usa el texto general
     for col in ENTREGA_COLS:
@@ -4472,8 +4553,10 @@ def ajustes(slug):
     nueva_firma = (fir, fpos, ftam) if fir else None
     limpiadas = 0
     if (tuple(elegidos) != antes_logos or nuevo_texto != antes_texto
-            or nueva_firma != antes_firma):
-        limpiadas += limpiar_cache(gal["id"], antes_texto, antes_logos, antes_firma)
+            or nueva_firma != antes_firma
+            or bool(request.form.get("marca_densa")) != bool(gal["marca_densa"])):
+        limpiadas += limpiar_cache(gal["id"], antes_texto, antes_logos, antes_firma,
+                                   gal["marca_densa"])
     if antes_firma and nueva_firma != antes_firma:
         limpiadas += limpiar_firmas(gal["id"], antes_firma)
 
@@ -4488,17 +4571,85 @@ def ajustes(slug):
     cx.execute("UPDATE galeria SET entrega = ? WHERE id = ?",
                (entrega or None, gal["id"]))
 
-    tapa = (request.form.get("portada") or "").strip()
-    fid = None
-    if tapa.isdigit():
-        # solo una foto de ESTA galeria puede ser su tapa
-        fila = cx.execute("SELECT id FROM foto WHERE id = ? AND galeria_id = ?",
-                          (int(tapa), gal["id"])).fetchone()
-        fid = fila["id"] if fila else None
-    cx.execute("UPDATE galeria SET portada_foto_id = ? WHERE id = ?", (fid, gal["id"]))
-
     cx.commit()
     return redirect(url_for("panel", slug=slug, limpiadas=limpiadas or None))
+
+
+def _soltar_tapa(gal):
+    """Borra el archivo de una tapa subida que ya no se usa.
+
+    ponytail: sus previews quedan en el cache, pero son un punado de archivos
+    chicos. Si algun dia pesan, limpiarlas aca con clave_preview_de().
+    """
+    if gal["portada_archivo"]:
+        (TAPAS / gal["portada_archivo"]).unlink(missing_ok=True)
+
+
+@app.get("/panel/<slug>/portada")
+def portada_form(slug):
+    cx = db()
+    gal = cx.execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    if gal is None:
+        abort(404)
+    total = cx.execute("SELECT COUNT(*) AS n FROM foto WHERE galeria_id = ?",
+                       (gal["id"],)).fetchone()["n"]
+    paginas = max(1, (total + PORTADA_POR_PAGINA - 1) // PORTADA_POR_PAGINA)
+    pag = min(max(request.args.get("pag", 1, type=int), 1), paginas)
+    fotos = cx.execute("SELECT id FROM foto WHERE galeria_id = ? ORDER BY orden, id "
+                       "LIMIT ? OFFSET ?", (gal["id"], PORTADA_POR_PAGINA,
+                                            (pag - 1) * PORTADA_POR_PAGINA)).fetchall()
+    return render_template_string(BASE_HTML, cuerpo=render_template_string(
+        PANEL_PORTADA, gal=gal, fotos=fotos, total=total, pag=pag, paginas=paginas,
+        error=request.args.get("error")))
+
+
+@app.post("/panel/<slug>/portada")
+def portada_guardar(slug):
+    """Una foto subida, cualquier foto de ESTA galeria, o ninguna."""
+    cx = db()
+    gal = cx.execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    if gal is None:
+        abort(404)
+    archivo, fid = None, None
+    subida = request.files.get("archivo")
+    if subida is not None and subida.filename:
+        ext = Path(subida.filename).suffix.lower()
+        if ext not in VISIBLES:
+            return redirect(url_for("portada_form", slug=slug, error="ese formato no sirve"))
+        TAPAS.mkdir(parents=True, exist_ok=True)
+        # nombre nuevo cada vez: va en el ?v= de la tapa, y asi nadie ve la
+        # anterior guardada en su navegador
+        archivo = "%d-%s%s" % (gal["id"], secrets.token_hex(4), ext)
+        subida.save(TAPAS / archivo)
+        if not abrible(TAPAS / archivo):
+            (TAPAS / archivo).unlink(missing_ok=True)
+            return redirect(url_for("portada_form", slug=slug, error="no es una imagen"))
+    elif (request.form.get("foto") or "").isdigit():
+        fila = cx.execute("SELECT id FROM foto WHERE id = ? AND galeria_id = ?",
+                          (int(request.form["foto"]), gal["id"])).fetchone()
+        if fila is None:
+            abort(404)
+        fid = fila["id"]
+    elif not request.form.get("sin"):
+        return redirect(url_for("portada_form", slug=slug, error="elige una foto"))
+    cx.execute("UPDATE galeria SET portada_foto_id = ?, portada_archivo = ? WHERE id = ?",
+               (fid, archivo, gal["id"]))
+    cx.commit()
+    _soltar_tapa(gal)
+    return redirect(url_for("portada_form", slug=slug))
+
+
+@app.get("/panel/<slug>/portada/ver")
+def portada_ver(slug):
+    """La tapa actual sin marca: el panel esta detras del basic_auth de Caddy."""
+    gal = db().execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    ruta = ruta_tapa(gal) if gal is not None else None
+    if ruta is None:
+        abort(404)
+    try:
+        return send_file(sin_marca(ruta), mimetype="image/jpeg", max_age=0)
+    except Exception:
+        abort(404)
 
 
 PANEL_BARRA = """<nav class="pbarra">
@@ -4623,6 +4774,16 @@ code{background:var(--panel);border:1px solid var(--linea);border-radius:2px;
   border-bottom:1px solid var(--cancha)}
 .tapas img,.tapas .nada{border-radius:2px;background:var(--panel)}
 .tapas input:checked ~ img,.tapas input:checked ~ .nada{border-color:var(--cancha)}
+.tapa-hoy{display:block;width:min(100%,18rem);aspect-ratio:3/2;object-fit:cover;border-radius:7px;background:#1c1c1c}
+.elegir{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.4rem;margin:.5rem 0 1rem}
+.elegir button{all:unset;cursor:pointer;line-height:0}
+.elegir button:focus-visible{outline:2px solid #eee;outline-offset:2px}
+.elegir img{width:100%;aspect-ratio:3/2;object-fit:cover;box-sizing:border-box;
+  border:3px solid transparent;border-radius:7px;background:#1c1c1c}
+.elegir button:hover img{border-color:#777}
+.elegir button.on img{border-color:var(--cancha)}
+.paginas{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+.paginas input{width:5rem}
 .tapas.logos img{background:var(--panel)}
 .combo{background:var(--panel);border:1px solid var(--linea);border-radius:2px}
 .combo:hover{border-color:var(--cancha)}
@@ -5666,11 +5827,6 @@ def panel(slug=None):
         "  SUM(descargable) AS descargables FROM foto WHERE galeria_id = ?",
         (gal["id"],)).fetchone()
     calentadas, _total_cal = calentadas_de(cx, gal["id"])
-    # ponytail: solo las primeras 24 para elegir tapa. Una fecha son 3000 fotos
-    # y nadie elige la portada en la numero 1800.
-    primeras = cx.execute(
-        "SELECT id FROM foto WHERE galeria_id = ? ORDER BY orden, id LIMIT 24",
-        (gal["id"],)).fetchall()
     # cuatro repartidas a lo largo de la galeria: la primera y la ultima
     # suelen ser del calentamiento, y en el medio esta el partido de verdad
     muestras = []
@@ -5686,6 +5842,7 @@ def panel(slug=None):
             PANEL_GAL, gal=gal, clientes=clientes, elegidas=elegidas,
             miradas=cobertura(cx, gal["id"]),
             tiene_indice=(CARAS / f"{gal['slug']}.npz").is_file(),
+            caras=estado_caras(gal),
             muestras_firma=muestras,
             estado=estado,
             tarifas=tramos(gal), pesos=pesos, precios_default=PRECIOS,
@@ -5706,7 +5863,7 @@ def panel(slug=None):
             calentadas=calentadas,
             corriendo=_calentando(gal["slug"]) or en_notebook(gal["slug"]),
             donde="la notebook" if en_notebook(gal["slug"]) else "la Pi",
-            primeras=primeras, hoy=datetime.now(timezone.utc).date().isoformat(),
+            hoy=datetime.now(timezone.utc).date().isoformat(),
             nombre=os.path.basename))
 
 
@@ -6881,9 +7038,10 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
   </div>
   <div><label class="tf-l" for="tf-x">Venta de fotos a jugadores</label>
     <select id="tf-x">
-      <option value="abierto">Abierta: los jugadores pueden comprar sus fotos</option>
+      <option value="abierto">Abierta: los jugadores pueden buscarse por cara y comprar sus fotos</option>
       <option value="exclusivo">Exclusiva (+{{ R.exclusivo_pct }} % en fotos): solo la liga recibe las fotos</option>
     </select>
+    <p class="tf-ayuda">En venta abierta, la galer&iacute;a incluye reconocimiento facial por IA para que cada jugador encuentre sus fotos al instante.</p>
     {% if T.tar_venta_nota %}<p class="tf-ayuda">{{ T.tar_venta_nota }}</p>{% endif %}</div>
   <div>
     <span class="tf-l" style="display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;color:var(--humo);margin-bottom:.4rem">Extras</span>
@@ -7208,7 +7366,7 @@ function calcular(){
       + (maxC > 1 ? " (hasta " + maxC + " a la vez)" : "") + ", "
       + (P ? "pack " + P.nombre + " (" + n + " fotos)"
            : "fotos a mi medida (" + q[0] + " básicas, " + q[1] + " completas, " + q[2] + " profesionales)")
-      + ", venta " + (excl ? "exclusiva" : "abierta")
+      + ", venta " + (excl ? "exclusiva" : "abierta con búsqueda por cara")
       + (xs.length ? ", con " + xs.join(", ") : "")
       + ". Total estimado " + pesos(total) + (nf > 1 ? " por fecha, " + pesos(total * nf) + " la temporada" : "")
       + ". Detalle: " + linkCotizacion();
@@ -7475,7 +7633,7 @@ fotos, el total y el ID se actualizan aca.</p>
 
 GATE = PIXIE + """<header class="pcab"><span class="tit"><b>{{ gal['nombre'] }}</b>
 <span>rb.fotos</span></span></header>
-{% if gal['portada_foto_id'] %}<div class="fondo">
+{% if gal['portada_foto_id'] or gal['portada_archivo'] %}<div class="fondo">
 {{ foto(url_tapa(gal), "100vw", alt="", fetchpriority="high") }}</div>{% endif %}
 <main><form class="gate" method="post" action="/g/{{ gal['slug'] }}/entrar">
 <h2 style="margin:0">{{ gal['nombre'] }}</h2>
@@ -7662,7 +7820,7 @@ document.getElementById('bterminar').onclick = async function () {
 {% if vende %}<a class="bcomprar" href="/g/{{ gal['slug'] }}/comprar">Comprar
 <b id="ncar">{{ ncarro }}</b></a>{% endif %}</header>
 <main>{% if tapa and not lista %}<section class="tapa">
-<img src="/portada/{{ gal['slug'] }}?v={{ gal['portada_foto_id'] }}" alt="">
+<img src="/portada/{{ gal['slug'] }}?v={{ gal['portada_archivo'] or gal['portada_foto_id'] }}" alt="">
 <div class="cen">
 <h1>{{ gal['nombre'] }}</h1>
 <p class="fecha">{{ gal['creada'][:10] }}</p>
@@ -8460,6 +8618,44 @@ carpeta. Entra a alguna de abajo{{ ', o inclui las subcarpetas' if hay_sub and n
 {% else %}<li style="opacity:.55;padding:.65rem .8rem">Sin subcarpetas.</li>{% endfor %}</ul>
 </main>"""
 
+PANEL_PORTADA = PANEL_CSS + PANEL_BARRA + """<main>
+<h1 class="tit">Portada</h1>
+<p class="migas"><a href="/panel/{{ gal['slug'] }}">&larr; {{ gal['nombre'] }}</a></p>
+<p class="nota">La tapa que ve el cliente y la que sale en /eventos.
+{% if not gal['portada_foto_id'] and not gal['portada_archivo'] %}Sin elegir:
+se usa la primera foto.{% endif %}</p>
+{% if error %}<p class="aviso">{{ error }}</p>{% endif %}
+<img class="tapa-hoy" src="/panel/{{ gal['slug'] }}/portada/ver" alt="Portada actual">
+{% if gal['portada_foto_id'] or gal['portada_archivo'] %}
+<form method="post" style="margin-top:.6rem"><button class="btn" name="sin" value="1"
+  >Quitar la portada</button></form>{% endif %}
+
+<h3>Subir una foto</h3>
+<p class="nota">No se agrega a la galeria ni se puede comprar. Lleva la misma marca
+de agua que las demas si la galeria la tiene.</p>
+<form method="post" enctype="multipart/form-data">
+<input type="file" name="archivo" required
+  accept="image/jpeg,image/png,image/webp,image/tiff">
+<button class="btn">Subir y usar</button>
+</form>
+
+<h3>Elegir de la galeria</h3>
+{% if fotos %}<p class="nota">{{ total }} fotos. Toca una para dejarla de portada.</p>
+<form method="post" class="elegir">
+{% for f in fotos %}<button name="foto" value="{{ f['id'] }}" title="Usar esta foto"
+  class="{{ 'on' if f['id'] == gal['portada_foto_id'] }}"><img src="/panel/p/{{ f['id'] }}"
+  loading="lazy" alt=""></button>{% endfor %}
+</form>
+{% if paginas > 1 %}<form method="get" class="paginas">
+{% if pag > 1 %}<a class="btn" href="?pag={{ pag - 1 }}">&larr; Anterior</a>{% endif %}
+<label>Pagina <input type="number" name="pag" min="1" max="{{ paginas }}"
+  value="{{ pag }}"> de {{ paginas }}</label>
+<button class="btn">Ir</button>
+{% if pag < paginas %}<a class="btn" href="?pag={{ pag + 1 }}">Siguiente &rarr;</a>{% endif %}
+</form>{% endif %}
+{% else %}<p class="nota">Esta galeria no tiene fotos.</p>{% endif %}
+</main>"""
+
 PANEL_DESCARGABLES = PANEL_CSS + PANEL_BARRA + """<main>
 <h1 class="tit">Que se puede descargar</h1>
 <p class="migas"><a href="/panel/{{ gal['slug'] }}">&larr; {{ gal['nombre'] }}</a></p>
@@ -9186,7 +9382,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
   <fieldset><legend>3. Venta posterior</legend>
     <label>Tipo de pack</label>
     <select id="pack">
-      <option value="abierto">Abierto: galería pública a la venta después del evento</option>
+      <option value="abierto">Abierto: galería pública a la venta después del evento, con búsqueda por cara</option>
       <option value="exclusivo">Exclusivo: sin venta individual</option>
     </select>
     <div id="bloqueAbierto" style="margin-top:8px">
@@ -9196,7 +9392,6 @@ PANEL_COTIZADOR = r"""<main class="cotz">
         <option value="si">Sí, las comparte</option>
         <option value="no">No, no las comparte</option>
       </select>
-      <label class="cz-chk" style="margin-top:6px"><input type="checkbox" id="busquedaCara"> Búsqueda por cara en la galería de venta</label>
     </div>
     <div id="bloqueExclusivo" style="margin-top:8px">
       <label>Recargo por exclusividad (% sobre las fotos)</label>
@@ -9296,7 +9491,7 @@ const PRESETS = {
   lista: {packFotos:"liga",durPartido:"60",simult:"{}",lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
-          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,recargoUrg:0,volumen:0,boleta:"si",
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,recargoUrg:0,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
           aLogo:false,aPartidos:false,aSeleccion:false,tipoEvento:"liga"},
   // cumpleanos y eventos sociales: su hora y sus precios; sin basica, sin
@@ -9311,7 +9506,7 @@ const PRESETS = {
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
           packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
-          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,busquedaCara:false,recargoUrg:0,volumen:0,
+          gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,recargoUrg:0,volumen:0,
           boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00",tipoEvento:"liga"}
 };
 
@@ -9594,10 +9789,9 @@ function render(){
     venta = `<li><b>Pack abierto:</b> después de la entrega publicaré una galería con marca de agua donde los ${quienes} podrán comprar fotos de forma individual, a precios propios que no tienen relación con el cliente.</li>`;
     // que nadie diga despues que no sabia: el cliente avisa, y quien no quiera
     // aparecer pide que saquen sus fotos de la venta
-    venta += `<li><b>Aviso a los asistentes:</b> al aceptar esta cotización, el cliente se compromete a informar a todos los ${r.social ? "invitados" : "jugadores, apoderados y representantes"} que la galería se publicará después del evento para su venta individual. Quien no quiera aparecer puede pedírmelo y retiro sus fotos de la venta.</li>`;
-    // la busqueda por cara la implementa Renzo en la galeria (26/10/2026); aca
-    // solo se ofrece en la cotizacion
-    if($("busquedaCara").checked) venta += `<li><b>Búsqueda por cara:</b> en la galería de venta cada ${quien} podrá encontrar sus fotos buscando por su cara, sin revisar el evento completo.</li>`;
+    venta += `<li><b>Aviso a los asistentes:</b> al aceptar esta cotización, el cliente se compromete a informar a todos los ${r.social ? "invitados" : "jugadores, apoderados y representantes"} que la galería se publicará después del evento para su venta individual, con búsqueda por cara. Quien no quiera aparecer puede pedírmelo y retiro sus fotos de la venta.</li>`;
+    // toda galeria a la venta la lleva desde el 4/11/2026: ya no es una opcion
+    venta += `<li><b>Búsqueda por cara:</b> analizaré con IA las caras de las fotos de la galería de venta para que cada ${quien} encuentre las suyas subiendo una selfie, sin revisar el evento completo. La selfie solo se usa para buscar y se borra al instante.</li>`;
     if(c === "si") venta += `<li>El cliente indicó que <b>compartirá con los ${quienes} las fotos que compró</b>: esas fotos quedan fuera de la venta individual, para que nadie pague por una foto que ya tiene.</li>`;
     else if(c === "no") venta += `<li>El cliente indicó que <b>no compartirá</b> las fotos que compró: todas las fotos del evento pueden quedar a la venta individual.</li>`;
   }
@@ -9705,8 +9899,8 @@ function resumenWsp(){
   if(r.ahorro>0) t.push(`Precio de lista ${pesos(r.subL)}. Tu descuento: ${pesos(r.ahorro)}`);
   t.push(`*Total: ${pesos(r.total)}*`);
   if(r.anticipo>0) t.push(`Anticipo (la cobertura): ${pesos(r.anticipo)} · Saldo: ${pesos(r.saldo)}`);
-  if(r.pack === "abierto" && $("busquedaCara").checked) t.push(`• Galería de venta con búsqueda por cara: cada ${r.social ? "invitado" : "jugador"} encuentra sus fotos buscando por su cara`);
-  if(r.pack === "abierto") t.push("", `_Galería abierta: al aceptar, te comprometes a avisar a ${r.social ? "los invitados" : "jugadores, apoderados y representantes"} que la galería se publica después del evento para venta individual. Quien no quiera aparecer me avisa y saco sus fotos de la venta._`);
+  if(r.pack === "abierto") t.push(`• Galería de venta con búsqueda por cara: cada ${r.social ? "invitado" : "jugador"} encuentra sus fotos buscando por su cara`);
+  if(r.pack === "abierto") t.push("", `_Galería abierta: al aceptar, te comprometes a avisar a ${r.social ? "los invitados" : "jugadores, apoderados y representantes"} que la galería se publica después del evento para venta individual, con búsqueda por cara. Quien no quiera aparecer me avisa y saco sus fotos de la venta._`);
   return t.join("\n");
 }
 
@@ -9919,6 +10113,17 @@ miniaturas viejas del cache. Las nuevas se generan solas.</p>{% endif %}
 &middot; <a href="/panel/{{ gal['slug'] }}/descargables">Que se puede
 descargar ({{ descargables }}/{{ total }})</a></p>{% endif %}
 
+{% if total and gal['venta'] %}<p class="nota">Análisis facial:
+{% if caras.estado == 'corriendo' %}<b>{{ caras.avance or 'partiendo' }}</b> &middot; analizando en la notebook
+{% elif caras.estado == 'pedido' %}pedido &middot; parte solo, de noche y con la notebook en el depto
+{% else %}{% if caras.fotos %}<b>{{ caras.fotos }} fotos, {{ caras.caras }} caras</b>
+{% if caras.fotos != total %} &middot; la galería ahora tiene {{ total }} fotos: falta analizarla de nuevo{% endif %}
+{% elif caras.hay %}<b>listo</b>{% else %}sin analizar{% endif %}
+{% if caras.error %} &middot; no se pudo: {{ caras.error }}{% endif %} &middot;
+<form style="display:inline" method="post" action="/panel/{{ gal['slug'] }}/caras">
+<button class="btn hueco" style="padding:.2rem .65rem;font-size:.82rem">{{ 'Volver a analizar' if caras.hay else 'Analizar caras' }}</button>
+</form>{% endif %}</p>{% endif %}
+
 <form method="post" action="/panel/{{ gal['slug'] }}/ajustes">
 
 <h3>Nombre</h3>
@@ -9951,6 +10156,8 @@ el logo)</option>
 </select></label>
 <label class="chk"><input type="checkbox" name="sin_marca" value="1"
   {{ 'checked' if gal['marca'] == 0 }}> Sin marca de agua</label>
+<label class="chk"><input type="checkbox" name="marca_densa" value="1"
+  {{ 'checked' if gal['marca_densa'] }}> Marca densa (más líneas y más juntas)</label>
 <label class="chk"><input type="checkbox" name="descargas" value="1"
   {{ 'checked' if gal['descargas'] }}> Permitir descargas</label>
 <label class="chk"><input type="checkbox" name="comentarios" value="1"
@@ -10099,13 +10306,8 @@ salen. Vacio = los de siempre.</span>
 
 <p class="nota">Portada &mdash; la tapa que ve el cliente y la que sale en
 /eventos</p>
-<div class="tapas">
-<label><input type="radio" name="portada" value=""
-  {{ 'checked' if not gal['portada_foto_id'] }}><span class="nada">sin<br>portada</span></label>
-{% for f in primeras %}<label><input type="radio" name="portada" value="{{ f['id'] }}"
-  {{ 'checked' if f['id'] == gal['portada_foto_id'] }}><img src="/panel/p/{{ f['id'] }}"
-  loading="lazy" alt=""></label>{% endfor %}
-</div>
+<p><img class="tapa-hoy" src="/panel/{{ gal['slug'] }}/portada/ver" alt="Portada actual"></p>
+<p><a class="btn" href="/panel/{{ gal['slug'] }}/portada">Cambiar la portada</a></p>
 
 <p class="guardar"><button class="btn">Guardar los ajustes</button></p>
 </form>
@@ -10463,9 +10665,9 @@ def _declaraciones_top(js):
 def test():
     """ponytail: un solo check que falla si se rompe algo que importa."""
     import tempfile
-    global DB, CACHE, RAIZ_FOTOS, RAIZ_DERIVADAS, LOGOS, MUESTRAS
+    global DB, CACHE, RAIZ_FOTOS, RAIZ_DERIVADAS, LOGOS, MUESTRAS, TAPAS
     tmp = Path(tempfile.mkdtemp())
-    DB, CACHE = tmp / "t.db", tmp / "cache"
+    DB, CACHE, TAPAS = tmp / "t.db", tmp / "cache", tmp / "tapas"
     MUESTRAS = tmp / "portada"     # las fotos de la vidriera de verdad no se tocan
     # las raices apuntan al tmp desde el principio: si apuntaran al disco de
     # verdad, tenerlo desconectado cuelga el self-check entero (su punto de
@@ -10597,6 +10799,15 @@ def test():
     assert ia.crop(aba).tobytes() == ib.crop(aba).tobytes(), "la firma quedo mal puesta"
 
     # el visor pide la misma foto mas grande, y con la marca igual de puesta
+    # marca densa: otro archivo, mas texto, y la clave normal no se mueve
+    normal = capa_marca(1000, 700, MARCAS[0], 0.042, ())
+    densa = capa_marca(1000, 700, MARCAS[0], 0.042, (), True)
+    con_texto = lambda c_: sum(1 for v in c_.getchannel("A").getdata() if v)
+    assert con_texto(densa) > 2.5 * con_texto(normal), "la densa no agrega texto"
+    k_ = (str(orig), MARCAS[0], (), ANCHO_PREVIEW, 0.042)
+    assert ruta_cache(*k_) == ruta_cache(*k_, None, False) != ruta_cache(*k_, None, True)
+    assert preview(1, str(orig), MARCAS[0], densa=True) != preview(1, str(orig), MARCAS[0])
+
     chica = preview(1, str(orig), MARCAS[0])
     grande = preview(1, str(orig), MARCAS[0], ANCHO_VISOR)
     assert chica != grande, "el cache no distingue el tamano del visor"
@@ -11519,6 +11730,39 @@ def test():
         assert c.get("/portada/ccc").status_code == 200, "la tapa tiene que verse sin entrar"
         assert c.get("/portada/ddd").status_code == 404, "FUGA: tapa de galeria vencida"
 
+        # portada subida: manda sobre las fotos y no entra a la galeria
+        def fila_tapa():
+            return conectar().execute("SELECT portada_foto_id AS f, portada_archivo AS a "
+                                      "FROM galeria WHERE id = ?", (gid,)).fetchone()
+        def n_fotos():
+            return conectar().execute("SELECT COUNT(*) FROM foto WHERE galeria_id = ?",
+                                      (gid,)).fetchone()[0]
+        def subir_tapa(datos, nombre):
+            return c.post("/panel/ccc/portada", content_type="multipart/form-data",
+                          data={"archivo": (io.BytesIO(datos), nombre)})
+        antes_fotos = n_fotos()
+        subir_tapa(b"no es una imagen", "falsa.jpg")
+        subir_tapa(b"MZ", "falsa.exe")
+        assert fila_tapa()["f"] == id_uno and not fila_tapa()["a"], "acepto basura como tapa"
+        assert not list(TAPAS.glob("*")) if TAPAS.is_dir() else True, "quedo basura en tapas/"
+        buf = io.BytesIO()
+        Image.new("RGB", (900, 600), (10, 200, 30)).save(buf, "JPEG")
+        subir_tapa(buf.getvalue(), "tapa.JPG")
+        t1 = fila_tapa()["a"]
+        assert t1 and fila_tapa()["f"] is None and (TAPAS / t1).is_file(), "no guardo la tapa"
+        assert n_fotos() == antes_fotos, "la tapa subida entro a la galeria"
+        assert c.get("/portada/ccc").status_code == 200, "la tapa subida no se ve"
+        assert c.get("/panel/ccc/portada/ver").status_code == 200, "el panel no la muestra"
+        # una foto de otra galeria no puede ser su tapa, y no suelta la que hay
+        assert c.post("/panel/ccc/portada", data={"foto": str(id_venc)}).status_code == 404
+        assert fila_tapa()["a"] == t1, "FUGA: tapa de otra galeria"
+        # elegir una foto suelta el archivo, y la pagina la ofrece aunque no sea de las primeras
+        assert c.post("/panel/ccc/portada", data={"foto": str(id_uno)}).status_code == 302
+        assert fila_tapa()["f"] == id_uno and fila_tapa()["a"] is None, "no cambio a la foto"
+        assert not (TAPAS / t1).exists(), "quedo el archivo de la tapa vieja"
+        assert ("/panel/p/%d" % id_uno) in c.get("/panel/ccc/portada").get_data(as_text=True)
+        assert c.get("/panel/ccc/portada?pag=999").status_code == 200, "pagina fuera de rango"
+
     # ------------------------------------------------- subida de fotos
     assert carpeta_segura("../../etc") == "etc"
     assert carpeta_segura("liga uandes 20-08") == "liga uandes 20-08"
@@ -12076,6 +12320,34 @@ def test():
         assert r_.status_code == 302 and "cara=" not in r_.headers["Location"]
     buscar_cara = buscar_cara_real
 
+    # analisis facial: el panel solo deja el pedido, y solo en galerias a la venta
+    filas_ = [{"id": 1, "ruta": "/a/DSC1.JPG"}, {"id": 2, "ruta": "/b/DSC1.JPG"}]
+    assert ids_de_caras(filas_, [["/a/DSC1.JPG", .9]]) == [1], "un DSC repetido trajo otra foto"
+    assert ids_de_caras(filas_, [["DSC1-Editar.jpg", .9]]) == [1, 2], "indice viejo sin ruta"
+    pedido_ = CACHE / "caras-pedido-ccc"
+    with app.test_client() as c:
+        assert c.post("/panel/ccc/caras").status_code == 404 and not pedido_.exists()
+        cx = conectar()
+        cx.execute("UPDATE galeria SET venta = 1 WHERE slug = 'ccc'")
+        cx.commit()
+        cx.close()
+        html_ = c.get("/panel/ccc").get_data(as_text=True)
+        assert "Analizar caras" in html_ or "Volver a analizar" in html_
+        assert c.post("/panel/ccc/caras").status_code == 302 and pedido_.exists()
+        assert "de noche" in c.get("/panel/ccc").get_data(as_text=True)
+        pedido_.unlink()
+        # notebook que se apago a mitad: no dice "analizando", queda como pedido
+        (CACHE / "caras-trabajando-ccc").write_text("10/20")
+        assert estado_caras({"slug": "ccc"})["estado"] == "pedido"
+        (CACHE / "notebook-vivo").touch()
+        assert estado_caras({"slug": "ccc"})["avance"] == "10/20"
+        (CACHE / "notebook-vivo").unlink()
+        (CACHE / "caras-trabajando-ccc").unlink()
+        cx = conectar()
+        cx.execute("UPDATE galeria SET venta = 0 WHERE slug = 'ccc'")
+        cx.commit()
+        cx.close()
+
     cx = conectar()
     cx.execute("UPDATE foto SET grupo = NULL, grupo_col = NULL WHERE galeria_id = ?",
                (gccc,))
@@ -12261,7 +12533,7 @@ def test():
         assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gKm", "gEstac", "pSel", "pTipo", "pNumero"))
         assert 'id="pCuenta"' not in cz_
         assert 'id="km"' in cz_ and 'id="estac"' in cz_ and 'id="traslado"' not in cz_
-        assert 'id="busquedaCara"' in cz_
+        assert 'id="busquedaCara"' not in cz_ and "<b>Búsqueda por cara:</b>" in cz_
         assert tarifas()["km"] == 200
         # eventos sociales: su hora y sus packs, con la misma regla de packs.
         # Celebracion: 90x590 + 10x990 = 63.000, -3,5 % = 60.795 -> 61.000

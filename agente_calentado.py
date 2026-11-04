@@ -11,6 +11,9 @@ el mismo SSH de siempre (LAN o Tailscale):
      toma dos veces), baja galeria.py al dia y corre calentar_local.py.
   3. si el contador no cierra —tipico: cambiaron la marca mientras corria—
      reintenta una vez; si vuelve a fallar, suelta el pedido (no a la Pi).
+  4. si hay cache/caras-pedido-<slug> y es de noche con la notebook en casa,
+     corre caras_galeria.py: el analisis facial. Espera lo que haga falta: la
+     Pi nunca analiza, asi que no hay a quien devolverselo.
 
 Arranca solo al iniciar sesion (tarea programada "rbfotos agente calentado").
 
@@ -22,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +41,10 @@ SLUG = re.compile(r"^[A-Za-z0-9_-]{6,40}$")
 # sin esto cada ssh abre y cierra una ventana negra cada 30 s
 SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PYTHON = str(Path(sys.executable).with_name("python.exe"))   # no pythonw: queremos su salida
+# el analisis facial exprime la CPU y sube el indice por LAN: solo de noche y en el depto.
+# Puede terminar pasadas las 8 si partio antes: cortarlo botaria lo avanzado.
+NOCHE_DESDE, NOCHE_HASTA = 22, 8
+SSID_CASA = {"renzo", "renzo_5g"}
 
 
 def log(msg):
@@ -63,8 +71,9 @@ def tomar_pedidos():
     return [x for x in r.stdout.split() if SLUG.match(x)]
 
 
-def calentar(slug):
-    """0 = completo, otro = fallo. Mientras corre, un hilo mantiene el latido."""
+@contextmanager
+def latiendo():
+    """Mientras dura el bloque, un hilo mantiene el latido."""
     parar = threading.Event()
 
     def latido():
@@ -74,9 +83,16 @@ def calentar(slug):
             except Exception:
                 pass
 
-    hilo = threading.Thread(target=latido, daemon=True)
-    hilo.start()
+    threading.Thread(target=latido, daemon=True).start()
     try:
+        yield
+    finally:
+        parar.set()
+
+
+def calentar(slug):
+    """0 = completo, otro = fallo."""
+    with latiendo():
         subprocess.run([PYTHON, str(AQUI / "galeria_pi.py"), "traer"], cwd=AQUI,
                        capture_output=True, timeout=300, creationflags=SIN_VENTANA)
         r = subprocess.run([PYTHON, "-u", str(AQUI / "calentar_local.py"), "--", slug], cwd=AQUI,
@@ -90,8 +106,6 @@ def calentar(slug):
         if r.returncode:
             log("  %s: salio con codigo %d %s" % (slug, r.returncode, r.stderr[-300:].strip()))
         return r.returncode
-    finally:
-        parar.set()
 
 
 def atender(slug):
@@ -109,13 +123,64 @@ def atender(slug):
     log("abandonado %s: no se devuelve a la Pi" % slug)
 
 
+def es_noche(ahora=None):
+    h = (ahora or datetime.now()).hour
+    return h >= NOCHE_DESDE or h < NOCHE_HASTA
+
+
+def ssids(salida):
+    """Las redes de `netsh wlan show interfaces`; el BSSID no calza por el ^."""
+    return re.findall(r"^\s*SSID\s*:\s*(.+?)\s*$", salida, re.M)
+
+
+def en_casa():
+    r = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True,
+                       errors="replace", timeout=15, creationflags=SIN_VENTANA)
+    return any(s.lower() in SSID_CASA for s in ssids(r.stdout))
+
+
+def tomar_caras():
+    """Uno por pasada, para volver a mirar la hora antes del siguiente. Va primero
+    caras-trabajando-*: el agente hace una cosa a la vez, asi que si hay uno es de
+    una notebook que se apago a mitad, y se retoma."""
+    r = ssh('cd %s && for f in caras-trabajando-* caras-pedido-*; do [ -e "$f" ] || continue; '
+            's="${f#caras-*-}"; [ "$f" = "caras-trabajando-$s" ] || mv "$f" "caras-trabajando-$s"; '
+            'echo "$s"; break; done' % CACHE)
+    return [x for x in r.stdout.split() if SLUG.match(x)]
+
+
+def analizar(slug):
+    log("analisis facial %s" % slug)
+    with latiendo():
+        try:
+            r = subprocess.run([PYTHON, "-u", str(AQUI / "caras_galeria.py"), "--", slug], cwd=AQUI,
+                               capture_output=True, text=True, errors="replace", timeout=12 * 3600,
+                               creationflags=SIN_VENTANA)
+            codigo, error = r.returncode, r.stderr.strip()
+        except subprocess.TimeoutExpired:
+            codigo, error = 1, "paso de 12 horas"
+    if codigo:
+        # el panel muestra la ultima linea: es la que dice que paso
+        error = (error.splitlines() or ["fallo sin mensaje"])[-1][:300]
+        log("  %s: fallo: %s" % (slug, error))
+        subprocess.run(["ssh", "-o", "BatchMode=yes", host_pi(), "cat > %s/caras-error-%s" % (CACHE, slug)],
+                       input=error, text=True, encoding="utf-8", capture_output=True, timeout=40,
+                       creationflags=SIN_VENTANA)
+    else:
+        ssh("rm -f %s/caras-error-%s" % (CACHE, slug))
+        log("listo analisis %s" % slug)
+    ssh("rm -f %s/caras-trabajando-%s" % (CACHE, slug))
+
+
 def pasada():
-    if raiz_local() is None:
-        return                    # sin disco no hay latido: la Pi se arregla sola
-    if not latir():
-        return
-    for slug in tomar_pedidos():
-        atender(slug)
+    # sin disco no hay latido: la Pi se arregla sola
+    if raiz_local() is not None and latir():
+        for slug in tomar_pedidos():
+            atender(slug)
+    # no usa Y: lee TrabajoFotografico, por eso no depende del disco de arriba
+    if es_noche() and en_casa():
+        for slug in tomar_caras():
+            analizar(slug)
 
 
 def main():
@@ -134,4 +199,7 @@ def main():
 if __name__ == "__main__":
     assert SLUG.match("Hgwer-N-GAUHzz04") and not SLUG.match("a;rm -rf /")
     assert SLUG.match("-g1aw19AbLe5rzla")   # slug con guion adelante: por eso el "--"
+    assert es_noche(datetime(2026, 11, 4, 22)) and es_noche(datetime(2026, 11, 4, 7, 59))
+    assert not es_noche(datetime(2026, 11, 4, 8)) and not es_noche(datetime(2026, 11, 4, 21, 59))
+    assert ssids("  BSSID   : aa:bb\n    SSID     : Renzo_5G\n") == ["Renzo_5G"]
     main()
