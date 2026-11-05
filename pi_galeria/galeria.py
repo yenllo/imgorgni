@@ -6923,8 +6923,8 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 {% set L = R.packs.liga %}
 
 <nav class="tf-secciones-nav" aria-label="Secciones de tarifas">
-  <a href="#deportes" class="tf-sec-btn on">⚽ Ligas y deportes</a>
-  <a href="#social" class="tf-sec-btn">🎉 Cumpleaños, eventos y matrimonios</a>
+  <a href="#deportes" class="tf-sec-btn on">Ligas y deportes</a>
+  <a href="#social" class="tf-sec-btn">Cumpleaños, eventos y matrimonios</a>
 </nav>
 
 <div id="deportes">
@@ -7165,8 +7165,8 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 <form class="tf-form" id="tfs-form">
   <div><label class="tf-l" for="tfs-tipo">Tipo de evento</label>
     <select id="tfs-tipo">
-      <option value="social">🎉 Cumpleaños y eventos sociales &middot; {{ pesos(S.hora) }} / hora</option>
-      <option value="matrimonio">💍 Matrimonio &middot; {{ pesos(S.hora_matrimonio) }} / hora</option>
+      <option value="social">Cumpleaños y eventos sociales &middot; {{ pesos(S.hora) }} / hora</option>
+      <option value="matrimonio">Matrimonio &middot; {{ pesos(S.hora_matrimonio) }} / hora</option>
     </select>
   </div>
   <div class="tf-dos">
