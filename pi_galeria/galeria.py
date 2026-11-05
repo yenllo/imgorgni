@@ -7035,6 +7035,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
       <div><label class="tf-l" for="tf-qc">Completas &middot; {{ pesos(F.completa) }}</label><input id="tf-qc" type="number" min="0" step="10" value="40" inputmode="numeric"></div>
       <div><label class="tf-l" for="tf-qp">Profesionales &middot; {{ pesos(F.pro) }}</label><input id="tf-qp" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
     </div>
+    <p class="tf-ayuda" id="tf-min"></p>
   </div>
   <div><label class="tf-l" for="tf-x">Venta de fotos a jugadores</label>
     <select id="tf-x">
@@ -7196,6 +7197,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
       <div><label class="tf-l" for="tfs-qc">Completas (4K) &middot; {{ pesos(FS.completa) }}</label><input id="tfs-qc" type="number" min="0" step="10" value="50" inputmode="numeric"></div>
       <div><label class="tf-l" for="tfs-qp">Profesionales (4K) &middot; {{ pesos(FS.pro) }}</label><input id="tfs-qp" type="number" min="0" step="5" value="10" inputmode="numeric"></div>
     </div>
+    <p class="tf-ayuda" id="tfs-min"></p>
   </div>
   <div><label class="tf-l" for="tfs-x">Venta de fotos a invitados</label>
     <select id="tfs-x">
@@ -7335,6 +7337,13 @@ function calcular(){
   $("tf-medida").hidden = !!P;
   const q = P ? P.q : ["tf-qb", "tf-qc", "tf-qp"].map(id => Math.round(n0(id)));
   const n = q[0] + q[1] + q[2];
+  // el pedido a medida tiene un minimo por hora (mezclable: cada nivel suma
+  // su fraccion de hora)
+  const M = R.minimo_hora, cub = h ? (q[0] / M.basica + q[1] / M.completa + q[2] / M.pro) / h : 1;
+  $("tf-min").textContent = P || !h ? "" : "Mínimo para " + hTxt + " h: " + Math.ceil(M.completa * h) + " completas, "
+    + Math.ceil(M.pro * h) + " profesionales o " + Math.ceil(M.basica * h) + " básicas, o una mezcla."
+    + (cub < 1 ? " Tu pedido cubre el " + Math.floor(cub * 100) + " %." : "");
+  $("tf-min").style.color = !P && cub < 1 ? "var(--foco)" : "";
   let fotos = P ? P.precio : q[0] * R.foto.basica + q[1] * R.foto.completa + q[2] * R.foto.pro;
   const excl = $("tf-x").value === "exclusivo";
   if(excl) fotos *= 1 + R.exclusivo_pct / 100;
@@ -7463,6 +7472,11 @@ function calcularSoc(){
 
   const q = P ? P.q : [0, Math.round(n0("tfs-qc")), Math.round(n0("tfs-qp"))];
   const n = q[1] + q[2];
+  const M = R.minimo_hora, cub = h ? (q[1] / M.completa + q[2] / M.pro) / h : 1;
+  $("tfs-min").textContent = P || !h ? "" : "Mínimo para " + hTxt + " h: " + Math.ceil(M.completa * h)
+    + " completas o " + Math.ceil(M.pro * h) + " profesionales, o una mezcla."
+    + (cub < 1 ? " Tu pedido cubre el " + Math.floor(cub * 100) + " %." : "");
+  $("tfs-min").style.color = !P && cub < 1 ? "var(--foco)" : "";
   let fotos = P ? P.precio : q[1] * S.foto.completa + q[2] * S.foto.pro;
   const excl = $("tfs-x").value === "exclusivo";
   if(excl) fotos *= 1 + R.exclusivo_pct / 100;
@@ -8921,6 +8935,10 @@ TARIFAS_DEF = {
     # encima y no tiene descuento: tarifas() lo deja en "foto".
     "foto_pack": {"basica": 200, "completa": 390, "pro": 700},
     "medida_pct": 20,
+    # minimo del pedido a medida, en fotos por hora de cobertura (5/11/2026).
+    # Equivalen en plata: 20 completas ~ 12 profesionales ~ 40 basicas, asi
+    # que se pueden mezclar (20 completas + 20 basicas cubren 1,5 h)
+    "minimo_hora": {"basica": 40, "completa": 20, "pro": 12},
     # cada pack: fotos de cada nivel y su descuento sobre foto_pack. Con
     # 3/3,5/5 % y redondeo a $1.000 dan los 25.000/43.000/75.000 del 19/10/2026
     "packs": {
@@ -9016,7 +9034,10 @@ CAMPOS_TARIFAS = (
         ("foto_pack.basica", "B\u00e1sica, dentro de un pack ($)"),
         ("foto_pack.completa", "Completa, dentro de un pack ($)"),
         ("foto_pack.pro", "Profesional, dentro de un pack ($)"),
-        ("medida_pct", "Recargo del pedido a medida (%)"))),
+        ("medida_pct", "Recargo del pedido a medida (%)"),
+        ("minimo_hora.completa", "A medida: m\u00ednimo de completas por hora"),
+        ("minimo_hora.pro", "A medida: m\u00ednimo de profesionales por hora"),
+        ("minimo_hora.basica", "A medida: m\u00ednimo de b\u00e1sicas por hora"))),
 ) + tuple(
     ("Pack " + P["nombre"], (
         ("packs.%s.q.0" % k, "Fotos b\u00e1sicas"),
@@ -9373,6 +9394,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
       <div><label>Completa</label><input id="qCompleta" type="number" min="0" value="36"></div>
       <div><label>Profesional</label><input id="qPro" type="number" min="0" value="0"></div>
     </div>
+    <p class="cz-ayuda" id="minAviso"></p>
     <div class="cz-f" style="margin-top:8px">
       <div><label>Descuento (%)</label><input id="volumen" type="number" min="0" max="100" step="0.5" value="0"></div>
     </div>
@@ -9606,6 +9628,12 @@ function calcular(){
   ["qBasica","qCompleta","qPro"].forEach((id,i) => { $(id).readOnly = !!P; if(P) $(id).value = P.q[i]; });
   const q = {basica:ent("qBasica"), completa:ent("qCompleta"), pro:ent("qPro")};
   const totalFotos = q.basica + q.completa + q.pro;
+  // minimo del pedido a medida: fotos por hora, mezclable entre niveles
+  const M = T.minimo_hora, hM = (Math.round(horas*100)/100).toLocaleString("es-CL");
+  const cubreMin = horas ? (q.basica/M.basica + q.completa/M.completa + q.pro/M.pro) / horas : 1;
+  const minTxt = `el mínimo es ${M.completa} fotos con edición completa por hora de cobertura (o ${M.pro} profesionales`
+    + (social ? "" : `, o ${M.basica} básicas`) + `, o una mezcla equivalente). Para ${hM} h: ${Math.ceil(M.completa*horas)} completas`
+    + ` o ${Math.ceil(M.pro*horas)} profesionales` + (social ? "" : ` o ${Math.ceil(M.basica*horas)} básicas`) + ".";
   const volPct = num("volumen");
   const pack = $("pack").value;
   const exclPct = pack === "exclusivo" ? num("recargoExcl") : 0;
@@ -9730,7 +9758,7 @@ function calcular(){
   // con boleta va bruteado igual que el total
   const cob = L.filter(x=>x.grupo==="Cobertura").reduce((s,x)=>s+x.tC,0);
   const anticipo = $("anticipo").checked ? Math.min(total, Math.round(conBoleta ? cob/(1-ret) : cob)) : 0;
-  return {L, horas, q, totalFotos, pack, P, social, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
+  return {L, horas, q, totalFotos, pack, P, social, cubreMin, minTxt, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
           ahorro: subL - subC, conBoleta, ret, pasada};
 }
 
@@ -9800,6 +9828,11 @@ function render(){
   const avisoPasada = r.pasada && !r.pasada.bloques && r.pasada.ex > 0
     ? `<li>Terminé ${r.pasada.ex} min después de la hora acordada, dentro de la tolerancia: sin cobro.</li>` : "";
 
+  // pedido a medida: el minimo va en la boleta y, si no se cumple, aviso en el formulario
+  const minLi = !r.P && r.horas ? `<li><b>Pedido a medida:</b> ${r.minTxt}</li>` : "";
+  $("minAviso").textContent = r.P || !r.horas ? "" : "Pedido a medida: " + r.minTxt
+    + (r.cubreMin < 1 ? ` Este pedido cubre el ${Math.floor(r.cubreMin*100)} %.` : "");
+  $("minAviso").style.color = !r.P && r.cubreMin < 1 ? "#e0a84a" : "";
   const hayPago = PAGO.some(id => $(id).value.trim());
 
   $("hoja").innerHTML = `
@@ -9851,7 +9884,7 @@ function render(){
       : `<li>Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para que elijan con calma. Las elegidas se entregan editadas en 4K (3.840 px en el borde largo), sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>`}
     <li>La edición completa incluye limpieza leve de piel de hasta 2 protagonistas por foto; la profesional, retoque de hasta 5 rostros protagonistas.</li>
     <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si el evento se alarga y sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3*(1+Math.max(0,num("recargoUrg"))/100))} por bloque).</li>
-    ${avisoPasada}
+    ${avisoPasada}${minLi}
     ${venta}
     <li>Puedo usar algunas fotos en mi portafolio, salvo que me pidan lo contrario.</li>
     ${r.anticipo > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
@@ -9859,7 +9892,7 @@ function render(){
     <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} partidos a la vez sin recargo; desde el siguiente, +${T.cancha_extra_pct} % de la hora por cada uno, en el horario que lo tiene. Partidos de 30 minutos: +${T.duracion_pct["30"]} % de la cobertura; de 20 minutos: +${T.duracion_pct["20"]} %. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
     <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
     <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3*(1+Math.max(0,num("recargoUrg"))/100))} por bloque).</li>
-    ${avisoPasada}
+    ${avisoPasada}${minLi}
     ${venta}
     <li>Derechos de uso para las redes del club y de los jugadores. No se permite su venta ni uso comercial sin acuerdo previo.</li>
     ${r.anticipo > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
@@ -12501,6 +12534,7 @@ def test():
         assert "{pct30}" not in tar and "Partidos cortos:" in tar
         assert "Venta abierta:" in tar and "Aviso a los asistentes" in c.get("/panel/cotizador").get_data(as_text=True)
         assert 'id="tf-dur"' in tar and 'id="tf-bloques"' in tar
+        assert 'id="tf-min"' in tar and 'id="tfs-min"' in tar
         assert all(('id="%s"' % i) in tar for i in ("tf-fecha", "tf-nf", "tf-link", "tf-temp"))
         # un link compartido (con parametros) abre la misma pagina, sin romperla
         assert c.get("/tarifas?ini=19:00&fin=21:00&dur=60&s=20:00-3&p=liga&e=ls&n=8").status_code == 200
@@ -12530,6 +12564,8 @@ def test():
         assert "const TARIFAS" in cz_ and 'id="durPartido"' in cz_ and 'id="czBloques"' in cz_
         assert 'id="canchas"' not in cz_ and 'id="descHora"' in cz_
         assert 'id="horaValor"' in cz_ and 'id="recargoUrg"' in cz_ and 'id="horaLista"' not in cz_
+        assert tarifas()["minimo_hora"] == {"basica": 40, "completa": 20, "pro": 12}
+        assert 'id="minAviso"' in cz_
         assert all(('id="%s"' % i) in cz_ for i in ("gExcl", "gKm", "gEstac", "pSel", "pTipo", "pNumero"))
         assert 'id="pCuenta"' not in cz_
         assert 'id="km"' in cz_ and 'id="estac"' in cz_ and 'id="traslado"' not in cz_
