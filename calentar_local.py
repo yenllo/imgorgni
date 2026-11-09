@@ -6,13 +6,15 @@ calentado). La notebook tiene 16 nucleos y lee las fotos por la red.
 
 Funciona porque la clave del cache es (ruta de la Pi, mtime_ns, parametros):
 se calcula con la ruta /mnt/fotos/... aunque el archivo se lea desde Y:, y el
-mtime_ns da identico en los dos lados (medido). Se usa el mismo galeria.py
-(pi_galeria/galeria.py) y la misma fuente de la Pi para la marca de agua.
+mtime_ns da identico en los dos lados (medido). Se usa el galeria.py que CORRE
+en la Pi y la misma fuente de la Pi para la marca de agua.
 
     python calentar_local.py <slug> --probar 5    # verifica claves, no sube nada
     python calentar_local.py <slug>               # calienta todo y sube
 
-Antes de correrlo: python galeria_pi.py traer  (el galeria.py local al dia).
+El galeria.py de la Pi se baja solo a _cache_local/pi_vivo/. Nunca a
+pi_galeria/galeria.py: ese es el archivo de trabajo, y el 9/11/2026 un
+"galeria_pi.py traer" del agente le borro a otra sesion un parche sin subir.
 """
 import argparse
 import json
@@ -112,6 +114,7 @@ def demo():
     print("ok: Y: colgada descartada al tope, eligio Z:")
 FUENTE_PI = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 TRABAJO = AQUI / "_cache_local"
+PI_VIVO = TRABAJO / "pi_vivo"
 
 
 def ssh(cmd, **kw):
@@ -180,7 +183,7 @@ G = GAL = None
 def iniciar(cache, fuente, logos, gal, raiz, deriv, mtimes):
     global G, GAL, RAIZ, DERIV, MTIMES
     RAIZ, DERIV, MTIMES = raiz, deriv, mtimes
-    sys.path.insert(0, str(AQUI / "pi_galeria"))
+    sys.path.insert(0, str(PI_VIVO))
     import galeria as modulo
     from PIL import Image, ImageFont
     modulo.os = _Os()
@@ -303,6 +306,10 @@ def main():
         shutil.rmtree(logos)
     subprocess.run(["scp", "-q", "-r", "%s:%s/logos" % (host_pi(), PI_GALERIA), str(logos)])
     logos.mkdir(exist_ok=True)
+    # el codigo que va a calcular las claves es el que sirve la Pi, no la copia de trabajo
+    PI_VIVO.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["scp", "-q", "%s:%s/galeria.py" % (host_pi(), PI_GALERIA), str(PI_VIVO / "galeria.py")],
+                   check=True)
 
     t0 = time.time()
     errores = []

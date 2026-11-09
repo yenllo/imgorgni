@@ -99,8 +99,8 @@ def latiendo():
 def calentar(slug):
     """0 = completo, otro = fallo."""
     with latiendo():
-        subprocess.run([PYTHON, str(AQUI / "galeria_pi.py"), "traer"], cwd=AQUI,
-                       capture_output=True, timeout=300, creationflags=SIN_VENTANA)
+        # sin "galeria_pi.py traer": pisaba pi_galeria/galeria.py, el archivo de
+        # trabajo (9/11/2026). calentar_local.py baja su propia copia de la Pi.
         r = subprocess.run([PYTHON, "-u", str(AQUI / "calentar_local.py"), "--", slug], cwd=AQUI,
                            # el "--" es obligatorio: hay slugs que empiezan con "-"
                            # y argparse los toma por flag (18/9/2026, -g1aw19AbLe5rzla)
