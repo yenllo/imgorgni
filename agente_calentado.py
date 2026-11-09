@@ -65,9 +65,15 @@ def latir():
 
 
 def tomar_pedidos():
-    """Renombra pedido-* a trabajando-* en la Pi y devuelve los slugs."""
-    r = ssh('cd %s && for f in pedido-*; do [ -e "$f" ] || continue; '
-            's="${f#pedido-}"; mv "$f" "trabajando-$s" && echo "$s"; done' % CACHE)
+    """Renombra pedido-* a trabajando-* en la Pi y devuelve los slugs.
+
+    Tambien toma los trabajando-* que ya estan: el agente hace una cosa a la
+    vez, asi que uno que encuentra aca es de una notebook que se apago a mitad.
+    Sin esto quedaba colgado y el panel decia "calentando en la notebook" para
+    siempre, sin boton (4/11/2026, la Coppa en 1157/2004)."""
+    r = ssh('cd %s && for f in trabajando-* pedido-*; do [ -e "$f" ] || continue; '
+            's="${f#*-}"; [ "$f" = "trabajando-$s" ] || mv "$f" "trabajando-$s"; '
+            'echo "$s"; done' % CACHE)
     return [x for x in r.stdout.split() if SLUG.match(x)]
 
 

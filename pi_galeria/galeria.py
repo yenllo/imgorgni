@@ -61,13 +61,15 @@ MARCAS = ("RB.Fotos_", "RB.Deportes_")
 # Mas chico que lo que entregas, a proposito. Si el preview mide lo mismo que
 # el archivo final, la marca de agua es lo unico que los separa; con 1000px de
 # lado largo el preview sirve para elegir y no sustituye a la entrega.
-ANCHO_PREVIEW = int(os.environ.get("GALERIA_ANCHO", 1000))
+# 640 desde el 8/11/2026 (eran 1000, 148 KB): la celda se ve a ~370 px y la
+# grilla cargaba lento. Cambiarlo deja fria toda galeria: hay que recalentar.
+ANCHO_PREVIEW = int(os.environ.get("GALERIA_ANCHO", 640))
 
-# Lo que pide el VISOR al abrir una foto. Con 1000 px la grilla anda liviana
-# pero al ver una en grande no se distingue si esta enfocada, y para elegir
-# 140 entre 5.000 eso es justo lo que hay que ver. Sigue siendo menos de un
-# tercio del original y va con la misma marca de agua.
-ANCHO_VISOR = int(os.environ.get("GALERIA_ANCHO_VISOR", 2400))
+# Lo que pide el VISOR al abrir una foto. Con la miniatura no se distingue si
+# esta enfocada, y para elegir 140 entre 5.000 eso es justo lo que hay que
+# ver. 1920 desde el 8/11/2026 (eran 2400, 667 KB): es el ancho de una
+# pantalla Full HD, y lo que sobraba solo se veia con zoom en el telefono.
+ANCHO_VISOR = int(os.environ.get("GALERIA_ANCHO_VISOR", 1920))
 
 # Cuantas fotos por pagina. Una fecha deportiva son 2000-4000: en una sola
 # pagina son ~16 mil nodos de DOM y el telefono del cliente se arrastra.
@@ -2993,8 +2995,10 @@ def anotar_vista(galeria_id, foto_id, visor):
             "  ultima = excluded.ultima, veces = veces + 1",
             (cid, foto_id, 1 if visor else 0, ahora, ahora))
         cx.commit()
-    except sqlite3.OperationalError:
-        # llevar la cuenta no vale romper la foto: se pierde ESTA vista y ya
+    except sqlite3.DatabaseError:
+        # llevar la cuenta no vale romper la foto: se pierde ESTA vista y ya.
+        # DatabaseError y no solo OperationalError: una cookie de un cliente
+        # que ya no existe da IntegrityError (FK) y cada miniatura salia 500
         cx.rollback()
 
 
@@ -7795,7 +7799,7 @@ visor.addEventListener("click", ev => { if (ev.target === visor) visor.close(); 
 </script>"""
 
 CELDAS = """{% for f in fotos %}<figure class="celda" style="margin:0">
-<img src="/p/{{ f['id'] }}" loading="lazy" decoding="async" alt="" draggable="false">
+<img data-src="/p/{{ f['id'] }}" decoding="async" alt="" draggable="false">
 {% if repetidas and f['en_listas'] %}<span class="enls">{{ f['en_listas'] }}</span>{% endif %}
 {% if gal['comentarios'] and f['ncom'] %}<span class="ncom" title="comentarios">&#128172; {{ f['ncom'] }}</span>{% endif %}
 <div class="acc">
@@ -8037,9 +8041,55 @@ function enganchar() {
     if (al) al.onclick = e => { e.stopPropagation(); abrirPop(al.dataset.id, al); };
     const im = fig.querySelector("img");
     im.onclick = () => abrir(figs.indexOf(fig));
-    if (im.complete) medir(fig);
-    else im.addEventListener("load", () => medir(fig), {once: true});
+    im.addEventListener("load", () => { medir(fig); bajada(im, true); });
+    im.addEventListener("error", () => bajada(im, false));
+    ojo.observe(im);
   });
+}
+
+// ------------------------------------------------------- miniaturas
+// Primero las que estas mirando y de ahi hacia arriba y abajo. Con
+// loading=lazy el navegador las pedia en orden y no soltaba las que ya
+// pasaron: bajando rapido, las de la pantalla esperaban detras de decenas
+// que nadie iba a ver (8/11/2026). Aca van EN_VUELO a la vez, la mas cercana
+// a la pantalla primero. La que ya va en camino NO se cancela: al volver a
+// pedirla, el navegador la retomaba con Range (206) y quedaba rota para
+// siempre. Lo peor que pasa asi es que terminen de bajar EN_VUELO que ya
+// pasaste.
+const EN_VUELO = 6;
+let vuelan = 0;
+const cerca = new Set();
+const ojo = new IntersectionObserver(es => {
+  es.forEach(e => e.isIntersecting ? cerca.add(e.target) : cerca.delete(e.target));
+  repartir();
+}, {rootMargin: "800px 0px"});
+function lejania(im) {
+  const r = im.getBoundingClientRect();
+  return r.bottom < 0 ? -r.bottom : Math.max(0, r.top - innerHeight);
+}
+function repartir() {
+  [...cerca].filter(im => !im.dataset.vuela)
+    .sort((a, b) => lejania(a) - lejania(b))
+    .slice(0, Math.max(0, EN_VUELO - vuelan))
+    .forEach(im => {
+      im.dataset.vuela = "1";
+      vuelan++;
+      // un reintento va con otra URL: la misma vuelve a dar el error guardado
+      const n = +im.dataset.intento || 0;
+      im.src = im.dataset.src + (n ? "?r=" + n : "");
+    });
+}
+function bajada(im, ok) {
+  if (!im.dataset.vuela) return;
+  delete im.dataset.vuela;
+  vuelan--;
+  const n = +im.dataset.intento || 0;
+  if (!ok && n < 2) im.dataset.intento = n + 1;  // sigue en `cerca`: se repide
+  else {
+    cerca.delete(im);
+    ojo.unobserve(im);                           // lista (o rota de verdad)
+  }
+  repartir();
 }
 enganchar();
 
@@ -8230,13 +8280,12 @@ let idx = -1;
 // vCargando y no `cargando`: ese nombre ya lo usa el scroll infinito, y dos
 // `let` iguales en el mismo scope rompen el <script> entero
 let vCargando = false, tCarga = null;
-let rumbo = 1, precargas = [];
+let rumbo = 1, precargas = [], vGrande = null;
 function vListo() {
   vCargando = false;
   clearTimeout(tCarga);
   visor.classList.remove("cargando");
 }
-vimg.onload = vimg.onerror = vListo;
 
 let tVisto = null;
 function abrir(i) {
@@ -8248,7 +8297,21 @@ function abrir(i) {
   // red de seguridad: si la foto nunca llega, el visor no queda trabado
   clearTimeout(tCarga);
   tCarga = setTimeout(vListo, 6000);
-  vimg.src = "/p/" + id + "?g=1";
+  // al tiro la miniatura que ya esta en el navegador, borrosa, y encima la
+  // grande cuando llega. Sin esto quedaba la foto ANTERIOR mientras bajaba.
+  const mini = fig.querySelector("img");
+  if (mini.naturalWidth) vimg.src = mini.currentSrc;
+  else vimg.removeAttribute("src");
+  const grande = vGrande = new Image();
+  precargas = [];
+  grande.onload = () => {
+    if (vGrande !== grande) return;              // ya pasaste a otra
+    vimg.src = grande.src;
+    vListo();
+    precargar(fig);
+  };
+  grande.onerror = () => { if (vGrande === grande) vListo(); };
+  grande.src = "/p/" + id + "?g=1";
   if (pcom) pcom.hidden = true;
   // "la vio" es que haya quedado en pantalla, no que el navegador la haya
   // bajado: pasando en seco con la flecha apretada no cuenta ninguna
@@ -8269,8 +8332,12 @@ function abrir(i) {
   vpos.textContent = (idx + 1) + " / " + figs.length;
   visor.hidden = false;
   document.body.style.overflow = "hidden";
-  // precarga 3 hacia donde vas y 1 para atras: al avanzar la foto ya esta en
-  // el navegador. Se guardan las Image: sin referencia la descarga se cancela.
+}
+// precarga 3 hacia donde vas y 1 para atras: al avanzar la foto ya esta en
+// el navegador. Recien cuando llego la actual: antes partian juntas y la que
+// estabas abriendo se repartia el ancho de banda con las otras tres.
+// Se guardan las Image: sin referencia la descarga se cancela.
+function precargar(fig) {
   precargas = [1, 2, 3, -1].map(k => {
     const v = figs[(idx + k * rumbo + figs.length) % figs.length];
     if (!v || v === fig) return null;
@@ -8283,6 +8350,8 @@ function cerrar() {
   clearTimeout(tVisto);
   if (pcom) pcom.hidden = true;
   visor.hidden = true;
+  vGrande = null;
+  precargas = [];
   vimg.src = "";
   document.body.style.overflow = "";
 }
