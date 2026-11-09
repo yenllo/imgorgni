@@ -6619,7 +6619,7 @@ TARJETAS = """{% for g in eventos %}<a class="evcard" href="/g/{{ g['slug'] }}">
 <span class="tags">{% if g['descargas'] %}<i>Descarga</i>{% endif %}
 {% if g['clave_hash'] %}<i>Con clave</i>{% endif %}</span>
 {% if g['venta'] and not g['descargas'] %}<span class="tarifa">{% for c, p in tramos(g) %}
-<span><b>{{ c }}</b> fotos <em>{{ pesos(p) }}</em></span>{% endfor %}</span>{% endif %}
+<span><b>{{ c }}</b> foto{{ "s" if c != 1 }} <em>{{ pesos(p) }}</em></span>{% endfor %}</span>{% endif %}
 </div></a>
 {% endfor %}"""
 
@@ -7628,14 +7628,14 @@ COMPRAR = """<header><b><a class="volver" href="/g/{{ gal['slug'] }}">&larr;
 <p style="opacity:.6">Vuelve a la galeria y agrega al carrito las fotos que
 quieres, o elige arriba una de tus listas. El total se calcula solo.</p>
 <p style="opacity:.5;font-size:.9rem;margin:0">Precios de este evento:
-{% for c, p in tarifas %}{{ c }} fotos {{ pesos(p) }}{% if not loop.last %}
+{% for c, p in tarifas %}{{ c }} foto{{ "s" if c != 1 }} {{ pesos(p) }}{% if not loop.last %}
 &middot; {% endif %}{% endfor %}</p>
 <p class="botones"><a class="wsp hueco" href="/g/{{ gal['slug'] }}">Volver a la
 galeria</a></p>
 {% else %}
 <p class="grande">{{ n }} foto{{ '' if n == 1 else 's' }} <small>{{ total }}</small></p>
 <p style="opacity:.5;font-size:.9rem;margin:0">Precios de este evento:
-{% for c, p in tarifas %}{{ c }} fotos {{ pesos(p) }}{% if not loop.last %}
+{% for c, p in tarifas %}{{ c }} foto{{ "s" if c != 1 }} {{ pesos(p) }}{% if not loop.last %}
 &middot; {% endif %}{% endfor %}</p>
 <div class="cuenta"><p class="idcompra">{{ codigo }}</p></div>
 <ol class="pasos3">{% for p in pasos %}{% if p %}<li>{{ p }}</li>{% endif %}{% endfor %}</ol>
@@ -7855,7 +7855,7 @@ lista y toca el corazon de la foto.</p>{% endif %}
 <p class="grande">{{ T.gal_gratis_texto }}</p>
 </section>{% elif vende and tarifas %}<section class="tarifas">
 {% if T.gal_precios_tit %}<p class="rot">{{ T.gal_precios_tit }}</p>{% endif %}
-<div class="packs">{% for c, p in tarifas %}<div><b>{{ c }}</b><span>fotos</span>
+<div class="packs">{% for c, p in tarifas %}<div><b>{{ c }}</b><span>foto{{ "s" if c != 1 }}</span>
 <em>{{ pesos(p) }}</em></div>{% endfor %}</div>
 {% if T.gal_precios_nota %}<p class="nota">{{ T.gal_precios_nota }}</p>{% endif %}
 </section>{% endif %}
@@ -10403,7 +10403,7 @@ salen. Vacio = los de siempre.</span>
   placeholder="{{ precios_default }}">{{ gal['precios'] or '' }}</textarea></label>
 </div>
 <p class="nota" style="margin-top:-1.2rem">Queda:
-{% for c, p in tarifas %}{{ c }} fotos {{ pesos(p) }}{% if not loop.last %}
+{% for c, p in tarifas %}{{ c }} foto{{ "s" if c != 1 }} {{ pesos(p) }}{% if not loop.last %}
 &middot; {% endif %}{% endfor %}</p>
 
 <p class="nota">Portada &mdash; la tapa que ve el cliente y la que sale en
