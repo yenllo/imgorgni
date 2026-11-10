@@ -286,13 +286,28 @@ CREATE TABLE IF NOT EXISTS seleccion_lista (
     PRIMARY KEY (galeria_id, cliente_id)
 );
 -- el resultado de una busqueda por selfie: solo que fotos salieron (JSON de
--- foto.id). La selfie no se guarda, se borra apenas se calcula.
+-- foto.id) y que cliente la pidio. La selfie no se guarda, se borra apenas se calcula.
 CREATE TABLE IF NOT EXISTS busqueda_cara (
     token      TEXT PRIMARY KEY,
     galeria_id INTEGER NOT NULL REFERENCES galeria(id) ON DELETE CASCADE,
+    cliente_id INTEGER REFERENCES cliente(id) ON DELETE SET NULL,
     fotos      TEXT NOT NULL,
     creada     TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS ix_busqueda_cara_gal ON busqueda_cara(galeria_id, creada);
+-- vistas dentro del filtro ?cara=<token>, separadas de `vista` para distinguir
+-- quien recorrio la galeria entera de quien solo miro sus fotos personales
+CREATE TABLE IF NOT EXISTS vista_cara (
+    cliente_id INTEGER NOT NULL REFERENCES cliente(id) ON DELETE CASCADE,
+    token      TEXT NOT NULL REFERENCES busqueda_cara(token) ON DELETE CASCADE,
+    foto_id    INTEGER NOT NULL REFERENCES foto(id) ON DELETE CASCADE,
+    visor      INTEGER NOT NULL DEFAULT 0,   -- 0 = miniatura, 1 = abierta grande
+    primera    TEXT NOT NULL,
+    ultima     TEXT NOT NULL,
+    veces      INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (cliente_id, token, foto_id, visor)
+);
+CREATE INDEX IF NOT EXISTS ix_vista_cara_token ON vista_cara(token);
 """
 
 
@@ -408,7 +423,10 @@ def conectar():
                       # renglones del preset de Edicion que ESTA galeria no
                       # muestra, uno por linea y tal cual. NULL = la lista
                       # entera, como siempre
-                      ("ent_quita", "TEXT")):
+                      ("ent_quita", "TEXT"),
+                      # carpeta de _para_publicar para "Top fotos de la fecha":
+                      # NULL = automatico en galerias en venta, "-" = no mostrar
+                      ("top_trabajo", "TEXT")):
         if col not in tiene:
             cx.execute(f"ALTER TABLE galeria ADD COLUMN {col} {tipo}")
             cx.commit()
@@ -426,6 +444,12 @@ def conectar():
     # midiera: se muestra como tal, no se inventa una fecha
     if "cuando" not in {r["name"] for r in cx.execute("PRAGMA table_info(lista_foto)")}:
         cx.execute("ALTER TABLE lista_foto ADD COLUMN cuando TEXT")
+        cx.commit()
+    # quien se busco por selfie, para ver en el panel sus fotos filtradas y
+    # separar esas miradas de las de toda la galeria (NULL = anterior al cambio)
+    if "cliente_id" not in {r["name"] for r in cx.execute("PRAGMA table_info(busqueda_cara)")}:
+        cx.execute("ALTER TABLE busqueda_cara ADD COLUMN "
+                   "cliente_id INTEGER REFERENCES cliente(id) ON DELETE SET NULL")
         cx.commit()
     migrar_megusta(cx)
     return cx
@@ -2181,7 +2205,7 @@ def _viz(plantilla, titulo=None, desc=None, og_img=None, indexar=False,
 @app.get("/")
 def home():
     fotos = muestras()
-    return _viz(PORTADA, fotos=fotos, eventos=publicas(6), seccion="inicio",
+    return _viz(PORTADA, fotos=fotos, eventos=publicas(6), seccion="inicio", feed=posts_de("exscuola")[:3],
                 og_img=("%smuestra/%s" % (request.url_root, fotos[0])
                         if fotos else None),
                 indexar=True,
@@ -2224,8 +2248,110 @@ def eventos_publicos():
                         if evs else None))
 
 
+# ------------------------------------------------------------ feed de ligas
+# Publicaciones tipo Instagram por liga (9/11/2026): no es galeria, es feed. Cada
+# publicacion es una carpeta FEED/<id>/ con post.json, web/NN.jpg (1600 px, lo que
+# se ve aca) e ig/NN.jpg (los archivos tal cual para Instagram: el 2x1 de Renzo,
+# que las sube aca de noche y las replica en IG cuando tiene tiempo). Las arma
+# y las sube feed_publicar.py desde el notebook; aca solo se leen.
+FEED = Path(os.environ.get("GALERIA_FEED", BASE / "feed"))
+LIGAS = {
+    "exscuola": {"nombre": "Liga ExScuola", "corto": "ExScuola", "cuenta": "rb.deportes_",
+                 "logo": "exscuola_logo.png", "insignia": "exscuola_insignia.png",
+                 "bajada": "Liga de ex alumnos Scuola Italiana Vittorio Montiglio. "
+                           "Lo que pasa en la cancha, fecha a fecha."},
+}
+_ID_POST = re.compile(r"^[a-z0-9][a-z0-9-]{2,80}$")
+
+
+def posts_de(liga, ocultos=False):
+    """Las publicaciones de una liga, la mas nueva primero. Un post.json roto
+    se salta: una subida a medias no puede botar la pagina."""
+    out = []
+    for f in FEED.glob("*/post.json") if FEED.is_dir() else ():
+        try:
+            p = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if p.get("liga") != liga or (p.get("oculto") and not ocultos) or not p.get("fotos"):
+            continue
+        p["id"] = f.parent.name
+        out.append(p)
+    return sorted(out, key=lambda p: (p.get("publicado") or "", p["id"]), reverse=True)
+
+
+def _feed_vista(liga, admin):
+    L = LIGAS.get(liga) or abort(404)
+    ps = posts_de(liga, ocultos=admin)
+    fechas = {}                      # chips: una por fecha, apuntando a su primera publicacion
+    for p in ps:
+        if p.get("fecha_txt"):
+            fechas.setdefault(p["fecha_txt"], p["id"])
+    return _viz(FEED_HTML, seccion="liga", liga=liga, L=L, posts=ps, fechas=fechas, admin=admin,
+                indexar=not admin, titulo="%s · rb.fotos" % L["nombre"],
+                desc=L["bajada"],
+                og_img=("%sfeed/%s/1.jpg" % (request.url_root, ps[0]["id"]) if ps else None))
+
+
+@app.get("/liga/<liga>")
+def feed_liga(liga):
+    return _feed_vista(liga, admin=False)
+
+
+@app.get("/panel/liga/<liga>")
+def feed_liga_panel(liga):
+    """La misma pagina con las herramientas de Renzo: bajar para IG, copiar el
+    texto, ocultar. Va bajo /panel: la cuidan Cloudflare Access y basic_auth."""
+    return _feed_vista(liga, admin=True)
+
+
+def _post_dir(pid):
+    if not _ID_POST.match(pid or ""):
+        abort(404)
+    d = FEED / pid
+    return d if (d / "post.json").is_file() else abort(404)
+
+
+@app.get("/feed/<pid>/<int:n>.jpg")
+def feed_foto(pid, n):
+    f = _post_dir(pid) / "web" / ("%02d.jpg" % n)
+    return send_file(f, max_age=86400) if f.is_file() else abort(404)
+
+
+@app.get("/feed/_logo/<nombre>")
+def feed_logo(nombre):
+    if nombre not in {L[k] for L in LIGAS.values() for k in ("logo", "insignia")}:
+        abort(404)
+    f = FEED / "_logos" / nombre
+    return send_file(f, max_age=604800) if f.is_file() else abort(404)
+
+
+@app.get("/panel/feed/<pid>/ig.zip")
+def feed_zip(pid):
+    """Los archivos de Instagram tal cual, en orden, y el texto: el carrusel listo."""
+    d = _post_dir(pid)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:   # JPEG: comprimir no gana nada
+        for f in sorted((d / "ig").glob("*.jpg")):
+            z.write(f, f.name)
+        z.writestr("texto.txt", json.loads((d / "post.json").read_text(encoding="utf-8")).get("texto", ""))
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True, download_name="%s.zip" % pid)
+
+
+@app.post("/panel/feed/<pid>/ocultar")
+def feed_ocultar(pid):
+    f = _post_dir(pid) / "post.json"
+    p = json.loads(f.read_text(encoding="utf-8"))
+    p["oculto"] = not p.get("oculto")
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(p, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(f)                   # atomico: la pagina nunca lee un json a medias
+    return redirect("/panel/liga/%s#%s" % (p.get("liga", ""), f.parent.name))
+
+
 # lo que se indexa: las mismas paginas que piden indexar=True en _viz
-INDEXABLES = ("/", "/eventos", "/sobre-mi", "/tarifas")
+INDEXABLES = ("/", "/eventos", "/liga/exscuola", "/sobre-mi", "/tarifas")
 
 
 @app.get("/robots.txt")
@@ -2503,6 +2629,68 @@ def _tarjeta(gal, cuantas=None):
             "og_img": img}
 
 
+_REVISADA = {}      # galeria_id -> cuando se miro por ultima vez si faltan archivos
+
+
+def sacar_borradas(cx, gal, gracia=600, cada=60):
+    """Saca de la galeria las fotos cuyo archivo ya no esta en el disco.
+
+    El 9/11/2026 Renzo borro 37 exports de MateoYBenzo despues de crear la
+    galeria: seguian listadas, /p/<id> daba 404 y el cliente veia una pantalla
+    de iconos rotos. Se mira al abrir la galeria o su panel, a lo mas una vez
+    por minuto. No saca nada si:
+    - faltan TODAS: eso es el disco desmontado o la carpeta movida, no un borrado;
+    - la carpeta de la foto no existe (la movieron entera);
+    - la carpeta cambio hace menos de `gracia` segundos: un export a medias
+      borra y vuelve a escribir;
+    - algun cliente la tiene marcada o en una lista: esa se queda, la pagina la
+      esconde sola y a Renzo le llega el aviso para que decida.
+    Devuelve cuantas saco.
+    """
+    ahora = time.time()
+    if ahora - _REVISADA.get(gal["id"], 0) < cada:
+        return 0
+    _REVISADA[gal["id"]] = ahora
+    filas = cx.execute("SELECT id, ruta FROM foto WHERE galeria_id = ?", (gal["id"],)).fetchall()
+    faltan = [f for f in filas if not os.path.exists(f["ruta"])]
+    if not faltan or len(faltan) == len(filas):
+        return 0
+    fuera, elegidas, frescas = [], 0, {}
+    for f in faltan:
+        carpeta = os.path.dirname(f["ruta"])
+        if carpeta not in frescas:
+            try:
+                frescas[carpeta] = ahora - os.stat(carpeta).st_mtime < gracia
+            except OSError:
+                frescas[carpeta] = True          # sin carpeta: no se toca
+        if frescas[carpeta]:
+            continue
+        if cx.execute("SELECT 1 FROM megusta WHERE foto_id = ? UNION ALL "
+                      "SELECT 1 FROM lista_foto WHERE foto_id = ? LIMIT 1",
+                      (f["id"], f["id"])).fetchone():
+            elegidas += 1
+            continue
+        fuera.append(f["id"])
+    for i in range(0, len(fuera), 500):          # SQLite: tope de parametros
+        tanda = fuera[i:i + 500]
+        cx.execute("DELETE FROM foto WHERE galeria_id = ? AND id IN (%s)"
+                   % ",".join("?" * len(tanda)), [gal["id"]] + tanda)
+    if fuera:
+        cx.execute("UPDATE galeria SET portada_foto_id = NULL WHERE id = ? AND "
+                   "portada_foto_id NOT IN (SELECT id FROM foto WHERE galeria_id = ?)",
+                   (gal["id"], gal["id"]))
+        cx.commit()
+    if fuera or elegidas:
+        partes = (["saque %d que ya no estan en el disco" % len(fuera)] if fuera else []) + \
+                 (["%d borradas del disco siguen en la galeria porque un cliente las eligio"
+                   % elegidas] if elegidas else [])
+        app.logger.warning("%s: %s", gal["slug"], "; ".join(partes))
+        # el aviso sale a internet: en un hilo, para no frenar la pagina del cliente
+        threading.Thread(target=avisar_renzo, daemon=True,
+                         args=(gal["nombre"], "Fotos: " + "; ".join(partes) + ".")).start()
+    return len(fuera)
+
+
 @app.get("/g/<slug>")
 def galeria(slug):
     gal = db().execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
@@ -2520,6 +2708,7 @@ def galeria(slug):
                 (gal["id"],)).fetchone()["c"]))
     if slug == VIDEOS_SLUG:
         return videos(gal)
+    sacar_borradas(db(), gal)
 
     cid = cliente_actual(gal["id"])
     # el criterio y la direccion salen de ?por= y ?dir=. Lo que antes era
@@ -2621,9 +2810,14 @@ def galeria(slug):
         # solo las celdas: lo que el scroll pega al final de la grilla
         return render_template_string(CELDAS, gal=gal, fotos=fotos, vende=vende,
                                       repetidas=repetidas)
+    top_fotos = (top_fotos_de(db(), gal, cid)
+                 if (not lista and not cara and not grupo
+                     and vdesde == 0 and vhasta == largo)
+                 else [])
     return render_template_string(BASE_HTML, **_tarjeta(gal, total),
         cuerpo=render_template_string(
         GRILLA, gal=gal, fotos=fotos, total=total, marcadas=marcadas,
+        top_fotos=top_fotos,
         p=p, paginas=paginas, lista=lista, marca=gal["marca_texto"] or MARCA,
         tapa=tiene_tapa(gal), tarifas=tramos(gal), pesos=pesos, T=textos(),
         entrega=indicaciones(gal),
@@ -2701,8 +2895,10 @@ def buscar_por_cara(slug):
     if fotos is None:
         return redirect(url_for("galeria", slug=slug, cara_error="sin_cara") + "#abajo")
     token = secrets.token_urlsafe(9)
-    db().execute("INSERT INTO busqueda_cara (token, galeria_id, fotos, creada) "
-                 "VALUES (?, ?, ?, ?)", (token, gal["id"], json.dumps(fotos), ahora_iso()))
+    db().execute(
+        "INSERT INTO busqueda_cara (token, galeria_id, cliente_id, fotos, creada) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (token, gal["id"], cliente_actual(gal["id"]), json.dumps(fotos), ahora_iso()))
     db().commit()
     return redirect(url_for("galeria", slug=slug, cara=token) + "#abajo")
 
@@ -2965,17 +3161,28 @@ def ver_preview(foto_id):
     # (3 adelante), asi que contarla aca inflaba "la abrio en grande": eso lo
     # avisa el visor con /api/visto cuando estuvo de verdad en pantalla.
     if not request.args.get("g"):
-        anotar_vista(f["galeria_id"], foto_id, False)
+        anotar_vista(f["galeria_id"], foto_id, False, request.args.get("cara"))
     return send_file(img, mimetype="image/jpeg", max_age=86400)
 
 
-def anotar_vista(galeria_id, foto_id, visor):
+def _ids_cara(texto):
+    """Los foto.id guardados en busqueda_cara.fotos, en el mismo orden."""
+    try:
+        xs = json.loads(texto or "[]")
+    except ValueError:
+        return []
+    return [int(x) for x in xs if isinstance(x, int) and not isinstance(x, bool)]
+
+
+def anotar_vista(galeria_id, foto_id, visor, cara=None):
     """Deja constancia de que este cliente pidio esta foto.
 
     Es la unica forma de saber despues si miro el evento entero o abandono en
     el primer partido: el log del servicio lo dice, pero se rota solo y ademas
     no distingue quien pide, porque detras del tunel todos llegan como
-    127.0.0.1.
+    127.0.0.1. Si viene con un ?cara=<token> valido de esta galeria, va a
+    `vista_cara` en vez de `vista` para no mezclar el recorrido de toda la
+    galeria con mirar solo sus propias fotos.
 
     Cuenta por lo bajo, nunca por lo alto: send_file manda max_age, asi que la
     foto que el navegador ya tiene guardada no se vuelve a pedir y esa segunda
@@ -2988,12 +3195,23 @@ def anotar_vista(galeria_id, foto_id, visor):
     ahora = ahora_iso()
     cx = db()
     try:
-        cx.execute(
-            "INSERT INTO vista (cliente_id, foto_id, visor, primera, ultima, veces) "
-            "VALUES (?, ?, ?, ?, ?, 1) "
-            "ON CONFLICT (cliente_id, foto_id, visor) DO UPDATE SET "
-            "  ultima = excluded.ultima, veces = veces + 1",
-            (cid, foto_id, 1 if visor else 0, ahora, ahora))
+        if cara and cx.execute(
+                "SELECT 1 FROM busqueda_cara WHERE token = ? AND galeria_id = ?",
+                (cara, galeria_id)).fetchone():
+            cx.execute(
+                "INSERT INTO vista_cara "
+                "(cliente_id, token, foto_id, visor, primera, ultima, veces) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT (cliente_id, token, foto_id, visor) DO UPDATE SET "
+                "  ultima = excluded.ultima, veces = veces + 1",
+                (cid, cara, foto_id, 1 if visor else 0, ahora, ahora))
+        else:
+            cx.execute(
+                "INSERT INTO vista (cliente_id, foto_id, visor, primera, ultima, veces) "
+                "VALUES (?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT (cliente_id, foto_id, visor) DO UPDATE SET "
+                "  ultima = excluded.ultima, veces = veces + 1",
+                (cid, foto_id, 1 if visor else 0, ahora, ahora))
         cx.commit()
     except sqlite3.DatabaseError:
         # llevar la cuenta no vale romper la foto: se pierde ESTA vista y ya.
@@ -3003,7 +3221,8 @@ def anotar_vista(galeria_id, foto_id, visor):
 
 
 def cobertura(cx, gid):
-    """Cuanto vio cada cliente de cada grupo de fotos, para el panel."""
+    """Cuanto vio cada cliente de cada grupo de fotos (y de sus propias fotos
+    filtradas por rostro), para el panel."""
     total, orden = {}, []
     for r in cx.execute(
             "SELECT COALESCE(grupo, '') AS grupo, COUNT(*) AS n FROM foto "
@@ -3013,7 +3232,8 @@ def cobertura(cx, gid):
         orden.append(r["grupo"])
     filas = {}
     for r in cx.execute(
-            "SELECT cliente.email AS quien, COALESCE(foto.grupo, '') AS grupo, "
+            "SELECT cliente.id AS cid, cliente.email AS quien, "
+            "  COALESCE(foto.grupo, '') AS grupo, "
             "  vista.visor AS visor, COUNT(DISTINCT vista.foto_id) AS n, "
             "  MAX(vista.ultima) AS fin "
             "FROM vista JOIN foto ON foto.id = vista.foto_id "
@@ -3024,13 +3244,57 @@ def cobertura(cx, gid):
             "GROUP BY quien, grupo, visor", (gid,)):
         f = filas.setdefault(
             (r["quien"], r["grupo"]),
-            {"quien": r["quien"], "grupo": r["grupo"], "fin": "",
+            {"quien": r["quien"], "cid": r["cid"], "grupo": r["grupo"],
+             "token": None, "fin": "",
              "total": total.get(r["grupo"], 0), "grilla": 0, "visor": 0})
         f["visor" if r["visor"] else "grilla"] = r["n"]
         f["fin"] = max(f["fin"], r["fin"] or "")
-    return sorted(filas.values(),
-                  key=lambda f: (f["quien"], orden.index(f["grupo"])
-                                 if f["grupo"] in orden else 99))
+
+    busquedas, orden_cara = {}, []
+    for b in cx.execute(
+            "SELECT busqueda_cara.token, busqueda_cara.fotos, busqueda_cara.creada, "
+            "  cliente.id AS cid, cliente.email AS quien "
+            "FROM busqueda_cara "
+            "LEFT JOIN cliente ON cliente.id = busqueda_cara.cliente_id "
+            "  AND cliente.galeria_id = busqueda_cara.galeria_id "
+            "WHERE busqueda_cara.galeria_id = ? ORDER BY busqueda_cara.creada",
+            (gid,)):
+        orden_cara.append(b["token"])
+        busquedas[b["token"]] = {"n": len(_ids_cara(b["fotos"])),
+                                 "creada": b["creada"],
+                                 "cid": b["cid"], "quien": b["quien"]}
+    filas_cara = {}
+    for tok, b in busquedas.items():
+        if b["quien"]:
+            filas_cara[(b["quien"], tok)] = {
+                "quien": b["quien"], "cid": b["cid"],
+                "grupo": "Solo sus fotos (rostro)", "token": tok,
+                "fin": b["creada"], "total": b["n"], "grilla": 0, "visor": 0}
+    for r in cx.execute(
+            "SELECT cliente.id AS cid, cliente.email AS quien, vista_cara.token, "
+            "  vista_cara.visor, COUNT(DISTINCT vista_cara.foto_id) AS n, "
+            "  MAX(vista_cara.ultima) AS fin "
+            "FROM vista_cara JOIN foto ON foto.id = vista_cara.foto_id "
+            "JOIN cliente ON cliente.id = vista_cara.cliente_id "
+            "WHERE foto.galeria_id = ? AND cliente.galeria_id = foto.galeria_id "
+            "GROUP BY quien, vista_cara.token, vista_cara.visor", (gid,)):
+        b = busquedas.get(r["token"])
+        if b is None:
+            continue
+        f = filas_cara.setdefault(
+            (r["quien"], r["token"]),
+            {"quien": r["quien"], "cid": r["cid"],
+             "grupo": "Solo sus fotos (rostro)", "token": r["token"],
+             "fin": b["creada"], "total": b["n"], "grilla": 0, "visor": 0})
+        f["visor" if r["visor"] else "grilla"] = r["n"]
+        f["fin"] = max(f["fin"], r["fin"] or "")
+
+    todas = list(filas.values()) + list(filas_cara.values())
+    return sorted(
+        todas,
+        key=lambda f: (f["quien"], 1 if f["token"] else 0,
+                       orden_cara.index(f["token"]) if f["token"] in orden_cara
+                       else (orden.index(f["grupo"]) if f["grupo"] in orden else 99)))
 
 
 @app.get("/d/<int:foto_id>")
@@ -3577,7 +3841,7 @@ def api_visto(foto_id):
     """El visor avisa que ESTA foto estuvo en pantalla. Llega por sendBeacon,
     sin cuerpo y sin esperar respuesta: 204 y nada mas."""
     f = foto_autorizada(foto_id)
-    anotar_vista(f["galeria_id"], foto_id, True)
+    anotar_vista(f["galeria_id"], foto_id, True, request.args.get("cara"))
     return "", 204
 
 
@@ -3992,6 +4256,157 @@ def _veredictos(d):
         return json.loads((d / "revision.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+
+
+MAX_TOP = 20
+
+
+def _fecha_iso_en(texto):
+    """Extrae YYYY-MM-DD de un nombre con YYYY-MM-DD o DD-MM-YYYY, o None."""
+    s = texto or ""
+    m = re.search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.search(r"\b(\d{2})-(\d{2})-(20\d{2})\b", s)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    return None
+
+
+def _stem_sel(item):
+    """(stem exacto en minusculas, clave_camara) de un item de seleccion.json."""
+    orig = (item.get("original") or "").replace("\\", "/")
+    base = Path(orig).name if orig else re.sub(r"^\d+_", "", item.get("archivo") or "")
+    if not base:
+        return "", ""
+    return Path(base).stem.lower(), clave_camara(base)
+
+
+def trabajos_seleccion():
+    """Nombres de carpetas en _para_publicar con seleccion.json, mas nuevas primero."""
+    rev = RAIZ_FOTOS / "_para_publicar"
+    if not rev.is_dir():
+        return []
+    out = []
+    for d in sorted(rev.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if d.is_dir() and "(v1)" not in d.name.lower() and (d / "seleccion.json").is_file():
+            out.append(d.name)
+    return out
+
+
+def top_fotos_de(cx, gal, cid):
+    """Las elegidas de Claude/Pasa presentes en esta galeria, para la tira
+    'Top fotos de la fecha' arriba de /g/<slug>."""
+    modo = (gal["top_trabajo"] or "").strip() if "top_trabajo" in gal.keys() else ""
+    if modo == OCULTO:
+        return []
+    vende = bool(gal["venta"] and not gal["descargas"])
+    if not modo and not vende:
+        return []
+    rev = RAIZ_FOTOS / "_para_publicar"
+    if not rev.is_dir():
+        return []
+
+    filas = cx.execute(
+        "SELECT id, ruta, tomada FROM foto WHERE galeria_id = ? ORDER BY orden, id",
+        (gal["id"],)).fetchall()
+    if not filas:
+        return []
+
+    por_ruta = {r["ruta"]: r for r in filas}
+    por_stem, por_clave = {}, {}
+    for r in filas:
+        por_stem.setdefault(Path(r["ruta"]).stem.lower(), []).append(r)
+        por_clave.setdefault(clave_camara(r["ruta"]), []).append(r)
+    fechas_gal = ({(gal["fecha"] or "")[:10]}
+                  | {(r["tomada"] or "")[:10] for r in filas}) - {""}
+
+    elegido_d, fecha_d = None, None
+    if modo:
+        d = rev / modo
+        if "/" in modo or "\\" in modo or not dentro_de_raiz(d) or not (d / "seleccion.json").is_file():
+            return []
+        elegido_d = d
+        fecha_d = _fecha_iso_en(d.name)
+    else:
+        mejor = (0, 0)
+        for nombre in trabajos_seleccion():
+            d = rev / nombre
+            sel = _seccion(d, "")
+            el = [e for e in sel.get("elegidas", [])
+                  if not re.match(r"^R\d+_", e.get("archivo") or "", re.I)]
+            if not el:
+                continue
+            n_ruta = sum(1 for e in el
+                         if _ruta_pi(e.get("original")) is not None
+                         and str(_ruta_pi(e.get("original"))) in por_ruta)
+            f_tr = _fecha_iso_en(nombre) or _fecha_iso_en(sel.get("carpeta") or "")
+            n_nom = 0
+            if f_tr and f_tr in fechas_gal:
+                n_nom = sum(1 for e in el if _stem_sel(e)[1] in por_clave)
+            puntaje = (n_ruta, n_nom)
+            if (n_ruta >= 1 or n_nom >= 1) and puntaje > mejor:
+                mejor = puntaje
+                elegido_d, fecha_d = d, f_tr
+
+    if elegido_d is None:
+        return []
+
+    sel = _seccion(elegido_d, "")
+    ver = _veredictos(elegido_d)
+    elegidas = [e for e in sel.get("elegidas", [])
+                if not re.match(r"^R\d+_", e.get("archivo") or "", re.I)]
+    pasa_items, resto_items = [], []
+    for e in elegidas:
+        arc = e.get("archivo") or ""
+        v = ver.get(arc)
+        if v and v.get("pasa"):
+            pasa_items.append(e)
+        elif v is None or v.get("buena"):
+            resto_items.append(e)
+    # si en revision.json quedo alguna pasa:true que no venia en elegidas
+    vistos_arc = {e.get("archivo") for e in elegidas}
+    for arc, v in ver.items():
+        if arc not in vistos_arc and not re.match(r"^R\d+_", arc, re.I) and v.get("pasa"):
+            pasa_items.append({"archivo": arc})
+
+    def _buscar_fila(e):
+        rp = _ruta_pi(e.get("original"))
+        if rp is not None and str(rp) in por_ruta:
+            return por_ruta[str(rp)]
+        st, cl = _stem_sel(e)
+        for cands in (por_stem.get(st) or (), por_clave.get(cl) or ()):
+            if not cands:
+                continue
+            if fecha_d:
+                en_fecha = [r for r in cands if (r["tomada"] or "")[:10] == fecha_d]
+                if en_fecha:
+                    return en_fecha[0]
+                if not modo and fechas_gal != {fecha_d}:
+                    continue
+            return cands[0]
+        return None
+
+    ids, vistos = [], set()
+    for e in pasa_items + resto_items:
+        r = _buscar_fila(e)
+        if r is not None and r["id"] not in vistos:
+            vistos.add(r["id"])
+            ids.append(r["id"])
+            if len(ids) >= MAX_TOP:
+                break
+    if not ids:
+        return []
+
+    marcas = ",".join("?" * len(ids))
+    meta = {r["id"]: r for r in cx.execute(
+        f"SELECT foto.id, foto.id IN ({EN_TODAS}) AS mia, "
+        "  EXISTS(SELECT 1 FROM lista_foto JOIN lista ON lista.id = lista_foto.lista_id"
+        "         WHERE lista_foto.foto_id = foto.id AND lista.cliente_id = ?"
+        "           AND lista.nombre = ?) AS en_carro "
+        f"FROM foto WHERE galeria_id = ? AND foto.id IN ({marcas})",
+        (cid, cid, cid, CARRITO, gal["id"]) + tuple(ids))}
+    return [meta[i] for i in ids if i in meta]
 
 
 @app.get("/panel/revision")
@@ -4508,6 +4923,11 @@ def ajustes(slug):
     tp = (request.form.get("tipo") or "").strip()
     cx.execute("UPDATE galeria SET tipo = ? WHERE id = ?",
                (tp if tp in TIPOS else None, gal["id"]))
+    top_tr = (request.form.get("top_trabajo") or "").strip()
+    if top_tr != OCULTO and top_tr not in set(trabajos_seleccion()):
+        top_tr = ""
+    cx.execute("UPDATE galeria SET top_trabajo = ? WHERE id = ?",
+               (top_tr or None, gal["id"]))
 
     # listas que se le crean al cliente: los ticks + las escritas a mano
     nombres = [n for n in request.form.getlist("lista_auto") if n in LISTAS_SUGERIDAS]
@@ -5122,7 +5542,9 @@ document.querySelectorAll("[data-borrar]").forEach(b => b.onclick = async () => 
 PANEL_CLIENTE = PANEL_CSS + PANEL_BARRA + """<main>
 <h1 class="tit">{{ cli['email'] }}</h1>
 <p class="migas"><a href="/panel/{{ gal['slug'] }}">&larr; {{ gal['nombre'] }}</a>
-&middot; {{ visitas|length }} visitas &middot; vio {{ vistas }} de {{ total }} fotos
+&middot; {{ visitas|length }} visitas
+&middot; vio {{ vistas }} de {{ total }} {% if busquedas or vistas_cara %}en la galeria
+&middot; {{ vistas_cara }} en sus fotos por rostro{% else %}fotos{% endif %}
 &middot; marco {{ marcas }} &middot; bajo {{ bajadas }}</p>
 <p class="nota">Horas de Chile. La primera senal fue
 {{ hora_local(visitas[0]['desde']) if visitas else 'ninguna' }} y la ultima
@@ -5130,29 +5552,50 @@ PANEL_CLIENTE = PANEL_CSS + PANEL_BARRA + """<main>
 Se cuenta por lo bajo: la foto que el navegador ya tiene guardada no la vuelve
 a pedir, asi que pudo ver mas de lo que dice, nunca menos.</p>
 
+{% if busquedas %}<h3>Busquedas por rostro</h3>
+<table><tr><th>Cuando</th><th>Salieron</th><th>Vio en grilla</th>
+<th>Abrio grande</th><th>Listado</th></tr>
+{% for b in busquedas %}<tr>
+<td>{{ hora_local(b['creada']) }}</td>
+<td>{{ b['n'] }} fotos</td>
+<td>{{ b['grilla'] }}{% if b['n'] %} <span style="opacity:.45">({{
+  100 * b['grilla'] // b['n'] }}%)</span>{% endif %}</td>
+<td>{{ b['visor'] }}{% if b['n'] %} <span style="opacity:.45">({{
+  100 * b['visor'] // b['n'] }}%)</span>{% endif %}</td>
+<td><a class="btn" style="font-size:.75rem;padding:.2rem .6rem"
+  href="/panel/{{ gal['slug'] }}/cara/{{ b['token'] }}">Ver las {{ b['n'] }} fotos</a></td>
+</tr>{% endfor %}</table>{% endif %}
+
 <h3>Sus visitas <span style="opacity:.4;font-size:.8rem;font-weight:400">media
 hora sin senales y ya cuenta como otra</span></h3>
-<table><tr><th>Cuando</th><th>Duro</th><th>Fotos</th><th>Abrio grande</th>
-<th>Marco</th><th>Bajo</th></tr>
+<table><tr><th>Cuando</th><th>Duro</th><th>En galeria</th><th>Por rostro</th>
+<th>Abrio grande</th><th>Marco</th><th>Bajo</th></tr>
 {% for v in visitas %}<tr>
 <td>{{ hora_local(v['desde']) }} &rarr; {{ hora_local(v['hasta'], '%H:%M') }}</td>
 <td style="opacity:.6">{{ v['minutos'] }} min</td>
-<td>{{ v['fotos'] }}</td><td>{{ v['visor'] }}</td>
+<td>{{ v['fotos_galeria'] }}</td>
+<td>{{ v['fotos_cara'] if v['fotos_cara'] or v['caras'] else '-' }}</td>
+<td>{{ v['visor'] }}</td>
 <td>{{ v['marcas'] }}</td><td>{{ v['bajadas'] }}</td></tr>
-{% else %}<tr><td colspan="6">Entro pero no llego a mirar nada.</td></tr>
+{% else %}<tr><td colspan="7">Entro pero no llego a mirar nada.</td></tr>
 {% endfor %}</table>
 
 <h3>Que hizo, en orden <span style="opacity:.4;font-size:.8rem;font-weight:400">de
 lo mas nuevo a lo mas viejo, hasta 200</span></h3>
 <table><tr><th></th><th>Cuando</th><th>Que</th><th>Archivo</th></tr>
 {% for x in linea %}<tr>
-<td style="width:6.5rem"><img src="/panel/p/{{ x['foto'] }}" loading="lazy" alt=""
-  style="width:6rem;aspect-ratio:3/2;object-fit:cover;display:block;border-radius:4px"></td>
+<td style="width:6.5rem">{% if x['foto'] %}<img src="/panel/p/{{ x['foto'] }}" loading="lazy" alt=""
+  style="width:6rem;aspect-ratio:3/2;object-fit:cover;display:block;border-radius:4px">{% else
+  %}<span style="opacity:.4">-</span>{% endif %}</td>
 <td style="opacity:.6">{{ hora_local(x['cuando']) }}</td>
-<td>{% if x['tipo'] == 'visor' %}la abrio en grande
+<td>{% if x['tipo'] == 'cara' %}se busco por rostro (<b>{{ x['n'] }}</b> fotos)
+{% elif x['tipo'] == 'visor_cara' %}la abrio en grande <span style="opacity:.55">(en sus fotos)</span>
+{% elif x['tipo'] == 'visor' %}la abrio en grande{% if busquedas or vistas_cara %} <span style="opacity:.55">(en galeria)</span>{% endif %}
 {% elif x['tipo'] == 'marco' %}la marco en <b>{{ x['detalle'] }}</b>
 {% else %}la bajo{% if x['detalle'] == 'raw' %} en RAW{% endif %}{% endif %}</td>
-<td><code>{{ nombre(rutas.get(x['foto'], '?')) }}</code></td></tr>
+<td>{% if x['tipo'] == 'cara' %}<a href="/panel/{{ gal['slug'] }}/cara/{{ x['token'] }}"
+  style="color:#9ad1ff">Ver las {{ x['n'] }} fotos &rarr;</a>{% else
+  %}<code>{{ nombre(rutas.get(x['foto'], '?')) }}</code>{% endif %}</td></tr>
 {% else %}<tr><td colspan="4">Nada todavia: solo paso por la grilla.</td></tr>
 {% endfor %}</table>
 </main>"""
@@ -5163,7 +5606,9 @@ COMENTARIOS_CLIENTE = ("""<header><b>rb.fotos</b> <span>{{ gal['nombre'] }}</spa
 
 
 PANEL_LISTA = PANEL_CSS + PANEL_BARRA + """<main>
-<h1 class="tit">{{ l['nombre'] }} de {{ l['email'] }}</h1><p class="migas"><a href="/panel/{{ gal['slug'] }}">&larr; {{ gal['nombre'] }}</a>
+<h1 class="tit">{{ l['nombre'] }} de {% if ficha_cid %}<a
+  href="/panel/{{ gal['slug'] }}/cliente/{{ ficha_cid }}" style="color:#eee">{{ l['email'] }}</a>{% else
+  %}{{ l['email'] }}{% endif %}</h1><p class="migas"><a href="/panel/{{ gal['slug'] }}">&larr; {{ gal['nombre'] }}</a>
 &middot; {{ fotos|length }} fotos{% if codigo %} &middot; ID
 <code>{{ codigo }}</code>{% endif %}</p>
 {% if compra %}<div class="compra" style="border:1px solid #3a3a3a;padding:1rem 1.2rem;margin:1rem 0">
@@ -5368,6 +5813,19 @@ def hechos_de(cx, cid):
         h.append({"cuando": r["primera"], "tipo": tipo, "foto": r["foto_id"]})
         if r["ultima"] != r["primera"]:
             h.append({"cuando": r["ultima"], "tipo": tipo, "foto": r["foto_id"]})
+    for r in cx.execute("SELECT token, fotos, creada FROM busqueda_cara "
+                        "WHERE cliente_id = ?", (cid,)):
+        ids = _ids_cara(r["fotos"])
+        h.append({"cuando": r["creada"], "tipo": "cara", "token": r["token"],
+                  "n": len(ids), "foto": ids[0] if ids else None})
+    for r in cx.execute("SELECT token, foto_id, visor, primera, ultima "
+                        "FROM vista_cara WHERE cliente_id = ?", (cid,)):
+        tipo = "visor_cara" if r["visor"] else "grilla_cara"
+        h.append({"cuando": r["primera"], "tipo": tipo, "foto": r["foto_id"],
+                  "token": r["token"]})
+        if r["ultima"] != r["primera"]:
+            h.append({"cuando": r["ultima"], "tipo": tipo, "foto": r["foto_id"],
+                      "token": r["token"]})
     for r in cx.execute("SELECT foto_id, cual, cuando FROM descarga "
                         "WHERE cliente_id = ?", (cid,)):
         h.append({"cuando": r["cuando"], "tipo": "bajo", "foto": r["foto_id"],
@@ -5389,19 +5847,28 @@ def visitas_cliente(cx, cid):
         v = visitas[-1] if visitas else None
         if v is None or (t - v["_fin"]).total_seconds() > HUECO:
             v = {"desde": x["cuando"], "hasta": x["cuando"], "_fin": t,
-                 "_vistas": set(), "_visor": set(), "marcas": 0, "bajadas": 0}
+                 "_vistas": set(), "_vistas_cara": set(), "_visor": set(),
+                 "caras": 0, "marcas": 0, "bajadas": 0}
             visitas.append(v)
         v["hasta"], v["_fin"] = x["cuando"], t
         if x["tipo"] in ("grilla", "visor"):
             v["_vistas"].add(x["foto"])
             if x["tipo"] == "visor":
                 v["_visor"].add(x["foto"])
+        elif x["tipo"] in ("grilla_cara", "visor_cara"):
+            v["_vistas_cara"].add(x["foto"])
+            if x["tipo"] == "visor_cara":
+                v["_visor"].add(x["foto"])
+        elif x["tipo"] == "cara":
+            v["caras"] += 1
         elif x["tipo"] == "marco":
             v["marcas"] += 1
         elif x["tipo"] == "bajo":
             v["bajadas"] += 1
     for v in visitas:
-        v["fotos"] = len(v["_vistas"])
+        v["fotos_galeria"] = len(v["_vistas"])
+        v["fotos_cara"] = len(v["_vistas_cara"])
+        v["fotos"] = len(v["_vistas"] | v["_vistas_cara"])
         v["visor"] = len(v["_visor"])
         v["minutos"] = round((datetime.fromisoformat(v["hasta"])
                               - datetime.fromisoformat(v["desde"])).total_seconds() / 60)
@@ -5428,11 +5895,28 @@ def panel_cliente(slug, cid):
     visitas = visitas_cliente(cx, cid)
     rutas = {r["id"]: r["ruta"] for r in
              cx.execute("SELECT id, ruta FROM foto WHERE galeria_id = ?", (gal["id"],))}
-    # la linea de tiempo cuenta lo que se hizo a proposito: abrir en grande,
-    # marcar, bajar. Las miniaturas que pasaron volando ya estan contadas en
-    # la fila de cada visita, y en una galeria de 1.268 serian puro ruido.
-    linea = [x for x in reversed(hechos_de(cx, cid))
-             if x["tipo"] != "grilla"][:200]
+    hechos = hechos_de(cx, cid)
+    # la linea de tiempo cuenta lo que se hizo a proposito: buscarse por rostro,
+    # abrir en grande, marcar, bajar. Las miniaturas que pasaron volando ya estan
+    # contadas en la fila de cada visita, y en una galeria de 1.268 serian puro ruido.
+    linea = [x for x in reversed(hechos)
+             if x["tipo"] not in ("grilla", "grilla_cara")][:200]
+    busquedas = []
+    for b in cx.execute(
+            "SELECT token, fotos, creada FROM busqueda_cara "
+            "WHERE cliente_id = ? AND galeria_id = ? ORDER BY creada DESC",
+            (cid, gal["id"])):
+        ids = _ids_cara(b["fotos"])
+        gr = cx.execute(
+            "SELECT COUNT(DISTINCT foto_id) FROM vista_cara "
+            "WHERE cliente_id = ? AND token = ? AND visor = 0",
+            (cid, b["token"])).fetchone()[0]
+        vi = cx.execute(
+            "SELECT COUNT(DISTINCT foto_id) FROM vista_cara "
+            "WHERE cliente_id = ? AND token = ? AND visor = 1",
+            (cid, b["token"])).fetchone()[0]
+        busquedas.append({"token": b["token"], "creada": b["creada"],
+                          "n": len(ids), "grilla": gr, "visor": vi})
     total = cx.execute("SELECT COUNT(*) FROM foto WHERE galeria_id = ?",
                        (gal["id"],)).fetchone()[0]
     marcas = cx.execute(
@@ -5440,10 +5924,11 @@ def panel_cliente(slug, cid):
         "WHERE lista.cliente_id = ?", (cid,)).fetchone()[0]
     return render_template_string(BASE_HTML, cuerpo=render_template_string(
         PANEL_CLIENTE, gal=gal, cli=cli, visitas=visitas, linea=linea,
-        hora_local=hora_local,
+        busquedas=busquedas, hora_local=hora_local,
         rutas=rutas, total=total, marcas=marcas, nombre=os.path.basename,
-        vistas=len({x["foto"] for x in hechos_de(cx, cid)
-                    if x["tipo"] in ("grilla", "visor")}),
+        vistas=len({x["foto"] for x in hechos if x["tipo"] in ("grilla", "visor")}),
+        vistas_cara=len({x["foto"] for x in hechos
+                         if x["tipo"] in ("grilla_cara", "visor_cara")}),
         bajadas=sum(v["bajadas"] for v in visitas)))
 
 
@@ -5486,7 +5971,40 @@ def panel_descargadas(slug, cid):
     return render_template_string(BASE_HTML, cuerpo=render_template_string(
         PANEL_LISTA, gal=gal, fotos=fotos, nombre=os.path.basename,
         l={"id": "", "nombre": "Descargadas", "email": cli["email"]},
-        codigo=None, compra=None, win=ruta_windows,
+        ficha_cid=cid, codigo=None, compra=None, win=ruta_windows,
+        nombres=" ".join(os.path.basename(f["ruta"]) for f in fotos)))
+
+
+@app.get("/panel/<slug>/cara/<token>")
+def panel_cara(slug, token):
+    """Las fotos por las que se filtro alguien al buscarse por selfie, en el
+    mismo orden de parecido en que le salieron."""
+    cx = db()
+    gal = cx.execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
+    if gal is None:
+        abort(404)
+    cara = cx.execute(
+        "SELECT busqueda_cara.*, cliente.email, cliente.id AS cid "
+        "FROM busqueda_cara "
+        "LEFT JOIN cliente ON cliente.id = busqueda_cara.cliente_id "
+        "  AND cliente.galeria_id = busqueda_cara.galeria_id "
+        "WHERE busqueda_cara.token = ? AND busqueda_cara.galeria_id = ?",
+        (token, gal["id"])).fetchone()
+    if cara is None:
+        abort(404)
+    ids = _ids_cara(cara["fotos"])
+    por_id = {}
+    if ids:
+        por_id = {r["id"]: r for r in cx.execute(
+            "SELECT id, ruta, raw FROM foto WHERE galeria_id = ? AND id IN (%s)"
+            % ",".join("?" * len(ids)), [gal["id"]] + ids)}
+    fotos = [por_id[i] for i in ids if i in por_id]
+    return render_template_string(BASE_HTML, cuerpo=render_template_string(
+        PANEL_LISTA, gal=gal, fotos=fotos, nombre=os.path.basename,
+        l={"id": "",
+           "nombre": "Búsqueda por rostro (%s)" % hora_local(cara["creada"]),
+           "email": cara["email"] or "cliente sin asociar"},
+        ficha_cid=cara["cid"], codigo=None, compra=None, win=ruta_windows,
         nombres=" ".join(os.path.basename(f["ruta"]) for f in fotos)))
 
 
@@ -5784,6 +6302,7 @@ def panel(slug=None):
     gal = cx.execute("SELECT * FROM galeria WHERE slug = ?", (slug,)).fetchone()
     if gal is None:
         abort(404)
+    sacar_borradas(cx, gal)
     clientes = cx.execute(
         "SELECT cliente.*, "
         "  (SELECT COUNT(DISTINCT lista_foto.foto_id) FROM lista_foto "
@@ -5826,6 +6345,16 @@ def panel(slug=None):
     por_cliente = {}
     for l in listas:
         por_cliente.setdefault(l["cliente_id"], []).append(l)
+    caras_por_cli, caras_sueltas = {}, []
+    for b in cx.execute(
+            "SELECT token, cliente_id, fotos, creada FROM busqueda_cara "
+            "WHERE galeria_id = ? ORDER BY creada DESC", (gal["id"],)):
+        item = {"token": b["token"], "creada": b["creada"],
+                "n": len(_ids_cara(b["fotos"]))}
+        if b["cliente_id"]:
+            caras_por_cli.setdefault(b["cliente_id"], []).append(item)
+        else:
+            caras_sueltas.append(item)
     cuenta = cx.execute(
         "SELECT COUNT(*) AS total, COUNT(raw) AS con_raw, "
         "  SUM(descargable) AS descargables FROM foto WHERE galeria_id = ?",
@@ -5854,6 +6383,7 @@ def panel(slug=None):
             sugeridas=LISTAS_SUGERIDAS,
             entf={c: entrega_a_form(c, gal[c]) for c in ENTREGA_COLS},
             resoluciones=RESOLUCIONES, metodos=METODOS, oculto=OCULTO,
+            trabajos_top=trabajos_seleccion(),
             ed_items=lineas(textos().get("edicion_%s" % gal["ent_edicion"], ""))
             if gal["ent_edicion"] in EDICIONES else [],
             ed_quita=set(lineas(gal["ent_quita"])),
@@ -5861,7 +6391,9 @@ def panel(slug=None):
             todos_logos=logos_disponibles(), puestos=logos_de(gal),
             max_logos=MAX_LOGOS, combos=combos_logos(),
             posiciones=POSICIONES, firma_pos=FIRMA_POS, firma_tam=FIRMA_TAM,
-            bajadas=bajadas, listas_de=por_cliente, marcas=MARCAS,
+            bajadas=bajadas, listas_de=por_cliente,
+            caras_de=caras_por_cli, caras_sueltas=caras_sueltas,
+            hora_local=hora_local, marcas=MARCAS,
             total=cuenta["total"], con_raw=cuenta["con_raw"],
             descargables=cuenta["descargables"] or 0,
             calentadas=calentadas,
@@ -6057,6 +6589,30 @@ form.gate .btn{border-radius:0;width:100%;padding:.9rem;font-weight:400;
 @media (max-width:640px){
   .entrega dl div{grid-template-columns:1fr;gap:.25rem}
 }
+/* tira "Top fotos de la fecha" arriba de la galeria de venta */
+.tarifas.topfecha{padding:2.6rem 1.5rem 2.8rem;text-align:left}
+.topcab{max-width:1460px;margin:0 auto 1.1rem;display:flex;align-items:center;
+  justify-content:space-between;gap:1rem}
+.topcab .rot{margin:0;display:flex;align-items:center;gap:.65rem;color:var(--cal)}
+.topcab .rot::before{content:"";width:.42rem;height:.42rem;background:var(--cancha);flex:none}
+.topcab .sub{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--humo);margin-left:.3rem}
+.topnav{display:flex;gap:.35rem}
+.topfl{width:2rem;height:2rem;border-radius:50%;border:1px solid var(--linea2);
+  background:var(--panel);color:var(--cal);font-size:1.15rem;line-height:1;
+  cursor:pointer;display:grid;place-items:center;padding:0}
+.topfl:hover{border-color:var(--cancha);color:var(--cancha)}
+@media (hover:none){.topnav{display:none}}
+.toptira{max-width:1460px;margin:0 auto;display:flex;gap:.55rem;overflow-x:auto;
+  scroll-snap-type:x proximity;scrollbar-width:none;overscroll-behavior-x:contain;
+  padding-bottom:.2rem}
+.toptira::-webkit-scrollbar{display:none}
+.tcelda{position:relative;flex:0 0 auto;height:clamp(185px,26vw,250px);
+  min-width:130px;background:#171717;overflow:hidden;scroll-snap-align:start;
+  border:1px solid var(--linea)}
+.tcelda img{height:100%;width:auto;max-width:86vw;object-fit:contain;display:block;
+  cursor:zoom-in}
+.tcelda:hover .acc,.tcelda:focus-within .acc{opacity:1}
 </style>"""
 
 BASE_HTML = """<!doctype html><html lang="es"><meta charset="utf-8">
@@ -6591,6 +7147,7 @@ BARRA = """<nav class="barra">
 <div class="links">
 <a href="/" class="{{ 'on' if seccion == 'inicio' }}">Inicio</a>
 <a href="/eventos" class="{{ 'on' if seccion == 'eventos' }}">Eventos</a>
+<a href="/liga/exscuola" class="{{ 'on' if seccion == 'liga' }}">ExScuola</a>
 <a href="/tarifas" class="{{ 'on' if seccion == 'tarifas' }}">Tarifas</a>
 <a href="/sobre-mi" class="{{ 'on' if seccion == 'sobre-mi' }}">Sobre mi</a>
 </div>
@@ -6601,7 +7158,7 @@ BARRA = """<nav class="barra">
 
 PIE = """<hr class="luz">
 <footer class="pie"><span>rb.fotos</span>
-<a href="/eventos">Eventos</a><a href="/tarifas">Tarifas</a>
+<a href="/eventos">Eventos</a><a href="/liga/exscuola">ExScuola</a><a href="/tarifas">Tarifas</a>
 <a href="/sobre-mi">Sobre mi</a>
 {% if wsp %}<a href="https://wa.me/{{ wsp }}" rel="noopener">WhatsApp</a>{% endif %}
 {% if T.pie %}<span class="fin">{{ T.pie }}</span>{% endif %}</footer>"""
@@ -6647,6 +7204,38 @@ PORTADA = BARRA + """<main class="inicio"><header class="capa">
 {% if T.rotulo_eventos_mas %}<a class="mas"
   href="/eventos">{{ T.rotulo_eventos_mas }} &rarr;</a>{% endif %}
 </section>{% endif %}
+
+{# el feed de la liga (9/11/2026): las ultimas publicaciones, cada una con su
+   primera foto, y el link al feed completo. Sin publicaciones no aparece. #}
+{% if feed %}<section class="viz bloque" id="cancha">
+<style>
+.fprev{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:2rem;align-items:center;
+  text-decoration:none;color:inherit;border:1px solid var(--linea);border-radius:18px;padding:1.6rem;
+  background:linear-gradient(135deg,rgba(198,240,74,.05),transparent 55%),var(--panel)}
+.fprev:hover{border-color:var(--linea2)}
+.fprev .logo-liga{width:100%;max-width:320px;height:auto;display:block}
+.fprev .tri{height:3px;width:120px;margin:1rem 0;border-radius:2px;
+  background:linear-gradient(90deg,#009246 0 33.3%,#F1F2F1 33.3% 66.6%,#CE2B37 66.6%)}
+.fprev p{color:var(--humo);margin:0 0 1rem}
+.fprev .mas{color:var(--cancha);font-weight:600}
+.fprev .fotos{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
+.fprev .fotos figure{margin:0;position:relative;border-radius:10px;overflow:hidden;aspect-ratio:4/5;background:#0b0f0b}
+.fprev .fotos img{width:100%;height:100%;object-fit:cover;display:block;transition:scale .4s}
+.fprev:hover .fotos img{scale:1.04}
+.fprev .fotos figcaption{position:absolute;inset:auto 0 0;padding:1.6rem .6rem .5rem;font:600 .72rem/1.25 var(--sans);
+  color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.75))}
+@media (max-width:720px){.fprev{grid-template-columns:1fr;padding:1.2rem;gap:1.2rem}}
+</style>
+<p class="rotulo">En la cancha</p>
+<a class="fprev" href="/liga/exscuola">
+<div><img class="logo-liga" src="/feed/_logo/exscuola_logo.png" alt="Liga ExScuola" width="1280" height="324" loading="lazy">
+<div class="tri"></div>
+<p>Las mejores jugadas de cada fecha de la Liga ExScuola, publicadas como un feed: sin galeria, sin clave, para mirar
+y compartir.</p>
+<span class="mas">Ver las publicaciones &rarr;</span></div>
+<div class="fotos">{% for p in feed %}<figure><img src="/feed/{{ p.id }}/1.jpg?v={{ p.armado }}" alt="{{ p.titulo }}" loading="lazy">
+<figcaption>{{ p.titulo }}</figcaption></figure>{% endfor %}</div>
+</a></section>{% endif %}
 
 {# las fotos se reparten a lo largo de la pagina, no en un solo bloque:
    fotos[0] es la tapa, las 6 siguientes la tira de accion, la que viene
@@ -7606,6 +8195,162 @@ CARPETA = BARRA + """<main class="viz">
 </section>
 """ + PIE + """</main>"""
 
+# El feed: una columna como Instagram, pero con la estetica del sitio. La
+# destacada rompe la columna y va a todo lo ancho. El carrusel es scroll-snap
+# nativo (anda con el dedo sin JS); el JS solo mueve contador, puntos y flechas.
+FEED_HTML = BARRA + """<main class="feed">
+<style>
+.feed{--col:min(600px,100%)}
+.fcab{padding:calc(var(--barra) + 3.2rem) 1.25rem 1.6rem;text-align:center;
+  background:radial-gradient(60% 80% at 50% 0,rgba(198,240,74,.07),transparent 70%)}
+.fcab img{width:min(560px,88vw);height:auto;display:block;margin:0 auto}
+.fcab p{color:var(--humo);max-width:34rem;margin:1.1rem auto 0;font-size:.95rem}
+.tricolor{height:3px;width:min(220px,50vw);margin:1.4rem auto 0;border-radius:2px;
+  background:linear-gradient(90deg,#009246 0 33.3%,#F1F2F1 33.3% 66.6%,#CE2B37 66.6%)}
+.fchips{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;margin:1.4rem auto 0;padding:0 1rem}
+.fchips a{font:600 .78rem/1 var(--mono);letter-spacing:.04em;color:var(--cal);text-decoration:none;
+  border:1px solid var(--linea2);border-radius:99px;padding:.55rem .85rem}
+.fchips a:hover{border-color:var(--cancha);color:var(--cancha)}
+.posts{display:flex;flex-direction:column;align-items:center;gap:2.2rem;padding:1.5rem 1rem 4.5rem}
+/* al bajar, la publicacion que entra al centro de lectura se agranda y la que se
+   va achicandose vuelve al ancho comun (--col = 600 px), incluida la destacada.
+   Se anima con scale en el compositor para no recalcular layout ni romper el
+   scroll-snap del carrusel. */
+.post{--s0:.6522;--foco:1;width:min(920px,100%);background:var(--panel);
+  border:1px solid var(--linea);border-radius:14px;overflow:hidden;
+  scroll-margin-top:calc(var(--barra) + 1rem);transform-origin:center center;
+  scale:calc(var(--s0) + (1 - var(--s0)) * var(--foco));
+  opacity:calc(.82 + .18 * var(--foco));
+  transition:scale .12s ease-out,opacity .16s ease-out,border-color .2s;
+  will-change:scale,opacity}
+.post.destacada{--s0:.566;width:min(1060px,100%);border-radius:18px}
+@media (min-width:721px){.post{margin-block:-2.6rem}}
+@media (max-width:720px){.post,.post.destacada{--s0:.93;margin-block:0}}
+@media (prefers-reduced-motion:reduce){.post,.post.destacada{scale:1;opacity:1;margin-block:0}}
+.post.oculto{opacity:.45;outline:2px dashed #CE2B37}
+.phead{display:flex;align-items:center;gap:.7rem;padding:.75rem .9rem}
+.av{width:38px;height:38px;border-radius:50%;flex:none;padding:2px;
+  background:conic-gradient(#009246 0 33%,#F1F2F1 0 66%,#CE2B37 0)}
+.av img{width:100%;height:100%;border-radius:50%;background:var(--noche);object-fit:contain;padding:6px;display:block}
+.quien{line-height:1.25;font-size:.9rem}.quien b{color:var(--cal)}
+.quien span{display:block;color:var(--humo);font-size:.78rem}
+.etq{margin-left:auto;font:600 .7rem/1 var(--mono);color:var(--noche);background:var(--cancha);
+  border-radius:99px;padding:.35rem .6rem;letter-spacing:.05em;white-space:nowrap}
+.car{position:relative;background:#000}
+.pista{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;
+  overscroll-behavior-x:contain}
+.pista::-webkit-scrollbar{display:none}
+.pista img{flex:0 0 100%;width:100%;height:auto;scroll-snap-align:center;display:block;
+  aspect-ratio:var(--ar);object-fit:cover;background:#0b0f0b}
+.cont{position:absolute;top:.7rem;right:.7rem;font:600 .72rem/1 var(--mono);color:#fff;
+  background:rgba(0,0,0,.55);border-radius:99px;padding:.35rem .55rem}
+.flecha{position:absolute;top:50%;translate:0 -50%;width:34px;height:34px;border-radius:50%;border:0;
+  background:rgba(240,243,234,.85);color:#111;font-size:1.2rem;line-height:1;cursor:pointer;opacity:0;transition:opacity .2s}
+.car:hover .flecha,.flecha:focus-visible{opacity:1}.flecha.izq{left:.6rem}.flecha.der{right:.6rem}
+.flecha[disabled]{visibility:hidden}
+@media (hover:none){.flecha{display:none}}
+.puntos{display:flex;gap:5px;justify-content:center;padding:.7rem 0 .2rem}
+.puntos i{width:6px;height:6px;border-radius:50%;background:var(--linea2);transition:background .2s,scale .2s}
+.puntos i.on{background:var(--cancha);scale:1.25}
+.pcuerpo{padding:.5rem 1rem 1.1rem}
+.ptit{font-weight:700;color:var(--cal);font-size:1.02rem;margin:.2rem 0 .3rem}
+.ptexto{color:#d6dbd1;font-size:.93rem;white-space:pre-line;margin:0}
+.pfecha{display:block;margin-top:.6rem;color:var(--humo);font:500 .72rem/1 var(--mono);letter-spacing:.05em;
+  text-transform:uppercase}
+.admin{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.9rem}
+.admin form{margin:0}
+.admin a,.admin button{font:600 .8rem var(--sans);border-radius:8px;padding:.5rem .8rem;cursor:pointer;
+  border:1px solid var(--linea2);background:transparent;color:var(--cal);text-decoration:none}
+.admin a.ig{background:var(--cancha);color:var(--noche);border-color:var(--cancha)}
+.feed .vacio{color:var(--humo);text-align:center;padding:3rem 1rem}
+</style>
+<section class="fcab">
+<img src="/feed/_logo/{{ L.logo }}" alt="{{ L.nombre }}" width="1280" height="324">
+<div class="tricolor"></div>
+<p>{{ L.bajada }}</p>
+{% if fechas|length > 1 %}<nav class="fchips" aria-label="Fechas">{% for f, pid in fechas.items() %}
+<a href="#{{ pid }}">{{ f }}</a>{% endfor %}</nav>{% endif %}
+</section>
+<section class="posts">
+{% for p in posts %}
+<article class="post{{ ' destacada' if p.tipo == 'destacada' }}{{ ' oculto' if p.oculto }}" id="{{ p.id }}">
+<div class="phead"><span class="av"><img src="/feed/_logo/{{ L.insignia }}" alt=""></span>
+<span class="quien"><b>{{ L.cuenta }}</b> con <b>{{ L.corto }}</b>
+<span>{{ p.fecha_txt }}{% if p.lugar %} &middot; {{ p.lugar }}{% endif %}</span></span>
+{% if p.tipo == 'destacada' %}<span class="etq">FOTO DE LA FECHA</span>{% endif %}</div>
+<div class="car" style="--ar:{{ p.ancho }}/{{ p.alto }}">
+<div class="pista">{% set primero = loop.first %}{% for f in p.fotos %}
+<img src="/feed/{{ p.id }}/{{ loop.index }}.jpg?v={{ p.armado }}" width="{{ p.ancho }}" height="{{ p.alto }}"
+  alt="{{ p.alts[loop.index0] if p.alts and p.alts|length > loop.index0 else p.titulo }}"
+  loading="{{ 'eager' if primero and loop.first else 'lazy' }}" decoding="async">{% endfor %}</div>
+{% if p.fotos|length > 1 %}<span class="cont">1/{{ p.fotos|length }}</span>
+<button class="flecha izq" type="button" aria-label="Anterior" disabled>&lsaquo;</button>
+<button class="flecha der" type="button" aria-label="Siguiente">&rsaquo;</button>{% endif %}
+</div>
+{% if p.fotos|length > 1 %}<div class="puntos">{% for f in p.fotos %}<i class="{{ 'on' if loop.first }}"></i>{% endfor %}</div>{% endif %}
+<div class="pcuerpo">
+{% if p.titulo %}<p class="ptit">{{ p.titulo }}</p>{% endif %}
+<p class="ptexto">{{ p.texto }}</p>
+<span class="pfecha">{{ p.fecha_larga or p.fecha_txt }}</span>
+{% if admin %}<div class="admin"><a class="ig" href="/panel/feed/{{ p.id }}/ig.zip">Bajar para Instagram</a>
+<button type="button" class="copiar" data-texto="{{ p.texto }}">Copiar texto</button>
+<form method="post" action="/panel/feed/{{ p.id }}/ocultar"><button>{{ 'Mostrar' if p.oculto else 'Ocultar' }}</button></form>
+</div>{% endif %}
+</div></article>
+{% endfor %}
+{% if not posts %}<p class="vacio">Pronto: las publicaciones de la proxima fecha.</p>{% endif %}
+</section>
+<script>
+document.querySelectorAll('.car').forEach(function(c){
+  var pista=c.querySelector('.pista'),n=pista.children.length;if(n<2)return;
+  var cont=c.querySelector('.cont'),izq=c.querySelector('.izq'),der=c.querySelector('.der'),
+      ps=c.parentNode.querySelectorAll('.puntos i');
+  function ir(d){pista.scrollBy({left:d*pista.clientWidth,behavior:'smooth'})}
+  izq.onclick=function(){ir(-1)};der.onclick=function(){ir(1)};
+  pista.addEventListener('scroll',function(){
+    var i=Math.round(pista.scrollLeft/pista.clientWidth);
+    cont.textContent=(i+1)+'/'+n;izq.disabled=i===0;der.disabled=i===n-1;
+    ps.forEach(function(p,j){p.classList.toggle('on',j===i)});
+  },{passive:true});
+});
+document.querySelectorAll('.copiar').forEach(function(b){b.onclick=function(){
+  navigator.clipboard.writeText(b.dataset.texto).then(function(){b.textContent='Copiado';
+    setTimeout(function(){b.textContent='Copiar texto'},1500)})}});
+(function(){
+  var ps=[].slice.call(document.querySelectorAll('.post'));
+  if(!ps.length||window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  var raf=0;
+  function medirBase(){
+    var disp=Math.max(260,innerWidth-32);
+    var base=innerWidth<=720?disp*.93:Math.min(600,disp*.74);
+    ps.forEach(function(p){
+      var w=p.offsetWidth||1;
+      p.style.setProperty('--s0',Math.min(1,base/w).toFixed(4));
+    });
+  }
+  function enfocar(){
+    raf=0;
+    var h=innerHeight||1,y=scrollY||pageYOffset||0;
+    var maxY=Math.max(0,document.documentElement.scrollHeight-h);
+    var cola=maxY>0?Math.max(0,Math.min(1,(y-(maxY-220))/220)):0;
+    var yf=h*(.5+.16*cola),rango=Math.max(h*.64,480);
+    ps.forEach(function(p){
+      var r=p.getBoundingClientRect(),cy=(r.top+r.bottom)*.5;
+      var dist=Math.max(0,Math.abs(cy-yf)-75);
+      var d=Math.min(1,dist/rango);
+      var f=.5*(1+Math.cos(Math.PI*d));
+      p.style.setProperty('--foco',f.toFixed(3));
+    });
+  }
+  function pedir(){if(!raf)raf=requestAnimationFrame(enfocar)}
+  medirBase();enfocar();
+  addEventListener('scroll',pedir,{passive:true});
+  addEventListener('resize',function(){medirBase();pedir()},{passive:true});
+})();
+</script>
+""" + PIE + """</main>"""
+
+
 COMPRAR = """<header><b><a class="volver" href="/g/{{ gal['slug'] }}">&larr;
 {{ gal['nombre'] }}</a></b> <span>comprar</span></header>
 <main class="viz compra2">
@@ -7868,6 +8613,22 @@ lista y toca el corazon de la foto.</p>{% endif %}
 {% if items %}<ul class="quehace">{% for i in items %}<li>{{ i }}</li>{% endfor %}</ul>
 {% endif %}</dd></div>{% endfor %}</dl>
 </section>{% endif %}
+{% if top_fotos %}<section class="tarifas topfecha" id="topfotos">
+<div class="topcab">
+<p class="rot">Top fotos de la fecha <span class="sub">{{ top_fotos|length }} destacadas</span></p>
+<div class="topnav">
+<button type="button" class="topfl" id="topIzq" aria-label="Anterior">&lsaquo;</button>
+<button type="button" class="topfl" id="topDer" aria-label="Siguiente">&rsaquo;</button>
+</div></div>
+<div class="toptira" id="toptira">{% for f in top_fotos %}<figure class="tcelda" style="margin:0">
+<img src="/p/{{ f['id'] }}" loading="lazy" decoding="async" alt="" draggable="false">
+<div class="acc">
+<button class="fav {{ 'on' if f['mia'] }}" data-id="{{ f['id'] }}" title="Me gusta"></button>
+<button class="alista" data-id="{{ f['id'] }}" title="Elegir en que listas va">&#9776;</button>
+{% if vende %}<button class="car {{ 'on' if f['en_carro'] }}" data-id="{{ f['id'] }}"
+  title="Agregar al carrito"></button>{% endif %}
+</div></figure>{% endfor %}</div>
+</section>{% endif %}
 <section class="tarifas ordenar">
 <form method="get" id="fordenar">
 {% if lista %}<input type="hidden" name="lista" value="{{ lista['id'] }}">{% endif %}
@@ -7970,6 +8731,13 @@ async function alCarrito(id) {
   return d.en;
 }
 let figs = [];
+const topFigs = [...document.querySelectorAll("#toptira .tcelda")];
+function syncFav(id, m) {
+  document.querySelectorAll(`.acc .fav[data-id="${id}"]`).forEach(x => x.classList.toggle("on", m));
+}
+function syncCar(id, en) {
+  document.querySelectorAll(`.acc .car[data-id="${id}"]`).forEach(x => x.classList.toggle("on", en));
+}
 
 async function marcar(id) {
   const r = await fetch("/api/megusta", {method: "POST",
@@ -8019,28 +8787,41 @@ addEventListener("resize", () => {
   tMedir = setTimeout(() => { const g = gapFilas(); figs.forEach(f => medir(f, g)); }, 150);
 });
 
+function cablearAcciones(fig, alAbrir) {
+  const b = boton(fig);
+  b.onclick = async e => {
+    e.stopPropagation();
+    const m = await marcar(b.dataset.id);
+    if (m !== null) syncFav(b.dataset.id, m);
+  };
+  const c = carro(fig);
+  if (c) c.onclick = async e => {
+    e.stopPropagation();
+    const en = await alCarrito(c.dataset.id);
+    if (en !== null) syncCar(c.dataset.id, en);
+  };
+  const al = fig.querySelector(".alista");
+  if (al) al.onclick = e => { e.stopPropagation(); abrirPop(al.dataset.id, al); };
+  const im = fig.querySelector("img");
+  im.onclick = alAbrir;
+  return im;
+}
+
+topFigs.forEach((fig, k) => cablearAcciones(fig, () => abrir(k, topFigs)));
+const topTira = document.getElementById("toptira");
+if (topTira) {
+  const ti = document.getElementById("topIzq"), td = document.getElementById("topDer");
+  if (ti) ti.onclick = () => topTira.scrollBy({left: -Math.max(260, topTira.clientWidth * 0.78), behavior: "smooth"});
+  if (td) td.onclick = () => topTira.scrollBy({left: Math.max(260, topTira.clientWidth * 0.78), behavior: "smooth"});
+}
+
 // se vuelve a llamar por cada trozo que llega: los nuevos se enganchan igual
 function enganchar() {
   figs = [...grid.querySelectorAll(".celda")];
   figs.forEach(fig => {
     if (fig.dataset.listo) return;
     fig.dataset.listo = "1";
-    const b = boton(fig);
-    b.onclick = async e => {
-      e.stopPropagation();
-      const m = await marcar(b.dataset.id);
-      if (m !== null) b.classList.toggle("on", m);
-    };
-    const c = carro(fig);
-    if (c) c.onclick = async e => {
-      e.stopPropagation();
-      const en = await alCarrito(c.dataset.id);
-      if (en !== null) c.classList.toggle("on", en);
-    };
-    const al = fig.querySelector(".alista");
-    if (al) al.onclick = e => { e.stopPropagation(); abrirPop(al.dataset.id, al); };
-    const im = fig.querySelector("img");
-    im.onclick = () => abrir(figs.indexOf(fig));
+    const im = cablearAcciones(fig, () => abrir(figs.indexOf(fig), figs));
     im.addEventListener("load", () => { medir(fig); bajada(im, true); });
     im.addEventListener("error", () => bajada(im, false));
     ojo.observe(im);
@@ -8056,6 +8837,7 @@ function enganchar() {
 // pedirla, el navegador la retomaba con Range (206) y quedaba rota para
 // siempre. Lo peor que pasa asi es que terminen de bajar EN_VUELO que ya
 // pasaste.
+const CARA = "{{ cara['token'] if cara else '' }}";
 const EN_VUELO = 6;
 let vuelan = 0;
 const cerca = new Set();
@@ -8074,9 +8856,13 @@ function repartir() {
     .forEach(im => {
       im.dataset.vuela = "1";
       vuelan++;
-      // un reintento va con otra URL: la misma vuelve a dar el error guardado
+      // un reintento va con otra URL: la misma vuelve a dar el error guardado.
+      // Y con ?cara= puesto el navegador vuelve a pedir la foto aunque ya la
+      // tuviera cacheada de la galeria entera: asi queda contada aparte.
       const n = +im.dataset.intento || 0;
-      im.src = im.dataset.src + (n ? "?r=" + n : "");
+      const q = (CARA ? "cara=" + encodeURIComponent(CARA) : "")
+              + (n ? (CARA ? "&r=" : "r=") + n : "");
+      im.src = im.dataset.src + (q ? "?" + q : "");
     });
 }
 function bajada(im, ok) {
@@ -8088,8 +8874,22 @@ function bajada(im, ok) {
   else {
     cerca.delete(im);
     ojo.unobserve(im);                           // lista (o rota de verdad)
+    if (!ok) retirarSiNoExiste(im);
   }
   repartir();
+}
+// Una foto que el servidor ya no tiene (404: la borraron del disco con la
+// pagina abierta) se saca de la grilla en vez de quedar como icono roto. Solo
+// con 404: si lo que fallo es la red, la celda se queda y carga al recargar.
+async function retirarSiNoExiste(im) {
+  try {
+    const r = await fetch(im.dataset.src, {method: "HEAD"});
+    if (r.status !== 404) return;
+  } catch (e) { return; }
+  const fig = im.closest(".celda");
+  if (!fig) return;
+  fig.remove();
+  figs = figs.filter(f => f !== fig);
 }
 enganchar();
 
@@ -8182,7 +8982,6 @@ const DESDE = "{{ vdesde }}";
 const HASTA = "{{ vhasta }}";
 const LARGO = "{{ largo }}";
 const GRUPO = "{{ grupo }}";
-const CARA = "{{ cara['token'] if cara else '' }}";
 const POR = "{{ por }}";
 const DIR = "{{ 'desc' if dire == 'DESC' else 'asc' }}";
 const VENDE = {{ 'true' if vende else 'false' }};
@@ -8250,9 +9049,9 @@ async function refrescarCorazones() {
   const r = await fetch(`/api/marcadas/${SLUG}`);
   if (!r.ok) return;
   const puestas = new Set((await r.json()).ids);
-  figs.forEach(f => boton(f).classList.toggle("on", puestas.has(+boton(f).dataset.id)));
-  if (!visor.hidden && figs[idx])
-    vlike.classList.toggle("on", boton(figs[idx]).classList.contains("on"));
+  [...figs, ...topFigs].forEach(f => boton(f).classList.toggle("on", puestas.has(+boton(f).dataset.id)));
+  if (!visor.hidden && vLista[idx])
+    vlike.classList.toggle("on", boton(vLista[idx]).classList.contains("on"));
 }
 
 document.getElementById("blistas").onclick = async e => {
@@ -8277,6 +9076,7 @@ document.getElementById("bnueva").onclick = async () => {
 
 // ------------------------------------------------------- visor
 let idx = -1;
+let vLista = figs;
 // vCargando y no `cargando`: ese nombre ya lo usa el scroll infinito, y dos
 // `let` iguales en el mismo scope rompen el <script> entero
 let vCargando = false, tCarga = null;
@@ -8288,10 +9088,12 @@ function vListo() {
 }
 
 let tVisto = null;
-function abrir(i) {
-  if (!figs.length) return;
-  idx = (i + figs.length) % figs.length;
-  const fig = figs[idx], id = boton(fig).dataset.id;
+function abrir(i, lista) {
+  if (lista) vLista = lista;
+  else if (!vLista.length) vLista = figs;
+  if (!vLista.length) return;
+  idx = (i + vLista.length) % vLista.length;
+  const fig = vLista[idx], id = boton(fig).dataset.id;
   vCargando = true;
   visor.classList.add("cargando");
   // red de seguridad: si la foto nunca llega, el visor no queda trabado
@@ -8316,7 +9118,8 @@ function abrir(i) {
   // "la vio" es que haya quedado en pantalla, no que el navegador la haya
   // bajado: pasando en seco con la flecha apretada no cuenta ninguna
   clearTimeout(tVisto);
-  tVisto = setTimeout(() => navigator.sendBeacon("/api/visto/" + id), 500);
+  tVisto = setTimeout(() => navigator.sendBeacon(
+    "/api/visto/" + id + (CARA ? "?cara=" + encodeURIComponent(CARA) : "")), 500);
   const vdl = document.getElementById("vdl");
   if (vdl) {
     const dl = fig.querySelector("a.dl");
@@ -8329,7 +9132,7 @@ function abrir(i) {
   }
   vlike.classList.toggle("on", boton(fig).classList.contains("on"));
   if (vcar) vcar.classList.toggle("on", carro(fig).classList.contains("on"));
-  vpos.textContent = (idx + 1) + " / " + figs.length;
+  vpos.textContent = (vLista === topFigs ? "Top " : "") + (idx + 1) + " / " + vLista.length;
   visor.hidden = false;
   document.body.style.overflow = "hidden";
 }
@@ -8339,7 +9142,7 @@ function abrir(i) {
 // Se guardan las Image: sin referencia la descarga se cancela.
 function precargar(fig) {
   precargas = [1, 2, 3, -1].map(k => {
-    const v = figs[(idx + k * rumbo + figs.length) % figs.length];
+    const v = vLista[(idx + k * rumbo + vLista.length) % vLista.length];
     if (!v || v === fig) return null;
     const im = new Image();
     im.src = "/p/" + boton(v).dataset.id + "?g=1";
@@ -8373,7 +9176,7 @@ async function navegar(d) {
   rumbo = d < 0 ? -1 : 1;
   // el visor solo conoce las fotos que la grilla ya bajo: al salirse del
   // final hay que traer la tanda siguiente, si no la 300 volvia a la 1
-  while (idx + d >= figs.length && hayMas) {
+  while (vLista === figs && idx + d >= figs.length && hayMas) {
     const antes = figs.length;
     await masFotos();
     // si la tanda no trajo nada (red caida), dar la vuelta como antes en vez
@@ -8383,7 +9186,7 @@ async function navegar(d) {
   abrir(idx + d);
   // el proximo trozo se pide 20 antes del final: asi el salto de tanda no se
   // siente, y si igual lo alcanzas el while de arriba lo espera
-  if (idx > figs.length - 20 && hayMas) masFotos();
+  if (vLista === figs && idx > figs.length - 20 && hayMas) masFotos();
 }
 
 // -------------------------------------------------- comentarios de la foto
@@ -8416,7 +9219,7 @@ if (pcom) {
     const t = document.getElementById("ctxt");
     const texto = t.value.trim();
     if (!texto) return;
-    const id = boton(figs[idx]).dataset.id;
+    const id = boton(vLista[idx]).dataset.id;
     let r = await fetch("/api/comentario", {method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({foto_id: +id, texto})});
@@ -8434,19 +9237,20 @@ if (pcom) {
     if (!r.ok) { avisar("No se pudo comentar"); return; }
     pintar(await r.json());
     // el numerito de la celda, para no tener que recargar la grilla
-    const fig = figs[idx];
-    let n = fig.querySelector(".ncom");
-    if (!n) {
-      n = document.createElement("span");
-      n.className = "ncom";
-      fig.appendChild(n);
-    }
-    n.textContent = EMOJI_COM + " " +
-      (+(n.textContent.replace(/[^0-9]/g, "") || 0) + 1);
+    figs.filter(f => boton(f).dataset.id === id).forEach(fig => {
+      let n = fig.querySelector(".ncom");
+      if (!n) {
+        n = document.createElement("span");
+        n.className = "ncom";
+        fig.appendChild(n);
+      }
+      n.textContent = EMOJI_COM + " " +
+        (+(n.textContent.replace(/[^0-9]/g, "") || 0) + 1);
+    });
   };
   const abrirCom = async () => {
     if (!pcom.hidden) { pcom.hidden = true; return; }
-    const r = await fetch("/api/comentarios/" + boton(figs[idx]).dataset.id);
+    const r = await fetch("/api/comentarios/" + boton(vLista[idx]).dataset.id);
     if (!r.ok) return;
     pintar(await r.json());
     pcom.hidden = false;
@@ -8514,21 +9318,21 @@ document.addEventListener("click", e => {
 });
 vlistas.onclick = e => {
   e.stopPropagation();
-  abrirPop(boton(figs[idx]).dataset.id, vlistas);
+  abrirPop(boton(vLista[idx]).dataset.id, vlistas);
 };
 
 vlike.onclick = async () => {
-  const b = boton(figs[idx]);
+  const b = boton(vLista[idx]);
   const m = await marcar(b.dataset.id);
   if (m === null) return;
-  b.classList.toggle("on", m);
+  syncFav(b.dataset.id, m);
   vlike.classList.toggle("on", m);
 };
 if (vcar) vcar.onclick = async () => {
-  const c = carro(figs[idx]);
+  const c = carro(vLista[idx]);
   const en = await alCarrito(c.dataset.id);
   if (en === null) return;
-  c.classList.toggle("on", en);
+  syncCar(c.dataset.id, en);
   vcar.classList.toggle("on", en);
 };
 
@@ -10275,6 +11079,13 @@ el logo)</option>
 {% for t in tipos %}<option value="{{ t }}"
   {{ 'selected' if t == gal['tipo'] }}>{{ tipo_nombre[t] }}</option>{% endfor %}
 </select></label>
+<label class="campo"><span>Top fotos de la fecha</span>
+<select name="top_trabajo">
+<option value="" {{ 'selected' if not gal['top_trabajo'] }}>Automático (por fecha y archivo)</option>
+<option value="{{ oculto }}" {{ 'selected' if gal['top_trabajo'] == oculto }}>No mostrar</option>
+{% for tr in trabajos_top %}<option value="{{ tr }}"
+  {{ 'selected' if gal['top_trabajo'] == tr }}>{{ tr }}</option>{% endfor %}
+</select></label>
 {% set la = (gal['listas_auto'] or '').splitlines() %}
 <div style="flex-basis:100%;font-size:.85rem"><span style="opacity:.7">Listas que se
 le crean al cliente:</span>
@@ -10430,25 +11241,38 @@ salen. Vacio = los de siempre.</span>
   style="font-size:.75rem;padding:.2rem .6rem;margin:.1rem .25rem .1rem 0"
   href="/panel/{{ gal['slug'] }}/cliente/{{ c['id'] }}/descargadas"
   title="Se llena sola con lo que bajo">Descargadas ({{ c['bajadas_fotos'] }})</a>{% endif %}
+{% for b in caras_de.get(c['id'], []) %}<a class="btn"
+  style="font-size:.75rem;padding:.2rem .6rem;margin:.1rem .25rem .1rem 0;background:#253545;color:#cde7ff"
+  href="/panel/{{ gal['slug'] }}/cara/{{ b['token'] }}"
+  title="Se busco por selfie ({{ hora_local(b['creada']) }})">Rostro ({{ b['n'] }})</a>{% endfor %}
 {% for l in listas_de.get(c['id'], []) %}<a class="btn"
   style="font-size:.75rem;padding:.2rem .6rem;margin:.1rem .25rem .1rem 0"
   href="/panel/{{ gal['slug'] }}/lista/{{ l['id'] }}">{{ l['nombre'] }} ({{ l['n'] }})</a>{% else
-  %}<span style="opacity:.4">-</span>{% endfor %}</td></tr>
+  %}{% if not c['bajadas_fotos'] and not caras_de.get(c['id']) %}<span style="opacity:.4">-</span>{% endif %}{% endfor %}</td></tr>
 {% else %}<tr><td colspan="5">Nadie todavia.</td></tr>
 {% endfor %}</table>
+{% if caras_sueltas %}<p class="nota">Busquedas por rostro sin cliente asociado:
+{% for b in caras_sueltas %}<a class="btn"
+  style="font-size:.75rem;padding:.2rem .6rem;margin:.1rem .25rem .1rem 0;background:#253545;color:#cde7ff"
+  href="/panel/{{ gal['slug'] }}/cara/{{ b['token'] }}">Rostro {{ hora_local(b['creada']) }} ({{ b['n'] }})</a>{% endfor %}</p>{% endif %}
 
 {% if miradas %}<h3>Que miro cada uno</h3>
-<p class="nota">Cuenta por lo bajo: la foto que el navegador ya tiene guardada
-no la vuelve a pedir, asi que pudo ver mas de lo que dice, nunca menos.</p>
-<table><tr><th>Email</th><th>Grupo</th><th>Fotos</th><th>Vio en la grilla</th>
+<p class="nota">Separa lo que recorrio en la galeria general (o cada partido) de
+lo que miro filtrando solo sus propias fotos por rostro. Cuenta por lo bajo: la
+foto que el navegador ya tiene guardada no la vuelve a pedir.</p>
+<table><tr><th>Email</th><th>Donde</th><th>Fotos</th><th>Vio en la grilla</th>
 <th>Abrio en grande</th><th>Ultima</th></tr>
-{% for m in miradas %}<tr><td>{{ m['quien'] }}</td>
-<td>{{ m['grupo'] or '-' }}</td><td>{{ m['total'] }}</td>
+{% for m in miradas %}<tr><td>{% if m.get('cid') %}<a
+  href="/panel/{{ gal['slug'] }}/cliente/{{ m['cid'] }}" style="color:#eee">{{ m['quien'] }}</a>{% else
+  %}{{ m['quien'] }}{% endif %}</td>
+<td>{% if m.get('token') %}<a href="/panel/{{ gal['slug'] }}/cara/{{ m['token'] }}"
+  style="color:#9ad1ff">{{ m['grupo'] }}</a>{% else
+  %}{{ m['grupo'] or 'Toda la galería' }}{% endif %}</td><td>{{ m['total'] }}</td>
 <td>{{ m['grilla'] }}{% if m['total'] %} <span style="opacity:.45">({{
   100 * m['grilla'] // m['total'] }}%)</span>{% endif %}</td>
 <td>{{ m['visor'] }}{% if m['total'] %} <span style="opacity:.45">({{
   100 * m['visor'] // m['total'] }}%)</span>{% endif %}</td>
-<td>{{ m['fin'] }}</td></tr>{% endfor %}</table>{% endif %}
+<td>{{ hora_local(m['fin']) }}</td></tr>{% endfor %}</table>{% endif %}
 
 <h3>Fotos descargadas <span style="opacity:.4;font-size:.8rem;font-weight:400">
 una fila por bajada</span></h3>
@@ -12389,7 +13213,7 @@ def test():
 
     def buscar_falso(gal, selfie):          # sin modelos en el self-check
         vistas.append(Path(selfie).exists())
-        return None if b"sin cara" in Path(selfie).read_bytes() else fids[:2]
+        return None if b"sin cara" in Path(selfie).read_bytes() else [fids[1], fids[0]]
     buscar_cara = buscar_falso
     with app.test_client() as c:
         c.post("/g/ccc/entrar", data={"email": "x@y.com", "clave": "secreta"})
@@ -12410,17 +13234,126 @@ def test():
         assert len(re.findall(r'/p/([0-9]+)"', html)) == 2, "no filtra por cara"
         assert 'const CARA = "%s"' % token in html, "el scroll pierde el filtro"
         assert vistas == [True] and not list(CARAS.glob("selfie-*")), "la selfie quedo en disco"
+        # mirar con ?cara= cuenta como foto personal y NO contamina la galeria
+        assert c.get(f"/p/{fids[1]}?cara={token}").status_code == 200
+        assert c.post(f"/api/visto/{fids[1]}?cara={token}").status_code == 204
+        cx = conectar()
+        cid_x = cx.execute("SELECT id FROM cliente WHERE galeria_id = ? AND email = 'x@y.com'",
+                           (gccc,)).fetchone()["id"]
+        bc_ = cx.execute("SELECT cliente_id FROM busqueda_cara WHERE token = ?",
+                         (token,)).fetchone()
+        assert bc_ and bc_["cliente_id"] == cid_x, "no asocio la busqueda al cliente"
+        assert cx.execute("SELECT COUNT(*) FROM vista WHERE cliente_id = ? AND foto_id = ?",
+                          (cid_x, fids[1])).fetchone()[0] == 0, \
+            "una vista dentro de ?cara= se mezclo con la galeria general"
+        assert [tuple(r) for r in cx.execute(
+            "SELECT visor, veces FROM vista_cara WHERE cliente_id = ? AND token = ? "
+            "ORDER BY visor", (cid_x, token))] == [(0, 1), (1, 1)]
+        cx.close()
+        # en el panel se ve el boton Rostro (2), el listado en orden de parecido
+        # y la diferencia entre quien miro la galeria y quien solo sus fotos
+        pan_cara = c.get(f"/panel/ccc/cara/{token}")
+        assert pan_cara.status_code == 200
+        txt_cara = pan_cara.get_data(as_text=True)
+        assert "dos.jpg uno.jpg" in txt_cara and "con,coma.jpg" not in txt_cara, \
+            "el panel no mostro las fotos filtradas en orden"
+        assert c.get(f"/panel/ddd/cara/{token}").status_code == 404, "FUGA: cara de otra galeria"
+        assert c.get("/panel/ccc/cara/noexiste").status_code == 404
         r_ = c.post("/g/ccc/cara", data={"selfie": (io.BytesIO(b"sin cara"), "a.jpg")},
                     content_type="multipart/form-data")
         assert "cara_error=sin_cara" in r_.headers["Location"]
         # un token inventado (o de otra galeria) muestra todas
         assert len(re.findall(r'/p/([0-9]+)"',
                               c.get("/g/ccc?cara=nada").get_data(as_text=True))) == 3
+    # alguien que entra y SOLO se busca por rostro: no aparece mirando partidos,
+    # solo sus fotos personales
+    with app.test_client() as c:
+        c.post("/g/ccc/entrar", data={"email": "solo@y.com", "clave": "secreta"})
+        r_ = c.post("/g/ccc/cara", data={"selfie": (io.BytesIO(b"jpg"), "yo.jpg")},
+                    content_type="multipart/form-data")
+        tok_solo = re.search(r"cara=([\w-]+)", r_.headers["Location"]).group(1)
+        assert c.get(f"/p/{fids[0]}?cara={tok_solo}").status_code == 200
+        assert c.get(f"/p/{fids[1]}?cara={tok_solo}").status_code == 200
+        assert c.post(f"/api/visto/{fids[0]}?cara={tok_solo}").status_code == 204
+        cx = conectar()
+        cid_solo = cx.execute(
+            "SELECT id FROM cliente WHERE galeria_id = ? AND email = 'solo@y.com'",
+            (gccc,)).fetchone()["id"]
+        mir = cobertura(cx, gccc)
+        cx.close()
+        de_solo = [m for m in mir if m["quien"] == "solo@y.com"]
+        assert len(de_solo) == 1 and de_solo[0]["token"] == tok_solo, de_solo
+        assert de_solo[0]["grilla"] == 2 and de_solo[0]["visor"] == 1, de_solo
+        de_x = [m for m in mir if m["quien"] == "x@y.com"]
+        assert any(m["grupo"] == "Partido 1" and not m["token"] for m in de_x) and \
+               any(m["token"] == token for m in de_x), de_x
+        pan_ = c.get("/panel/ccc").get_data(as_text=True)
+        assert f"/panel/ccc/cara/{tok_solo}" in pan_ and "Rostro (2)" in pan_
+        assert "Solo sus fotos (rostro)" in pan_
+        ficha_ = c.get(f"/panel/ccc/cliente/{cid_solo}").get_data(as_text=True)
+        assert "vio 0 de 3 en la galeria" in ficha_ and \
+               "2 en sus fotos por rostro" in ficha_, ficha_
+        assert "se busco por rostro" in ficha_ and "(en sus fotos)" in ficha_
+        cx = conectar()
+        cx.execute("DELETE FROM cliente WHERE id = ?", (cid_solo,))
+        cx.commit()
+        cx.close()
     with app.test_client() as c:            # sin entrar a la galeria no se busca
         r_ = c.post("/g/ccc/cara", data={"selfie": (io.BytesIO(b"jpg"), "yo.jpg")},
                     content_type="multipart/form-data")
         assert r_.status_code == 302 and "cara=" not in r_.headers["Location"]
     buscar_cara = buscar_cara_real
+
+    # fotos borradas del disco con la galeria ya creada (9/11/2026, MateoYBenzo)
+    global avisar_renzo
+    avisar_real, avisos_ = avisar_renzo, []
+    avisar_renzo = lambda *a, **k: avisos_.append(a)      # sin ntfy de verdad
+    dborr = tmp / "borradas"
+    dborr.mkdir()
+    rb_ = [str(dborr / ("b%d.jpg" % n_)) for n_ in range(4)]
+    for r_ in rb_:
+        Path(r_).write_bytes(b"x")
+    cx = conectar()
+    slb, _p, _f = crear_galeria(cx, "Borradas", rb_, verificar=False)
+    galb = cx.execute("SELECT * FROM galeria WHERE slug = ?", (slb,)).fetchone()
+
+    def quedan_():
+        return cx.execute("SELECT COUNT(*) FROM foto WHERE galeria_id = ?",
+                          (galb["id"],)).fetchone()[0]
+    viejo_ = time.time() - 3600
+    assert quedan_() == 4 and sacar_borradas(cx, galb) == 0, "sin faltantes no saca nada"
+    os.remove(rb_[0])
+    os.remove(rb_[1])
+    assert sacar_borradas(cx, galb) == 0, "no respeto el minuto entre revisiones"
+    _REVISADA.clear()
+    assert sacar_borradas(cx, galb) == 0 and quedan_() == 4, \
+        "carpeta recien tocada: puede ser un export a medias"
+    os.utime(dborr, (viejo_, viejo_))
+    # la b1 la eligio un cliente: esa se queda y se avisa
+    cx.execute("INSERT INTO cliente (galeria_id, email, visto) VALUES (?, 'b@b.cl', ?)",
+               (galb["id"], ahora_iso()))
+    cx.execute("INSERT INTO megusta SELECT (SELECT id FROM cliente WHERE email = 'b@b.cl'), id "
+               "FROM foto WHERE ruta = ?", (rb_[1],))
+    cx.commit()
+    _REVISADA.clear()
+    assert sacar_borradas(cx, galb) == 1 and quedan_() == 3, "no saco la borrada sin elegir"
+    assert cx.execute("SELECT 1 FROM foto WHERE ruta = ?", (rb_[1],)).fetchone(), \
+        "saco una foto que un cliente habia elegido"
+    time.sleep(0.2)                                       # el aviso va en un hilo
+    assert len(avisos_) == 1 and "saque 1" in avisos_[0][1] and "eligio" in avisos_[0][1], avisos_
+    os.remove(rb_[2])
+    os.remove(rb_[3])
+    os.utime(dborr, (viejo_, viejo_))
+    cx.execute("DELETE FROM megusta WHERE foto_id IN (SELECT id FROM foto WHERE galeria_id = ?)",
+               (galb["id"],))
+    cx.commit()
+    _REVISADA.clear()
+    assert sacar_borradas(cx, galb) == 0 and quedan_() == 3, \
+        "faltan todas: es el disco o la carpeta, no un borrado"
+    cx.execute("DELETE FROM galeria WHERE id = ?", (galb["id"],))
+    cx.commit()
+    cx.close()
+    avisar_renzo = avisar_real
 
     # analisis facial: el panel solo deja el pedido, y solo en galerias a la venta
     filas_ = [{"id": 1, "ruta": "/a/DSC1.JPG"}, {"id": 2, "ruta": "/b/DSC1.JPG"}]
@@ -12985,6 +13918,70 @@ def test():
     cachear_videos()
     assert (CACHE / "videos" / f"{EV}.mp4").exists(), "el cron no preparo el clip"
     assert not viejo.exists(), "el cron no borro el clip viejo"
+
+    # feed con foco dinamico al bajar + "Top fotos de la fecha" en galeria de venta
+    rev_dir = RAIZ_FOTOS / "_para_publicar" / "Liga Test - F6 - 07-11-2026"
+    rev_dir.mkdir(parents=True, exist_ok=True)
+    ev_top = RAIZ_FOTOS / "Eventos" / "TopF6"
+    ev_top.mkdir(parents=True, exist_ok=True)
+    rutas_top = []
+    for n in ("DSC09001.JPG", "DSC09002.JPG", "DSC09003.JPG", "DSC09004.JPG"):
+        p_ = ev_top / n
+        Image.new("RGB", (600, 400), (40, 80, 50)).save(p_)
+        rutas_top.append(p_)
+    (rev_dir / "seleccion.json").write_text(json.dumps({
+        "carpeta": r"K:\Eventos\TopF6",
+        "elegidas": [
+            {"archivo": "01_DSC09001.JPG", "original": r"\\100.78.164.81\Fotos\Eventos\TopF6\DSC09001.JPG"},
+            {"archivo": "02_DSC09002.JPG", "original": r"\\100.78.164.81\Fotos\Eventos\TopF6\DSC09002.JPG"},
+            {"archivo": "03_DSC09003.JPG", "original": r"\\100.78.164.81\Fotos\Eventos\TopF6\DSC09003.JPG"},
+            {"archivo": "R01_DSC09004.JPG", "original": r"\\100.78.164.81\Fotos\Eventos\TopF6\DSC09004.JPG"},
+        ],
+    }), encoding="utf-8")
+    (rev_dir / "revision.json").write_text(json.dumps({
+        "02_DSC09002.JPG": {"pasa": True},
+        "03_DSC09003.JPG": {"pasa": False},
+        "R01_DSC09004.JPG": {"pasa": True},
+    }), encoding="utf-8")
+    cx_ = conectar()
+    sl_top, _p, _f = crear_galeria(cx_, "Top F6", [str(x) for x in rutas_top], verificar=False)
+    gid_top = cx_.execute("SELECT id FROM galeria WHERE slug = ?", (sl_top,)).fetchone()[0]
+    cx_.execute("UPDATE galeria SET venta = 1, descargas = 0, fecha = '2026-11-07' WHERE id = ?",
+                (gid_top,))
+    cx_.execute("UPDATE foto SET tomada = '2026-11-07 20:15:00' WHERE galeria_id = ?", (gid_top,))
+    ids_top = [r["id"] for r in cx_.execute(
+        "SELECT id FROM foto WHERE galeria_id = ? ORDER BY orden, id", (gid_top,))]
+    cx_.commit()
+    cx_.close()
+    with app.test_client() as c:
+        rf = c.get("/liga/exscuola")
+        assert rf.status_code == 200
+        hf = rf.get_data(as_text=True)
+        assert "--foco" in hf and "medirBase" in hf, "el feed no tiene foco dinamico"
+
+        c.post(f"/g/{sl_top}/entrar", data={"email": "jug@x.com"})
+        ht = c.get(f"/g/{sl_top}").get_data(as_text=True)
+        assert 'id="topfotos"' in ht and "Top fotos de la fecha" in ht, "no mostro la tira Top"
+        sec_top = ht.split('id="topfotos"', 1)[1].split("</section>", 1)[0]
+        en_tira = [int(x) for x in re.findall(r'/p/([0-9]+)"', sec_top)]
+        # pasa:true primero (9002), despues elegida sin voto (9001); 9003 (no) y 9004 (Renato) afuera
+        assert en_tira == [ids_top[1], ids_top[0]], en_tira
+        # las fotos de la tira salen con la marca normal (/p/<id>)
+        assert c.get(f"/p/{ids_top[1]}").status_code == 200
+
+        # desde el panel se puede apagar ("-") o fijar a mano
+        c.post(f"/panel/{sl_top}/ajustes", data={"nombre": "Top F6", "top_trabajo": OCULTO})
+        assert 'id="topfotos"' not in c.get(f"/g/{sl_top}").get_data(as_text=True), \
+            "No mostrar dejo la tira Top prendida"
+        c.post(f"/panel/{sl_top}/ajustes",
+               data={"nombre": "Top F6", "top_trabajo": "Liga Test - F6 - 07-11-2026"})
+        assert 'id="topfotos"' in c.get(f"/g/{sl_top}").get_data(as_text=True), \
+            "fijar el trabajo a mano no prendio la tira Top"
+    cx_ = conectar()
+    cx_.execute("DELETE FROM galeria WHERE id = ?", (gid_top,))
+    cx_.commit()
+    cx_.close()
+    shutil.rmtree(RAIZ_FOTOS / "_para_publicar", ignore_errors=True)
 
     print("ok")
 
