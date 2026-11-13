@@ -125,8 +125,40 @@ def borrar_del_telefono(tels, man):
     log(f"  borrados del telefono: {len(tels) - len(quedan)}" + (f", NO se pudieron {len(quedan)}" if quedan else ""))
 
 
-def procesar(hs, raiz, destino, man):
-    """Baja, verifica y borra del telefono. *hs*: {ruta tel: sha256}."""
+def conectado():
+    return adb("get-state").stdout.strip() == "device"
+
+
+def esperar_reconexion(maximo_s=3600):
+    log("  el telefono se desconecto: espero hasta 1 h a que vuelva")
+    fin = time.time() + maximo_s
+    while time.time() < fin:
+        time.sleep(30)
+        if conectado():
+            log("  volvio el telefono: sigo desde el mismo archivo")
+            return True
+    return False
+
+
+def bajar_uno(tel, local, h):
+    """True si *local* queda identico al del telefono; False si el archivo no cuadra; None si se fue
+    el telefono. Un archivo de una corrida cortada que ya cuadra no se vuelve a bajar."""
+    for _ in range(3):
+        if local.exists() and sha256(local) == h:
+            return True
+        adb("pull", "-a", tel, str(local))
+        if local.exists() and sha256(local) == h:
+            return True
+        local.unlink(missing_ok=True)  # a medias: se baja entero otra vez
+        if conectado():
+            return False
+        if not esperar_reconexion():
+            return None
+    return False
+
+
+def procesar(hs, raiz, destino, man, borrar=True):
+    """Baja, verifica y (si *borrar*) borra del telefono. *hs*: {ruta tel: sha256}."""
     LOCAL.mkdir(parents=True, exist_ok=True)  # disk_usage necesita que exista
     verificados, bajados, malos = [], 0, 0
     for tel, h in sorted(hs.items()):
@@ -141,21 +173,27 @@ def procesar(hs, raiz, destino, man):
             rel = sanear(PurePosixPath(tel).relative_to(raiz))
             local = LOCAL / "datos" / destino / rel
             local.parent.mkdir(parents=True, exist_ok=True)
-            r = adb("pull", "-a", tel, str(local))
-            if r.returncode or not local.exists() or sha256(local) != h:
-                log(f"  no cuadra, queda en el telefono: {tel} {r.stderr.strip()[:120]}")
-                local.unlink(missing_ok=True)
+            ok = bajar_uno(tel, local, h)
+            if ok is None:
+                log("  el telefono no volvio en 1 h: paro; al relanzar retoma desde este archivo")
+                guardar(man)
+                return False
+            if not ok:
+                log(f"  no cuadra el hash, queda en el telefono: {tel}")
                 malos += 1
                 continue
             man[tel] = e = {"sha": h, "local": str(local), "k": f"{destino}/{rel.as_posix()}",
                             "tel_borrado": False, "en_k": False}
             bajados += 1
-            if bajados % 200 == 0:
+            if bajados % 100 == 0:
                 guardar(man)
+                log(f"  {raiz}: {bajados} bajados...")
         verificados.append(tel)
     guardar(man)
     log(f"  {raiz}: {bajados} bajados y verificados, {malos} con problema")
-    borrar_del_telefono(verificados, man)
+    if borrar:
+        borrar_del_telefono(verificados, man)
+    return True
 
 
 def nas_para_leer():
@@ -180,7 +218,7 @@ def rutas_en_base(shas):
     return out
 
 
-def raw_de_mover_fotos(man):
+def raw_de_mover_fotos(man, borrar=True):
     nas = nas_para_leer()
     log(f"Mover fotos: compruebo en {nas or 'ningun NAS (los que ya estan en K: quedan en el telefono)'}")
     for i, raiz in enumerate(RAW_TEL, 1):
@@ -188,19 +226,22 @@ def raw_de_mover_fotos(man):
         if not hs:
             continue
         en_base = rutas_en_base(set(hs.values()))
-        borrar, faltan, sin_comprobar = [], {}, 0
+        ya_en_k, faltan, sin_comprobar = [], {}, 0
         for tel, h in hs.items():
             ruta = en_base.get(h)
             if ruta is None:
                 faltan[tel] = h
             elif nas and os.path.exists(nas + ruta[3:]):  # K:\Fotos\... -> <nas>Fotos\...
                 man[tel] = {"sha": h, "local": None, "k": ruta, "tel_borrado": False, "en_k": True}
-                borrar.append(tel)
+                ya_en_k.append(tel)
             else:
                 sin_comprobar += 1
-        log(f"  {raiz!r}: {len(borrar)} ya en K: (mismo SHA-256), {len(faltan)} faltan, {sin_comprobar} sin comprobar")
-        borrar_del_telefono(borrar, man)
-        procesar(faltan, raiz, f"{RAW_DESTINO}/Mover fotos {i}", man)
+        log(f"  {raiz!r}: {len(ya_en_k)} ya en K: (mismo SHA-256), {len(faltan)} faltan, {sin_comprobar} sin comprobar")
+        if borrar:
+            borrar_del_telefono(ya_en_k, man)
+        if not procesar(faltan, raiz, f"{RAW_DESTINO}/Mover fotos {i}", man, borrar):
+            return False
+    return True
 
 
 def esperar_telefono(hasta_h):
@@ -212,20 +253,26 @@ def esperar_telefono(hasta_h):
         time.sleep(60)
 
 
-def bajar(hasta_h=None):
+def bajar(hasta_h=None, borrar=True):
+    """Con borrar=False solo copia al notebook (sin cache ni borrados): la corrida siguiente con
+    borrado reconoce lo ya bajado por su hash y no lo vuelve a copiar."""
     if not esperar_telefono(hasta_h):
         log("bajar: no hay telefono conectado por adb")
         return
-    log(f"bajar: telefono con {libre_tel()}")
-    adb("shell", "pm", "trim-caches", "999999999999")
-    log(f"cache de apps limpiada: {libre_tel()}")
+    log(f"bajar{'' if borrar else ' (solo copiar)'}: telefono con {libre_tel()}")
+    if borrar:
+        adb("shell", "pm", "trim-caches", "999999999999")
+        log(f"cache de apps limpiada: {libre_tel()}")
     man = cargar()
-    raw_de_mover_fotos(man)
+    seguir = raw_de_mover_fotos(man, borrar)
     for raiz, destino in MOVER:
-        procesar(hashes(raiz), raiz, destino, man)
-    adb("shell", "content", "call", "--uri", "content://media", "--method", "scan_volume",
-        "--arg", "external_primary")  # que la galeria se entere de lo borrado
-    log(f"bajar: listo, telefono con {libre_tel()}")
+        if not seguir:
+            break
+        seguir = procesar(hashes(raiz), raiz, destino, man, borrar)
+    if borrar:
+        adb("shell", "content", "call", "--uri", "content://media", "--method", "scan_volume",
+            "--arg", "external_primary")  # que la galeria se entere de lo borrado
+    log(f"bajar: {'listo' if seguir else 'cortado (se retoma al relanzar)'}, telefono con {libre_tel()}")
     try:
         subir()
     except db.DiscoCaido as e:
@@ -272,6 +319,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["bajar", "subir", "estado"])
     ap.add_argument("--esperar-hasta", type=int, help="hora (0-23) hasta la que esperar el telefono")
+    ap.add_argument("--sin-borrar", action="store_true", help="bajar: solo copiar al notebook")
     a = ap.parse_args()
     if a.cmd == "estado":
         return estado()
@@ -282,7 +330,7 @@ def main():
         log(f"{a.cmd}: ya hay otra corrida en curso; salgo")
         return
     if a.cmd == "bajar":
-        bajar(a.esperar_hasta)
+        bajar(a.esperar_hasta, borrar=not a.sin_borrar)
     else:
         try:
             subir()
