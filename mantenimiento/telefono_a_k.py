@@ -173,11 +173,44 @@ def prebajar(tels, raiz, destino, tanda=200):
             log(f"  {carpeta}: {min(i + tanda, len(lista))}/{len(lista)} copiados, falta verificar")
 
 
+def tamanos(raiz):
+    """{ruta tel: bytes}, sin hashear: listar es instantaneo."""
+    r = adb("shell", f"find '{raiz}' -type f -exec stat -c '%s|%n' {{}} +")
+    out = {}
+    for l in r.stdout.splitlines():
+        s, _, p = l.partition("|")
+        if s.isdigit() and p and not PurePosixPath(p).name.startswith("."):
+            out[p] = int(s)
+    return out
+
+
+def solo_copiar(raiz, destino):
+    """Copia sin hashes (pedido de Renzo: primero todo, verificar despues). Retoma saltandose lo que
+    ya esta en el notebook con el mismo tamano. No borra nada: la corrida con borrado compara el
+    SHA-256 del telefono con el local antes de tocar el telefono."""
+    for pasada in (1, 2):  # la segunda repasa lo que haya fallado en la primera
+        ts = tamanos(raiz)
+        falta = [t for t, s in ts.items() if not (
+            (l := LOCAL / "datos" / destino / sanear(PurePosixPath(t).relative_to(raiz))).exists()
+            and l.stat().st_size == s)]
+        log(f"{raiz}: {len(ts) - len(falta)} ya en el notebook, faltan {len(falta)} (pasada {pasada})")
+        if not falta:
+            return True
+        prebajar(sorted(falta), raiz, destino)
+        if not conectado() and not esperar_reconexion():
+            log("  el telefono no volvio en 1 h: paro; al relanzar retoma desde aca")
+            return False
+    return True
+
+
 def procesar(hs, raiz, destino, man, borrar=True):
     """Baja, verifica y (si *borrar*) borra del telefono. *hs*: {ruta tel: sha256}."""
     LOCAL.mkdir(parents=True, exist_ok=True)  # disk_usage necesita que exista
+    # a las tandas solo va lo que no esta en el notebook: lo copiado por solo_copiar (sin manifiesto)
+    # lo verifica bajar_uno por hash y solo se vuelve a bajar si no cuadra
     pendientes = [t for t, h in hs.items() if not (man.get(t) and man[t]["sha"] == h and
-                  (man[t]["tel_borrado"] or man[t]["en_k"] or (man[t]["local"] and Path(man[t]["local"]).exists())))]
+                  (man[t]["tel_borrado"] or man[t]["en_k"] or (man[t]["local"] and Path(man[t]["local"]).exists())))
+                  and not (LOCAL / "datos" / destino / sanear(PurePosixPath(t).relative_to(raiz))).exists()]
     prebajar(sorted(pendientes), raiz, destino)
     verificados, bajados, malos = [], 0, 0
     for tel, h in sorted(hs.items()):
@@ -283,11 +316,14 @@ def bajar(hasta_h=None, borrar=True):
         adb("shell", "pm", "trim-caches", "999999999999")
         log(f"cache de apps limpiada: {libre_tel()}")
     man = cargar()
-    seguir = raw_de_mover_fotos(man, borrar)
-    for raiz, destino in MOVER:
-        if not seguir:
-            break
-        seguir = procesar(hashes(raiz), raiz, destino, man, borrar)
+    if borrar:
+        seguir = raw_de_mover_fotos(man)
+        for raiz, destino in MOVER:
+            if not seguir:
+                break
+            seguir = procesar(hashes(raiz), raiz, destino, man)
+    else:  # los 89 RAW que faltaban en K: ya quedaron copiados y verificados el 13/11
+        seguir = all(solo_copiar(raiz, destino) for raiz, destino in MOVER)
     if borrar:
         adb("shell", "content", "call", "--uri", "content://media", "--method", "scan_volume",
             "--arg", "external_primary")  # que la galeria se entere de lo borrado
