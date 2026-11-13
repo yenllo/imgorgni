@@ -9,7 +9,8 @@
     "_facet_train",
     "_Cuarentena",
     "_previews",
-    "_para_publicar"
+    "_para_publicar",
+    ".jarvis"
   ],
   "watermark_path": null,
   "discard_watermark_dir": "_descartadas_watermark",

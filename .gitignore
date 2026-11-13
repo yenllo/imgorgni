@@ -33,6 +33,10 @@ __pycache__/
 *.backup*
 *.antes-*
 /autocull_report*.csv
+# bases sqlite dentro de carpetas habilitadas: la galeria.db de la Pi tiene clientes y compras
+*.db
+*.db-shm
+*.db-wal
 
 # edicion automatica de Lightroom (plugin)
 !/lightroom/
