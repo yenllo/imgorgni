@@ -157,9 +157,28 @@ def bajar_uno(tel, local, h):
     return False
 
 
+def prebajar(tels, raiz, destino, tanda=200):
+    """Varios archivos por llamada a adb: con fotos chicas el costo fijo (~0,25 s por archivo) pesaba
+    mas que la transferencia. No verifica nada: eso lo hace bajar_uno despues, archivo por archivo."""
+    por_carpeta = {}
+    for tel in tels:
+        por_carpeta.setdefault(PurePosixPath(tel).parent, []).append(tel)
+    for carpeta, lista in por_carpeta.items():
+        dest = LOCAL / "datos" / destino / sanear(carpeta.relative_to(raiz))
+        dest.mkdir(parents=True, exist_ok=True)
+        for i in range(0, len(lista), tanda):
+            if shutil.disk_usage(LOCAL).free < LIBRE_MIN:
+                return
+            adb("pull", "-a", *lista[i:i + tanda], str(dest))
+            log(f"  {carpeta}: {min(i + tanda, len(lista))}/{len(lista)} copiados, falta verificar")
+
+
 def procesar(hs, raiz, destino, man, borrar=True):
     """Baja, verifica y (si *borrar*) borra del telefono. *hs*: {ruta tel: sha256}."""
     LOCAL.mkdir(parents=True, exist_ok=True)  # disk_usage necesita que exista
+    pendientes = [t for t, h in hs.items() if not (man.get(t) and man[t]["sha"] == h and
+                  (man[t]["tel_borrado"] or man[t]["en_k"] or (man[t]["local"] and Path(man[t]["local"]).exists())))]
+    prebajar(sorted(pendientes), raiz, destino)
     verificados, bajados, malos = [], 0, 0
     for tel, h in sorted(hs.items()):
         e = man.get(tel)
