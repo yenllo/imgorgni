@@ -415,9 +415,14 @@ def subir(raiz="K:\\"):
 def estado():
     man = cargar()
     loc = [e for e in man.values() if not e["en_k"] and e["local"] and Path(e["local"]).exists()]
+    def tam(e):  # subir puede estar borrandolos mientras tanto
+        try:
+            return Path(e["local"]).stat().st_size
+        except OSError:
+            return 0
     print(f"{len(man)} archivos en el manifiesto; borrados del telefono {sum(e['tel_borrado'] for e in man.values())}; "
           f"en K: {sum(e['en_k'] for e in man.values())}; esperando en el notebook {len(loc)} "
-          f"({sum(Path(e['local']).stat().st_size for e in loc) / 1e9:.1f} GB)")
+          f"({sum(map(tam, loc)) / 1e9:.1f} GB)")
 
 
 def main():
