@@ -102,13 +102,26 @@ def libre_tel():
     return f"{int(r[3]) / 1024 ** 2:.1f} GB libres" if len(r) > 3 and r[3].isdigit() else "?"
 
 
+def listar(comando):
+    """Corre *comando* en el telefono. Si adb falla (el telefono se fue un segundo) espera y reintenta;
+    nunca devuelve una lista vacia por error: el 13/11 a las 22:07 eso hizo "listo" sin hacer nada."""
+    for _ in range(3):
+        r = adb("shell", comando)
+        if r.returncode == 0:
+            return r.stdout
+        if not conectado() and not esperar_reconexion():
+            break
+        time.sleep(5)
+    raise RuntimeError(f"el telefono no respondio a: {comando[:80]}")
+
+
 def hashes(raiz):
     """{ruta en el telefono: sha256} de todo lo que cuelga de *raiz*, calculado en el telefono."""
     # xargs y no `-exec {} +`: el find del telefono falla con "Argument list too long" pasados unos
     # miles de archivos y sigue callado (WhatsApp Images: 1.411 de 21.677, 13/11/2026)
-    r = adb("shell", f"find '{raiz}' -type f -print0 | xargs -0 sha256sum")
+    salida = listar(f"find '{raiz}' -type f -print0 | xargs -0 -r sha256sum")
     out = {}
-    for l in r.stdout.splitlines():
+    for l in salida.splitlines():
         h, _, p = l.partition("  ")
         if len(h) == 64 and p and not PurePosixPath(p).name.startswith("."):  # .nomedia y cia se quedan
             out[p] = h.lower()
@@ -116,21 +129,39 @@ def hashes(raiz):
 
 
 def borrar_del_telefono(tels, man):
-    """Borra del telefono SOLO rutas ya verificadas y marca las que de verdad desaparecieron."""
-    if not tels:
-        return
-    lista = LOCAL / "_borrar.txt"
-    lista.write_text("".join(t + "\n" for t in tels), encoding="utf-8", newline="\n")
-    adb("push", str(lista), "/data/local/tmp/imgorgni_borrar.txt")
-    r = adb("shell", "L=/data/local/tmp/imgorgni_borrar.txt; "
-                     'while IFS= read -r f; do rm -f -- "$f"; done < $L; '
-                     'while IFS= read -r f; do [ -e "$f" ] && echo "$f"; done < $L; rm -f $L')
-    quedan = set(r.stdout.splitlines())
-    for t in tels:
-        if t not in quedan:
-            man[t]["tel_borrado"] = True
-    guardar(man)
-    log(f"  borrados del telefono: {len(tels) - len(quedan)}" + (f", NO se pudieron {len(quedan)}" if quedan else ""))
+    """Borra del telefono SOLO rutas ya verificadas, de a 500, y marca como borradas solo las que una
+    comprobacion aparte (que tiene que terminar bien) ya no encuentra. Con el cable suelto, una tanda
+    cortada queda como no borrada y la proxima corrida la repite: rm -f es idempotente."""
+    L = "/data/local/tmp/imgorgni_borrar.txt"
+    hechos, fallidos = 0, 0
+    for i in range(0, len(tels), 500):
+        lote = tels[i:i + 500]
+        lista = LOCAL / "_borrar.txt"
+        lista.write_text("".join(t + "\n" for t in lote), encoding="utf-8", newline="\n")
+        try:
+            for _ in range(3):
+                if adb("push", str(lista), L).returncode == 0:
+                    break
+                if not conectado() and not esperar_reconexion():
+                    raise RuntimeError("el telefono no volvio")
+            else:
+                raise RuntimeError("no pude pasarle la lista al telefono")
+            listar(f'[ -f {L} ] || exit 3; while IFS= read -r f; do rm -f -- "$f"; done < {L}')
+            quedan = set(listar(f'[ -f {L} ] || exit 3; '
+                                f'while IFS= read -r f; do [ -e "$f" ] && echo "$f"; done < {L}; true').splitlines())
+        except RuntimeError as e:
+            log(f"  tanda de {len(lote)} sin confirmar ({e}): queda como no borrada")
+            fallidos += len(lote)
+            continue
+        for t in lote:
+            if t not in quedan:
+                man[t]["tel_borrado"] = True
+                hechos += 1
+        fallidos += len(quedan)
+        guardar(man)
+    adb("shell", f"rm -f {L}")
+    if tels:
+        log(f"  borrados del telefono: {hechos}" + (f", NO confirmados {fallidos}" if fallidos else ""))
 
 
 def conectado():
@@ -183,9 +214,9 @@ def prebajar(tels, raiz, destino, tanda=200):
 
 def tamanos(raiz):
     """{ruta tel: bytes}, sin hashear: listar es instantaneo."""
-    r = adb("shell", f"find '{raiz}' -type f -print0 | xargs -0 stat -c '%s|%n'")  # ver hashes()
+    salida = listar(f"find '{raiz}' -type f -print0 | xargs -0 -r stat -c '%s|%n'")  # ver hashes()
     out = {}
-    for l in r.stdout.splitlines():
+    for l in salida.splitlines():
         s, _, p = l.partition("|")
         if s.isdigit() and p and not PurePosixPath(p).name.startswith("."):
             out[p] = int(s)
@@ -324,14 +355,19 @@ def bajar(hasta_h=None, borrar=True):
         adb("shell", "pm", "trim-caches", "999999999999")
         log(f"cache de apps limpiada: {libre_tel()}")
     man = cargar()
-    if borrar:
-        seguir = raw_de_mover_fotos(man)
-        for raiz, destino in MOVER:
-            if not seguir:
-                break
-            seguir = procesar(hashes(raiz), raiz, destino, man)
-    else:  # los 89 RAW que faltaban en K: ya quedaron copiados y verificados el 13/11
-        seguir = all(solo_copiar(raiz, destino) for raiz, destino in MOVER)
+    try:
+        if borrar:
+            seguir = raw_de_mover_fotos(man)
+            for raiz, destino in MOVER:
+                if not seguir:
+                    break
+                seguir = procesar(hashes(raiz), raiz, destino, man)
+        else:  # los 89 RAW que faltaban en K: ya quedaron copiados y verificados el 13/11
+            seguir = all(solo_copiar(raiz, destino) for raiz, destino in MOVER)
+    except RuntimeError as e:  # el telefono no respondio ni tras esperarlo: lo hecho queda en el manifiesto
+        log(f"  {e}")
+        guardar(man)
+        seguir = False
     if borrar:
         adb("shell", "content", "call", "--uri", "content://media", "--method", "scan_volume",
             "--arg", "external_primary")  # que la galeria se entere de lo borrado
@@ -352,12 +388,18 @@ def subir(raiz="K:\\"):
         while dest.exists() and sha256(dest) != e["sha"]:  # otro archivo con el mismo nombre
             dest = dest.with_stem(dest.stem + "_tel")
         if not dest.exists():
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(local, dest)
-            if sha256(dest) != e["sha"]:
-                log(f"subir: el hash no cuadra en K:, queda en el notebook: {local}")
-                dest.unlink(missing_ok=True)
-                continue
+            parcial = dest.with_name(dest.name + ".parcial")  # un corte no deja basura con el nombre final
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(local, parcial)
+                if sha256(parcial) != e["sha"]:
+                    log(f"subir: el hash no cuadra en K:, queda en el notebook: {local}")
+                    parcial.unlink(missing_ok=True)
+                    continue
+                os.replace(parcial, dest)
+            except OSError as err:  # se corto la red (WinError 64, 13/11 22:1x): lo hecho queda anotado
+                log(f"subir: se corto K: ({err}); sigue la proxima vez")
+                break
         e["k"], e["en_k"] = dest.relative_to(raiz).as_posix(), True
         local.unlink()
         n += 1
