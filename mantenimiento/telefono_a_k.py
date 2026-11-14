@@ -42,6 +42,12 @@ MOVER = [  # (carpeta del telefono, destino relativo en K:) — fotos de telefon
     (f"{WA}/WhatsApp Video", "_Telefono_respaldo/WhatsApp/Video"),
     (f"{WA}/WhatsApp Images", "_Telefono_respaldo/WhatsApp/Images"),
     (f"{WA}/WhatsApp Documents", "_Telefono_respaldo/WhatsApp/Documents"),
+    # sumadas por Renzo el 13/11 (~11 GB). No van: el album oculto de la galeria ni Documents/ObsAI
+    ("/sdcard/Download", "_Telefono_respaldo/Download"),
+    ("/sdcard/Pictures/Gallery", "_Telefono_respaldo/Pictures_Gallery"),
+    ("/sdcard/Pictures/AdobeLightroom", "_Telefono_respaldo/Pictures_AdobeLightroom"),
+    ("/sdcard/DCIM/Screenshots", "_Telefono_respaldo/DCIM_Screenshots"),
+    ("/sdcard/Movies", "_Telefono_respaldo/Movies"),
 ]
 RAW_TEL = ["/sdcard/Mover fotos ", "/sdcard/Mover fotos"]  # RAW de camara (ojo: el primero con espacio)
 RAW_DESTINO = "Fotos/AOrdenar/Mover_fotos_telefono"       # estos si son del proyecto
