@@ -98,7 +98,9 @@ def libre_tel():
 
 def hashes(raiz):
     """{ruta en el telefono: sha256} de todo lo que cuelga de *raiz*, calculado en el telefono."""
-    r = adb("shell", f"find '{raiz}' -type f -exec sha256sum {{}} +")
+    # xargs y no `-exec {} +`: el find del telefono falla con "Argument list too long" pasados unos
+    # miles de archivos y sigue callado (WhatsApp Images: 1.411 de 21.677, 13/11/2026)
+    r = adb("shell", f"find '{raiz}' -type f -print0 | xargs -0 sha256sum")
     out = {}
     for l in r.stdout.splitlines():
         h, _, p = l.partition("  ")
@@ -175,7 +177,7 @@ def prebajar(tels, raiz, destino, tanda=200):
 
 def tamanos(raiz):
     """{ruta tel: bytes}, sin hashear: listar es instantaneo."""
-    r = adb("shell", f"find '{raiz}' -type f -exec stat -c '%s|%n' {{}} +")
+    r = adb("shell", f"find '{raiz}' -type f -print0 | xargs -0 stat -c '%s|%n'")  # ver hashes()
     out = {}
     for l in r.stdout.splitlines():
         s, _, p = l.partition("|")
