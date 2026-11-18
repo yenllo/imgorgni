@@ -7510,6 +7510,11 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 .tf-sec-btn.on{border-color:var(--cancha);background:rgba(198,240,74,.08)}
 .tf-separador{border:0;border-top:1px solid var(--linea2);margin:4.5rem 0 3.5rem}
 .tfs-si{color:var(--cancha);font-weight:700;font-size:1.4rem;line-height:1}
+.tf-luz{display:flex;gap:.5rem;flex-wrap:wrap;margin:0 0 1.2rem}
+.tf-luz button{font:inherit;cursor:pointer}
+.tf-luz-nota{margin:-.4rem 0 1.4rem}
+/* .tf-grid y .tf-mp traen su propio display, que le gana al hidden del navegador */
+.tf-grid[hidden],.tf-mp[hidden],#tf-qb-w[hidden]{display:none!important}
 </style>
 {% set R = tarifas %}
 {% set F = R.foto %}
@@ -7545,15 +7550,22 @@ TARIFAS_PUB = BARRA + """<main class="viz">
 {% if T.tar_packs_rot %}<p class="rotulo">{{ T.tar_packs_rot }}</p>{% endif %}
 <h2 class="tf-h2">{{ T.tar_packs_tit }}</h2>
 {% if T.tar_packs_sub %}<p class="tf-sub">{{ T.tar_packs_sub }}</p>{% endif %}
-<div class="tf-grid">
-{% for k, P in R.packs.items() %}
+<div class="tf-luz" role="group" aria-label="Luz de la cancha">
+<button type="button" class="tf-sec-btn on" data-luz="dia" aria-pressed="true">De d&iacute;a</button>
+<button type="button" class="tf-sec-btn" data-luz="noche" aria-pressed="false">De noche o bajo techo</button>
+</div>
+<p class="tf-ayuda tf-luz-nota" data-luz-nota="noche" hidden>Con luz artificial la foto necesita reducci&oacute;n
+de ruido, as&iacute; que de noche no hay edici&oacute;n b&aacute;sica: todas van con edici&oacute;n completa o profesional.</p>
+{% for luz, PKS in (("dia", R.packs), ("noche", R.packs_noche)) %}
+<div class="tf-grid" data-luz-grid="{{ luz }}"{{ ' hidden' if luz == 'noche' }}>
+{% for k, P in PKS.items() %}
 {% set armado = P.q[0] * F.basica + P.q[1] * F.completa + P.q[2] * F.pro %}
 <div class="tf-card{{ ' reco' if P.reco }}">
 {% if P.reco and T.tar_reco %}<span class="tf-tag">{{ T.tar_reco }}</span>{% endif %}
 <h3>{{ P.nombre }}</h3>
 <p class="tf-precio">{{ pesos(P.precio) }}<small>{{ P.q|sum }} fotos editadas + la cobertura</small></p>
 <ul class="tf-ul">
-<li><b>{{ P.q[0] }}</b> con edici&oacute;n b&aacute;sica</li>
+{% if P.q[0] %}<li><b>{{ P.q[0] }}</b> con edici&oacute;n b&aacute;sica</li>{% endif %}
 <li><b>{{ P.q[1] }}</b> con edici&oacute;n completa</li>
 {% if P.q[2] %}<li><b>{{ P.q[2] }}</b> con edici&oacute;n profesional, para portadas y redes</li>{% endif %}
 <li>Pensado para jornadas de unas {{ P.horas }} horas</li>
@@ -7563,6 +7575,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
 </div>
 {% endfor %}
 </div>
+{% endfor %}
 {% if T.tar_nota %}<p class="tf-nota">{{ tx('tar_nota', basica=pesos(redondo(F.basica, 10)),
   completa=pesos(redondo(F.completa, 10)), pro=pesos(redondo(F.pro, 10))) }}</p>{% endif %}
 </section>
@@ -7606,17 +7619,22 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
       <select id="tf-dur"><option value="20">20 minutos</option>
         <option value="30">30 minutos</option><option value="60" selected>60 minutos</option></select></div>
   </div>
+  <div><label class="tf-l" for="tf-luz">Luz de la cancha</label>
+    <select id="tf-luz"><option value="dia">De d&iacute;a, luz natural</option>
+      <option value="noche">De noche o bajo techo, luz artificial</option></select>
+    <p class="tf-ayuda" id="tf-luz-ayuda" hidden>De noche no hay edici&oacute;n b&aacute;sica: con luz artificial
+      la foto necesita reducci&oacute;n de ruido.</p></div>
   <div><span class="tf-l">Partidos a la vez en cada horario</span>
     <div class="tf-bloques" id="tf-bloques"></div>
     <p class="tf-ayuda" id="tf-hinfo"></p></div>
   <div><span class="tf-l">Fotos editadas</span>
     <div class="tf-mini" role="radiogroup" aria-label="Pack de fotos">
-    {% for k, P in R.packs.items() %}
-      <label class="tf-mp"><input type="radio" name="tf-p" value="{{ k }}"{{ ' checked' if P.reco }}>
+    {% for luz, pre, PKS in (("dia", "", R.packs), ("noche", "n-", R.packs_noche)) %}{% for k, P in PKS.items() %}
+      <label class="tf-mp"{{ ' hidden' if luz == 'noche' }}><input type="radio" name="tf-p" value="{{ pre }}{{ k }}" data-luz="{{ luz }}"{{ ' checked' if P.reco and luz == 'dia' }}>
         <i>Te lo recomiendo</i><b>{{ P.nombre }}</b><span>{{ P.q|sum }} fotos</span>
-        <small>{{ P.q[0] }} b&aacute;sicas &middot; {{ P.q[1] }} completas{% if P.q[2] %} &middot; {{ P.q[2] }} profesionales{% endif %}</small>
+        <small>{% if P.q[0] %}{{ P.q[0] }} b&aacute;sicas &middot; {% endif %}{{ P.q[1] }} completas{% if P.q[2] %} &middot; {{ P.q[2] }} profesionales{% endif %}</small>
         <em>{{ pesos(P.precio) }}</em></label>
-    {% endfor %}
+    {% endfor %}{% endfor %}
       <label class="tf-mp"><input type="radio" name="tf-p" value="">
         <i>Te lo recomiendo</i><b>A tu medida</b><span>Eliges cu&aacute;ntas</span><em>por foto</em></label>
     </div>
@@ -7624,7 +7642,7 @@ ahorras {{ pesos(redondo(armado, 100) - redondo(P.precio, 100)) }}</p>
   </div>
   <div id="tf-medida" hidden>
     <div class="tf-tres">
-      <div><label class="tf-l" for="tf-qb">B&aacute;sicas &middot; {{ pesos(F.basica) }}</label><input id="tf-qb" type="number" min="0" step="10" value="60" inputmode="numeric"></div>
+      <div id="tf-qb-w"><label class="tf-l" for="tf-qb">B&aacute;sicas &middot; {{ pesos(F.basica) }}</label><input id="tf-qb" type="number" min="0" step="10" value="60" inputmode="numeric"></div>
       <div><label class="tf-l" for="tf-qc">Completas &middot; {{ pesos(F.completa) }}</label><input id="tf-qc" type="number" min="0" step="10" value="40" inputmode="numeric"></div>
       <div><label class="tf-l" for="tf-qp">Profesionales &middot; {{ pesos(F.pro) }}</label><input id="tf-qp" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
     </div>
@@ -7856,13 +7874,18 @@ const n0 = (id, min) => Math.max(min || 0, parseFloat($(id).value) || 0);
 const minutos = t => { if(!t) return null; const [a, b] = t.split(":").map(Number); return a * 60 + b; };
 const radios = [...document.querySelectorAll('input[name="tf-p"]')];
 let aMano = false;          // si el visitante eligio un pack, la recomendacion ya no se lo cambia
+// de noche (luz artificial) los packs son otros y no hay basica: sus radios
+// llevan el prefijo "n-" en el value
+const noche = () => $("tf-luz").value === "noche";
+const packsDe = () => noche() ? R.packs_noche : R.packs;
+const packDe = v => v ? packsDe()[v.replace(/^n-/, "")] : null;
 radios.forEach(r => r.addEventListener("input", () => { aMano = true; }));
 // el pack cuyo total de fotos queda mas cerca de lo que da la jornada
 function recomendar(n){
   let mejor = null, dif = Infinity;
-  for(const [k, P] of Object.entries(R.packs)){
+  for(const [k, P] of Object.entries(packsDe())){
     const d = Math.abs(P.q[0] + P.q[1] + P.q[2] - n);
-    if(d < dif){ dif = d; mejor = k; }
+    if(d < dif){ dif = d; mejor = (noche() ? "n-" : "") + k; }
   }
   return mejor;
 }
@@ -7917,24 +7940,35 @@ function calcular(){
   $("tf-hinfo").textContent = !h ? "Indica a qué hora empieza el primer partido y a qué hora termina el último."
     : hTxt + " h de cobertura a " + pesos(R.hora) + " la hora · " + partidos + (partidos > 1 ? " partidos" : " partido") + " en total"
       + (notas.length ? " · " + notas.join(" · ") : " · hasta " + R.canchas_incluidas + " a la vez sin recargo");
-  const reco = recomendar(nSug);
+  const reco = recomendar(nSug), luz = noche() ? "noche" : "dia";
+  // al cambiar la luz, el mismo pack del otro juego (Liga de dia -> Liga de noche)
+  const sel = radios.find(r => r.checked);
+  if(sel && sel.value && sel.dataset.luz !== luz){
+    const otro = radios.find(r => r.value === (luz === "noche" ? "n-" : "") + sel.value.replace(/^n-/, ""));
+    if(otro) otro.checked = true;
+  }
   if(!aMano){ const r = radios.find(r => r.value === reco); if(r) r.checked = true; }
+  $("tf-luz-ayuda").hidden = luz !== "noche";
+  $("tf-qb-w").hidden = luz === "noche";
   radios.forEach(r => {
     const card = r.closest(".tf-mp");
+    card.hidden = !!r.value && r.dataset.luz !== luz;
     card.classList.toggle("on", r.checked);
     card.classList.toggle("rec", !!h && r.value === reco);
   });
   $("tf-reco").textContent = h ? "Para " + hTxt + " h con " + partidos + (partidos > 1 ? " partidos" : " partido")
-    + " salen unas " + nSug + " fotos que valen la pena: te recomiendo el pack " + R.packs[reco].nombre + "." : "";
-  const P = R.packs[(radios.find(r => r.checked) || {}).value];
+    + " salen unas " + nSug + " fotos que valen la pena: te recomiendo el pack " + packDe(reco).nombre + "." : "";
+  const P = packDe((radios.find(r => r.checked) || {}).value);
   $("tf-medida").hidden = !!P;
   const q = P ? P.q : ["tf-qb", "tf-qc", "tf-qp"].map(id => Math.round(n0(id)));
+  if(!P && luz === "noche") q[0] = 0;
   const n = q[0] + q[1] + q[2];
   // el pedido a medida tiene un minimo por hora (mezclable: cada nivel suma
   // su fraccion de hora)
   const M = R.minimo_hora, cub = h ? (q[0] / M.basica + q[1] / M.completa + q[2] / M.pro) / h : 1;
-  $("tf-min").textContent = P || !h ? "" : "Mínimo para " + hTxt + " h: " + Math.ceil(M.completa * h) + " completas, "
-    + Math.ceil(M.pro * h) + " profesionales o " + Math.ceil(M.basica * h) + " básicas, o una mezcla."
+  $("tf-min").textContent = P || !h ? "" : "Mínimo para " + hTxt + " h: " + Math.ceil(M.completa * h) + " completas"
+    + (luz === "noche" ? " o " + Math.ceil(M.pro * h) + " profesionales, o una mezcla."
+       : ", " + Math.ceil(M.pro * h) + " profesionales o " + Math.ceil(M.basica * h) + " básicas, o una mezcla.")
     + (cub < 1 ? " Tu pedido cubre el " + Math.floor(cub * 100) + " %." : "");
   $("tf-min").style.color = !P && cub < 1 ? "var(--foco)" : "";
   let fotos = P ? P.precio : q[0] * R.foto.basica + q[1] * R.foto.completa + q[2] * R.foto.pro;
@@ -7965,7 +7999,7 @@ function calcular(){
       + (fTxt ? (nf > 1 ? " desde el " : " para el ") + fTxt : "")
       + ": de " + $("tf-ini").value + " a " + $("tf-fin").value
       + " (" + hTxt + " h), partidos de " + dur + " minutos, " + partidos + " en total"
-      + (maxC > 1 ? " (hasta " + maxC + " a la vez)" : "") + ", "
+      + (maxC > 1 ? " (hasta " + maxC + " a la vez)" : "") + (luz === "noche" ? ", de noche (luz artificial)" : "") + ", "
       + (P ? "pack " + P.nombre + " (" + n + " fotos)"
            : "fotos a mi medida (" + q[0] + " básicas, " + q[1] + " completas, " + q[2] + " profesionales)")
       + ", venta " + (excl ? "exclusiva" : "abierta con búsqueda por cara")
@@ -7992,6 +8026,7 @@ function linkCotizacion(){
   q.set("p", pk);
   if(!pk) ["qb", "qc", "qp"].forEach(k => q.set(k, $("tf-" + k).value));
   if($("tf-x").value !== "abierto") q.set("x", $("tf-x").value);
+  if(noche()) q.set("l", "noche");
   const ex = EXTRAS.filter(([id]) => $(id).checked).map(([, l]) => l).join("");
   if(ex) q.set("e", ex);
   if($("tf-fecha").value) q.set("f", $("tf-fecha").value);
@@ -8001,7 +8036,7 @@ function linkCotizacion(){
 // abrir un link compartido: lo que trae la direccion pisa los valores de partida
 const q0 = new URLSearchParams(location.search);
 if(q0.has("ini")){
-  [["ini", "tf-ini"], ["fin", "tf-fin"], ["dur", "tf-dur"], ["x", "tf-x"], ["f", "tf-fecha"],
+  [["ini", "tf-ini"], ["fin", "tf-fin"], ["dur", "tf-dur"], ["x", "tf-x"], ["l", "tf-luz"], ["f", "tf-fecha"],
    ["n", "tf-nf"], ["qb", "tf-qb"], ["qc", "tf-qc"], ["qp", "tf-qp"]].forEach(([k, id]) => {
     if(q0.has(k)) $(id).value = q0.get(k);
   });
@@ -8013,6 +8048,18 @@ if(q0.has("ini")){
   if(r){ r.checked = true; aMano = true; }
   EXTRAS.forEach(([id, l]) => { $(id).checked = (q0.get("e") || "").includes(l); });
 }
+function pintarLuz(luz){
+  document.querySelectorAll(".tf-luz button").forEach(b => {
+    b.classList.toggle("on", b.dataset.luz === luz); b.setAttribute("aria-pressed", b.dataset.luz === luz);
+  });
+  document.querySelectorAll("[data-luz-grid]").forEach(g => { g.hidden = g.dataset.luzGrid !== luz; });
+  document.querySelectorAll("[data-luz-nota]").forEach(g => { g.hidden = g.dataset.luzNota !== luz; });
+}
+document.querySelectorAll(".tf-luz button").forEach(b => b.addEventListener("click", () => {
+  $("tf-luz").value = b.dataset.luz; pintarLuz(b.dataset.luz); calcular();
+}));
+$("tf-luz").addEventListener("change", () => pintarLuz($("tf-luz").value));
+if(noche()) pintarLuz("noche");
 $("tf-link").addEventListener("click", async () => {
   const u = linkCotizacion(), b = $("tf-link");
   try{ await navigator.clipboard.writeText(u); b.textContent = "Link copiado"; }
@@ -9822,6 +9869,18 @@ TARIFAS_DEF = {
         "full": {"nombre": "Full", "q": [140, 85, 25], "desc_pct": 5,
                  "horas": 5},
     },
+    # futbol de noche o bajo techo (18/11/2026): con luz artificial la basica
+    # queda con demasiado grano (las fotos de Babbo), asi que de noche no se
+    # vende basica. Mismo precio que los packs de dia, menos fotos y todas
+    # completas o profesionales
+    "packs_noche": {
+        "esencial": {"nombre": "Esencial", "q": [0, 65, 10], "desc_pct": 3,
+                     "horas": 2},
+        "liga": {"nombre": "Liga", "q": [0, 95, 20], "desc_pct": 3.5,
+                 "horas": 3, "reco": True},
+        "full": {"nombre": "Full", "q": [0, 160, 40], "desc_pct": 5,
+                 "horas": 5},
+    },
     "redondeo_pack": 1000,
     # Cumpleanos y eventos sociales (26/10/2026): la hora vale mas porque no es
     # cubrir una jornada, es estar atento a lo que piden y a lo que nadie pide,
@@ -9919,6 +9978,13 @@ CAMPOS_TARIFAS = (
         ("packs.%s.desc_pct" % k, "Descuento del pack (%)"),
         ("packs.%s.horas" % k, "Horas para las que se sugiere")))
     for k, P in TARIFAS_DEF["packs"].items()
+) + tuple(
+    ("De noche: pack " + P["nombre"], (
+        ("packs_noche.%s.q.1" % k, "Fotos completas"),
+        ("packs_noche.%s.q.2" % k, "Fotos profesionales"),
+        ("packs_noche.%s.desc_pct" % k, "Descuento del pack (%)"),
+        ("packs_noche.%s.horas" % k, "Horas para las que se sugiere")))
+    for k, P in TARIFAS_DEF["packs_noche"].items()
 ) + (
     ("Eventos sociales (cumpleaños, matrimonios)", (
         ("social.hora", "Valor de la hora ($)"),
@@ -10004,7 +10070,7 @@ def tarifas():
         fp = sub["foto_pack"]
         sub["foto"] = {k: int(round(v * (1 + sub["medida_pct"] / 100) / 10) * 10)
                        for k, v in fp.items()}
-        for P in sub["packs"].values():
+        for P in list(sub["packs"].values()) + list(sub.get("packs_noche", {}).values()):
             lista = sum(P["q"][i] * fp[k] for i, k in enumerate(orden))
             P["precio"] = int(round(lista * (1 - P["desc_pct"] / 100) / r) * r)
     return t
@@ -13532,7 +13598,11 @@ def test():
         assert 'id="tfs-form"' in tar and 'id="tfs-tot"' in tar, "falta calculadora social"
         assert "Todo lo de" not in tar.split('class="tf-tabla"')[1].split("</table>")[0]
         # la calculadora: un pack chico por pack, mas el de a tu medida
-        assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + 1
+        assert tar.count('type="radio" name="tf-p"') == len(TARIFAS_DEF["packs"]) + len(TARIFAS_DEF["packs_noche"]) + 1
+        # de noche: sin basica y al mismo precio que los packs de dia (18/11/2026)
+        assert {k: P["precio"] for k, P in tarifas()["packs_noche"].items()} == {
+            "esencial": 31000, "liga": 49000, "full": 86000}, tarifas()["packs_noche"]
+        assert 'id="tf-luz"' in tar and 'data-luz-grid="noche"' in tar and 'value="n-liga"' in tar
         assert "{pct30}" not in tar and "Partidos cortos:" in tar
         assert "Venta abierta:" in tar and "Aviso a los asistentes" in c.get("/panel/cotizador").get_data(as_text=True)
         assert 'id="tf-dur"' in tar and 'id="tf-bloques"' in tar
@@ -13591,7 +13661,8 @@ def test():
         assert "abc" not in r.headers["Location"] and "Logo" in \
             urllib.parse.unquote_plus(r.headers["Location"]), r.headers["Location"]
         tar = c.get("/tarifas").get_data(as_text=True)
-        assert "$9.000" in tar and "$8.000" not in tar, "la hora no se movio"
+        # el valor de la hora, no cualquier "$8.000" (un "ahorras $8.000" de un pack tambien calza)
+        assert "$9.000" in tar and '"hora": 9000' in tar and '"hora": 8000' not in tar, "la hora no se movio"
         c.post("/panel/textos/restaurar")
         assert "$9.000" in c.get("/tarifas").get_data(as_text=True), \
             "restaurar los textos se llevo las tarifas"
