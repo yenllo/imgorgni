@@ -12,9 +12,8 @@ Lee C:\Renzo\Proyectos\IMGorgni\_lightroom\cola.tsv. Una linea por trabajo, camp
   (las completas: Renzo recorta y borra distractores, y exporta despues).
 - marca_de_agua: title de una marca de agua de Lightroom ("EdicionCompletaExScuolaMarca"). Opcional.
 - coleccion: nombre de una coleccion donde dejar las fotos para revisarlas en la manana. Opcional.
-- nivelar: "si" = nivelado 2D rapido del Encuadrador (Python, sin mouse): pone CropAngle y una
-  calificacion de confianza (3 seguro, 2 probable, 1 revisala). Lo que no se pudo medir queda
-  sin tocar y con 0 estrellas: ese es el filtro para pasarle despues la macro del boton "Automatico".
+- nivelar: ya no se usa (21/11/2026: Renzo nivela a mano con el Automatico de Lightroom). La columna
+  sigue en su lugar para no correr las demas; se ignora.
 
 - receta: .lua de edicion_ig.py con ajustes y mascaras de IA por foto (ver cargar_receta). Opcional.
 - Archivos por trabajo junto a la cola, opcionales: color_<id>.tsv (modelo de color) y ajustes_<id>.tsv
@@ -53,12 +52,19 @@ local function carpeta_appdata()
 	return "C:\\Users\\renzo\\AppData\\Roaming"
 end
 local PRESETS = carpeta_appdata() .. "\\Adobe\\Lightroom"
--- nivelado rapido del proyecto Encuadrador (su README explica la calibracion contra Adobe)
-local ENC_PY = "C:\\Renzo\\Proyectos\\Encuadrador\\.venv\\Scripts\\python.exe"
-local ENC_SCRIPT = "C:\\Renzo\\Proyectos\\Encuadrador\\python_ia\\nivelar.py"
 local EXT = { arw = 1, cr2 = 1, cr3 = 1, nef = 1, dng = 1, raf = 1, orf = 1, rw2 = 1,
 	jpg = 1, jpeg = 1, tif = 1, tiff = 1 }
 
+-- Lightroom en Linux (Wine, 18/11/2026): en el prefijo de Wine, C:\Renzo es un enlace a ~/Renzo. Asi las rutas
+-- fijas de arriba sirven igual y los scripts de Python en Linux pueden escribir /home/renzo/Renzo/...: a_wine las
+-- traduce al leer la cola. En Windows ninguna ruta empieza con "/" y todo queda como siempre.
+local HOME_UNIX = "/home/renzo"
+local function a_wine(r)
+	if r:sub(1, 1) ~= "/" then return r end
+	local pre = HOME_UNIX .. "/Renzo/"
+	if r:sub(1, #pre):lower() == pre:lower() then return (("C:\\Renzo\\" .. r:sub(#pre + 1)):gsub("/", "\\")) end
+	return (("Z:" .. r):gsub("/", "\\"))
+end
 local function log(msg)
 	local f = io.open(LOG, "a")
 	if f then f:write(ahora(), " ", msg, "\n"); f:close() end
@@ -94,7 +100,7 @@ end
 local function fotos_de(origen)
 	local t = {}
 	if origen:lower():match("%.txt$") then
-		for _, l in ipairs(lineas(origen)) do t[#t + 1] = l end
+		for _, l in ipairs(lineas(origen)) do t[#t + 1] = a_wine(l) end
 	else
 		for ruta in LrFileUtils.recursiveFiles(origen) do
 			if EXT[(LrPathUtils.extension(ruta) or ""):lower()] then t[#t + 1] = ruta end
@@ -133,43 +139,6 @@ local function plantilla(subcarpeta, titulo)
 	end
 end
 
--- Mismo criterio que Nivelar.lua del Encuadrador: no pisa un angulo que ya exista (lo que Renzo
--- enderezo a mano o paso por la macro vale mas) y mezcla con el revelado en vez de reemplazarlo.
-local function nivelar(catalogo, fotos, id)
-	local lista, salida = BASE .. "\\nivelar_lista.txt", BASE .. "\\nivelar_angulos.tsv"
-	local por_ruta = {}
-	local f = io.open(lista, "w")
-	for _, p in ipairs(fotos) do
-		local r = p:getRawMetadata("path")
-		por_ruta[r] = p
-		f:write(r, "\n")
-	end
-	f:close()
-	if LrFileUtils.exists(salida) then LrFileUtils.delete(salida) end
-	-- cmd.exe se come las comillas externas: por eso todo el comando va entrecomillado
-	local code = LrTasks.execute(string.format('""%s" "%s" "%s" "%s""', ENC_PY, ENC_SCRIPT, lista, salida))
-	if code ~= 0 or not LrFileUtils.exists(salida) then error("nivelar.py fallo (codigo " .. tostring(code) .. ")") end
-	local n = 0
-	catalogo:withWriteAccessDo("IMGorgni: nivelar " .. id, function()
-		for linea in io.lines(salida) do
-			local ruta, ang, l, t, r, b, conf =
-				linea:match("^(.-)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
-			local p = ruta and por_ruta[ruta]
-			if p then
-				local s = p:getDevelopSettings()
-				if (s.CropAngle or 0) == 0 then
-					s.CropAngle = tonumber(ang)
-					s.CropLeft, s.CropTop, s.CropRight, s.CropBottom = tonumber(l), tonumber(t), tonumber(r), tonumber(b)
-					p:applyDevelopSettings(s, "Nivelar")
-					p:setRawMetadata("rating", tonumber(conf) or 1)
-					n = n + 1
-				end
-			end
-		end
-	end, { timeout = 600 })
-	return n
-end
-
 -- Receta de edicion (edicion_ig.py, 14/10/2026): un .lua que devuelve
 --   { ["ruta del raw en minusculas"] = { ajustes = {...}, limpiar = bool,
 --       mascaras = { { tipo = "background", valores = { local_Exposure = -0.4, ... } }, ... } } }
@@ -182,7 +151,12 @@ local function cargar_receta(ruta)
 	f:close()
 	local fn, err = loadstring(codigo)
 	if not fn then error("receta invalida: " .. tostring(err)) end
-	return fn()
+	local receta = {}
+	for k, v in pairs(fn()) do -- claves en minusculas; en Linux llegan como /home/renzo/renzo/...
+		if type(v) == "table" and v.mascaras_de then v.mascaras_de = a_wine(v.mascaras_de) end
+		receta[a_wine(k):lower()] = v
+	end
+	return receta
 end
 
 -- Si la foto ya trae un Denoise calculado (29/10/2026). Reaplicar un preset de Denoise mete un filtro nuevo y
@@ -326,8 +300,10 @@ local function exportar_previa(fotos, carpeta, lado)
 end
 
 local function trabajo(catalogo, c)
-	local id, origen, nombre_rev, nombre_exp, destino, marca = c[1], c[2] or "", c[3] or "", c[4] or "", c[5] or "", c[6] or ""
-	local coleccion, con_nivelado = c[7] or "", (c[8] or "") == "si"
+	local id, origen, nombre_rev, nombre_exp, destino, marca = c[1], a_wine(c[2] or ""), c[3] or "", c[4] or "",
+		a_wine(c[5] or ""), c[6] or ""
+	c[9], c[10] = a_wine(c[9] or ""), a_wine(c[10] or "") -- receta y carpeta de previas
+	local coleccion = c[7] or "" -- c[8] (nivelar) se ignora desde el 21/11/2026
 	local rutas = fotos_de(origen)
 	if #rutas == 0 then error("no hay fotos en " .. origen) end
 	local preset
@@ -362,7 +338,7 @@ local function trabajo(catalogo, c)
 		local valores = {}
 		for _, l in ipairs(lineas(tsv)) do
 			local c = campos(l)
-			if c[1] and tonumber(c[2]) then valores[c[1]:lower()] = c end
+			if c[1] and tonumber(c[2]) then valores[a_wine(c[1]):lower()] = c end
 		end
 		local n = 0
 		catalogo:withWriteAccessDo("IMGorgni: color " .. id, function()
@@ -393,7 +369,7 @@ local function trabajo(catalogo, c)
 					if v == "true" then a[k] = true elseif v == "false" then a[k] = false else a[k] = tonumber(v) or v end
 				end
 			end
-			por_foto[c[1]:lower()] = a
+			por_foto[a_wine(c[1]):lower()] = a
 		end
 		local presets = {}
 		for _, a in pairs(por_foto) do
@@ -433,7 +409,7 @@ local function trabajo(catalogo, c)
 		if ya_tenian > 0 then detalle = detalle .. ", " .. ya_tenian .. " ya tenian Denoise (marcadas con estrellas, sin recalcular)" end
 	end
 	local receta =(c[9] or "") ~= "" and cargar_receta(c[9]) or nil
-	if receta then -- antes de nivelar: si la receta trae el angulo de Renzo, nivelar no lo pisa
+	if receta then
 		catalogo:withWriteAccessDo("IMGorgni: receta " .. id, function()
 			for _, p in ipairs(fotos) do
 				local r = receta[p:getRawMetadata("path"):lower()]
@@ -441,7 +417,6 @@ local function trabajo(catalogo, c)
 			end
 		end, { timeout = 600 })
 	end
-	if con_nivelado then detalle = detalle .. ", " .. nivelar(catalogo, fotos, id) .. " niveladas" end
 	-- el borde derecho es por la franja del Denoise del preset: sin preset no hay franja y el encuadre de
 	-- Renzo (ya nivelado) queda como esta (28/10/2026)
 	if receta and preset then detalle = detalle .. ", encuadre 3:2 en " .. encuadre_final(catalogo, fotos) end

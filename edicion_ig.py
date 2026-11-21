@@ -183,7 +183,7 @@ def main():
     # Desde el 24/10/2026 el Denoise IA no va en la completa: --sin-denoise no aplica "IMGorgni Completa base"
     # (la base es la edicion de Renzo de la receta). --sin-nivelar: Renzo ya nivelo y la receta trae su angulo.
     preset = "" if "--sin-denoise" in sys.argv else "IMGorgni Completa base"
-    nivelar = "" if "--sin-nivelar" in sys.argv else "si"
+    nivelar = ""  # 21/11/2026: el plugin ya no nivela (Renzo usa el Automatico de Lightroom); --sin-nivelar queda sin efecto
     linea = f"{jid}\t{carpeta}\t{preset}\t\t\t\t{coleccion}\t{nivelar}\t{archivo}\t{previas}\t{lado}\n"
     cola = (LR / "cola.tsv").read_text(encoding="utf-8")
     if f"\n{jid}\t" not in "\n" + cola:
