@@ -127,6 +127,10 @@ Desde ahí, una sesión de Code puede hacer contigo el resto.
 
 ## Paso 5b: tu plugin IMGorgni en Linux
 
+> **Hecho el 21/11/2026, con cambios respecto de lo que sigue:** el nivelado salió del plugin (Renzo nivela a mano
+> con el Automático de Lightroom), así que los pasos 4 y 6 de abajo ya no aplican. Cómo quedó de verdad: sección
+> "Resultado del 21/11: Lightroom y Jarvis en Debian".
+
 El plugin ya viene preparado (cambio del 18/11/2026, sin probar todavía en Linux): si detecta Wine, traduce las
 rutas `/home/renzo/Renzo/...` que escriban tus scripts y llama al Python de Linux para nivelar. En Windows no cambia
 nada. Lo que hay que dejar armado:
@@ -166,6 +170,50 @@ Usar las 110 RAW de la F7 (`Compras/pedidos`), copiadas a Linux, y un catálogo 
 
 Si el Denoise, el plugin y la exportación pasan, Linux sirve para trabajar. Si alguno falla, lo anotas y seguimos
 en Windows sin haber perdido nada.
+
+## Resultado del 21/11: Lightroom y Jarvis en Debian
+
+### Lightroom Classic + plugin: pasa
+
+Prueba con 5 RAW de la F7 (pedido 5AD44C, edición completa) en un catálogo nuevo de Linux:
+
+| Qué | Resultado |
+|---|---|
+| Plugin `IMGorgni.lrplugin` | Carga solo y procesa la cola: revelado, modelo de color, ajustes por foto, Denoise, recorte del borde y previas |
+| Denoise IA (GPU Radeon 860M) | **~105 s/foto** (Windows: ~62 s en la F7, ~133 s en Katty) |
+| Previas JPEG 1600 px | OK |
+
+Cómo quedó armado (detalle en la memoria `linux-es-por-personalizacion`):
+
+- AppImage `6im0n` v1.2.0; prefijo en `~/.local/share/lightroom-classic-on-linux/wineprefix`. Instalado con
+  `Lightroom_Classic_Set-Up.exe` (copiado como `resources/installers/Creative_Cloud_Set-Up.exe`) → menú 3, 6 y `a`.
+- **Driver X11 forzado** (`wineprefix/.lr-driver-pref`): con Wayland, `wlstack.so` muere por
+  `wl_proxy_get_interface` (libwayland 1.23.1 de Debian).
+- En el prefijo, enlaces: `drive_c/Renzo` → `~/Renzo`, `drive_c/Fotos` → `/mnt/win/Fotos`, `dosdevices/k:` → `~/K`.
+  Así los catálogos de `C:\Fotos\otro\catalogos` abren con las fotos en su lugar.
+- Presets **enlazados** (no copiados) a los de Windows: `CameraRaw/Settings` y 17 carpetas de `Adobe/Lightroom`.
+- Plugins por enlaces en `AppData/Roaming/Adobe/Lightroom/Modules`: IMGorgni, lr-auto-settings, NegativeLabPro3.
+- **Modelos de IA copiados de Windows** (`C:\ProgramData\Adobe\CameraRaw\ModelZoo` y `%APPDATA%\...\ModelZoo`):
+  sin eso sale "Some AI models failed to download" y el Denoise se "aplica" sin calcularse.
+- `Cola.lua` detecta Wine con `C:\windows\system32\wineboot.exe` (el AppImage desactiva `winemenubuilder`).
+- No actualizar Creative Cloud y cerrarlo con `--kill`: su interfaz sin GPU congela el escritorio. "Cerrar sesión"
+  sale gris en Wine; para cambiar de cuenta se borra `AppData/Local/Adobe/OOBE/opm.db`, las cookies de
+  `AppData/Local/Adobe/webview2` y las credenciales de Adobe en `user.reg`.
+- `K:` = `~/K` por sshfs (`~/.local/bin/montar-k`): en la casa por LAN con escritura, fuera por Tailscale y
+  solo lectura. Antes, fuera de casa, el sshfs colgado trababa Wine al arrancar.
+
+### Jarvis: la captura corre en Debian
+
+- La Pi ya procesaba la noche (hora, noche, mañana). En Debian se portó solo la **captura**, con agy
+  (`Jarvis/docs/spec_agy_jarvis_debian.md`): script de KWin para la ventana activa, `spectacle` para la foto,
+  Klipper para el portapapeles e inactividad por Wayland. Servicio `jarvis-captura.service` de usuario.
+- Ajustes después de agy: la foto se refresca cada 10 s y no cada 2 (16 % → 5,6 % de un núcleo), y con la **tapa
+  cerrada** cuenta como ausente (Antigravity abierto bloquea la inactividad de Wayland).
+- Syncthing 2.1.7 con la identidad del Windows (`note-yenllo`): `datos/` sigue sincronizando con la Pi y el teléfono.
+
+### Lo que falta
+
+- Tareas nocturnas de IMGorgni que se usan de verdad: agente calentado, editar Renato, selección IG / feed.
 
 ## Lo que igual sigue siendo de Windows
 
