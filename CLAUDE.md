@@ -135,3 +135,18 @@ estrellas en cada miniatura, con filtros por cantidad de estrellas.
   señal es la pelota (ancla quien es el sujeto). En deportes anda como fue diseñado;
   en baile/concierto/presentacion degrada a filtros genericos de calidad
   (nitidez, exposicion, ojos cerrados), que igual sirven pero rinden menos.
+
+## Cambio a Debian (21/11/2026)
+
+Renzo paso su dia a dia de Windows 11 a **Debian 13 KDE** (arranque dual; Windows queda para juegos con
+anti-cheat y lo que aun no se migra). Esta carpeta es la MISMA en los dos sistemas: en Debian se ve como
+`~/Renzo/...`, que es `C:\Renzo\...` montado desde `/mnt/win`. Por eso:
+
+- Las rutas `C:\Renzo\...` del codigo y de los docs equivalen a `/home/yenllo/Renzo/...`. `K:` es `~/K`
+  (sshfs a la Pi: en la casa con escritura, fuera solo lectura por Tailscale).
+- Lo descargable o propio de Windows NO se trajo: venvs (`venv\Scripts\python.exe`), `.exe`, toolchains,
+  modelos. Si falta, no es un error del proyecto: en Debian se recrea, con el venv FUERA de la carpeta
+  compartida (p. ej. `~/.venvs/<proyecto>`) para no pisar el de Windows.
+- Las tareas programadas de Windows no corren en Debian salvo que se hayan portado (systemd --user).
+- Antes de dar comandos, revisa en que sistema corre la sesion (bash en Debian, PowerShell en Windows).
+- Aca: Lightroom corre en Debian con el AppImage de Wine y el plugin ya funciona (probado el 21/11: completa con Denoise ~105 s/foto). Las tareas nocturnas (editar Renato, seleccion IG/feed, agente calentado) siguen en Windows hasta portarlas. Detalle en la memoria `linux-es-por-personalizacion`.

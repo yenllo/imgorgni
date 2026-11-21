@@ -45,7 +45,8 @@ for _s in (sys.stdout, sys.stderr):
 # Todo lo que cambia entre la notebook y la Pi sale del entorno. Los valores
 # por defecto son los de la notebook, asi que aca no cambia nada: si no seteas
 # ninguna variable, el curador se comporta exactamente como siempre.
-_RAIZ = Path(os.environ.get("CURADOR_RAIZ", r"C:\Renzo\Proyectos\IMGorgni"))
+# la carpeta de este archivo: en Windows es C:\Renzo\Proyectos\IMGorgni igual que antes, y sirve en Debian (21/11/2026)
+_RAIZ = Path(os.environ.get("CURADOR_RAIZ", Path(__file__).resolve().parent))
 
 DB = os.environ.get("CURADOR_DB", str(_RAIZ / "photos_v2.db"))
 # En C: (SSD NVMe interno): E: es un disco externo por USB, y SQLite con WAL

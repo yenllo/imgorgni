@@ -8,10 +8,13 @@ el filtro tiene que frenar (DNG del rescate de F: declarando 49435x40988 en
 """
 import sys
 
-sys.path.insert(0, r"C:\Renzo\Proyectos\IMGorgni")
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parent.parent  # relativo: sirve en Windows y en Debian
+sys.path.insert(0, str(RAIZ))
 import importlib.util
 
-spec = importlib.util.spec_from_file_location("wc", r"C:\Renzo\Proyectos\IMGorgni\web_curador.py")
+spec = importlib.util.spec_from_file_location("wc", RAIZ / "web_curador.py")
 wc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wc)
 
