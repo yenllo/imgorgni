@@ -237,6 +237,17 @@ CREATE INDEX IF NOT EXISTS ix_lista_cliente ON lista(cliente_id, orden);
 -- ordenar por "mas elegidas" cuenta por foto; sin este indice cada foto
 -- escanea lista_foto entera
 CREATE INDEX IF NOT EXISTS ix_lista_foto_foto ON lista_foto(foto_id);
+CREATE TABLE IF NOT EXISTS indicacion (
+    cliente_id INTEGER NOT NULL REFERENCES cliente(id) ON DELETE CASCADE,
+    foto_id    INTEGER NOT NULL REFERENCES foto(id) ON DELETE CASCADE,
+    modo       TEXT NOT NULL DEFAULT 'fotografo',
+    protas     TEXT NOT NULL DEFAULT '[]',
+    quitar     TEXT NOT NULL DEFAULT '[]',
+    nota       TEXT NOT NULL DEFAULT '',
+    cuando     TEXT NOT NULL,
+    PRIMARY KEY (cliente_id, foto_id)
+);
+CREATE INDEX IF NOT EXISTS ix_indicacion_foto ON indicacion(foto_id);
 CREATE TABLE IF NOT EXISTS descarga (
     id         INTEGER PRIMARY KEY,
     cliente_id INTEGER REFERENCES cliente(id) ON DELETE SET NULL,
@@ -308,6 +319,27 @@ CREATE TABLE IF NOT EXISTS vista_cara (
     PRIMARY KEY (cliente_id, token, foto_id, visor)
 );
 CREATE INDEX IF NOT EXISTS ix_vista_cara_token ON vista_cara(token);
+-- la pagina de un trabajo (/t/<codigo>): opciones, lo acordado y los plazos.
+-- `datos` es JSON (ver pasos_trabajo): son pocos y se leen enteros
+CREATE TABLE IF NOT EXISTS trabajo (
+    codigo TEXT PRIMARY KEY,
+    datos  TEXT NOT NULL,
+    creado TEXT NOT NULL
+);
+-- cotizaciones guardadas en /panel/cotizador: organizador, evento y estado
+-- completo del formulario en JSON
+CREATE TABLE IF NOT EXISTS cotizacion (
+    id          TEXT PRIMARY KEY,
+    organizador TEXT NOT NULL DEFAULT '',
+    evento      TEXT NOT NULL DEFAULT '',
+    numero      TEXT NOT NULL DEFAULT '',
+    total       INTEGER NOT NULL DEFAULT 0,
+    resumen     TEXT NOT NULL DEFAULT '',
+    datos       TEXT NOT NULL,
+    creada      TEXT NOT NULL,
+    actualizada TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_cotizacion_act ON cotizacion(actualizada DESC);
 """
 
 
@@ -331,6 +363,18 @@ def ahora_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+_DB_LOCK = threading.Lock()
+_DB_MIGRADAS = set()
+
+
+def _db_clave(ruta):
+    try:
+        st = os.stat(ruta)
+        return (os.path.abspath(ruta), st.st_dev, st.st_ino)
+    except OSError:
+        return None
+
+
 def db():
     if "db" not in g:
         g.db = conectar()
@@ -341,12 +385,30 @@ def conectar():
     cx = sqlite3.connect(DB, timeout=30)
     cx.row_factory = sqlite3.Row
     cx.execute("PRAGMA foreign_keys = ON")
+    cx.execute("PRAGMA busy_timeout = 30000")
+    cx.execute("PRAGMA synchronous = NORMAL")
+    cx.execute("PRAGMA temp_store = MEMORY")
+    cx.execute("PRAGMA mmap_size = 67108864")
+    clave = _db_clave(DB)
+    if clave is not None and clave in _DB_MIGRADAS:
+        return cx
+    with _DB_LOCK:
+        clave = _db_clave(DB)
+        if clave is not None and clave in _DB_MIGRADAS:
+            return cx
+        _migrar_esquema(cx)
+        clave = _db_clave(DB)
+        if clave is not None:
+            _DB_MIGRADAS.add(clave)
+    return cx
+
+
+def _migrar_esquema(cx):
     # WAL: lectores y escritor no se bloquean entre si. Con el modo por
     # defecto, anotar una vista trababa la base entera y la grilla devolvia
     # 500 en las fotos que caian justo ahi (18/9/2026, CasaMati con 300).
     # Es persistente: se fija una vez y queda en el archivo.
     cx.execute("PRAGMA journal_mode = WAL")
-    cx.execute("PRAGMA busy_timeout = 30000")
     cx.executescript(ESQUEMA)
     # galerias creadas antes de que existiera la columna raw
     tiene_foto = {r["name"] for r in cx.execute("PRAGMA table_info(foto)")}
@@ -451,8 +513,9 @@ def conectar():
         cx.execute("ALTER TABLE busqueda_cara ADD COLUMN "
                    "cliente_id INTEGER REFERENCES cliente(id) ON DELETE SET NULL")
         cx.commit()
+    cx.execute("CREATE INDEX IF NOT EXISTS ix_foto_tomada ON foto(galeria_id, tomada)")
+    cx.commit()
     migrar_megusta(cx)
-    return cx
 
 
 @app.teardown_appcontext
@@ -484,6 +547,18 @@ def traducir_ruta(ruta):
     return str(RAIZ_FOTOS / r.lstrip("/"))
 
 
+_RAIZ_RESUELTA = {}
+
+
+def _resolver_raiz(raiz):
+    k = str(raiz)
+    r = _RAIZ_RESUELTA.get(k)
+    if r is None:
+        r = Path(raiz).resolve()
+        _RAIZ_RESUELTA[k] = r
+    return r
+
+
 def dentro_de_raiz(ruta):
     """Nadie sirve nada de afuera de las dos raices, venga de donde venga.
 
@@ -499,7 +574,7 @@ def dentro_de_raiz(ruta):
     # preguntar por el ultimo evita colgar todo lo que vive en la SSD
     for raiz in (RAIZ_DERIVADAS, RAIZ_FOTOS):
         try:
-            p.relative_to(raiz.resolve())
+            p.relative_to(_resolver_raiz(raiz))
             return True
         except ValueError:
             continue
@@ -721,10 +796,23 @@ def logos_de(gal):
     return tuple(n for n in crudo.splitlines() if n.strip() in hay)[:MAX_LOGOS]
 
 
+_LOGOS_CACHE = {}
+
+
 def logos_disponibles():
+    try:
+        mt = LOGOS.stat().st_mtime_ns
+    except OSError:
+        return []
+    k = str(LOGOS)
+    c = _LOGOS_CACHE.get(k)
+    if c is not None and c[0] == mt:
+        return list(c[1])
     if not LOGOS.is_dir():
         return []
-    return sorted(f.name for f in LOGOS.iterdir() if f.is_file() and es_visible(f))
+    res = tuple(sorted(f.name for f in LOGOS.iterdir() if f.is_file() and es_visible(f)))
+    _LOGOS_CACHE[k] = (mt, res)
+    return list(res)
 
 
 def combos_logos():
@@ -864,7 +952,7 @@ def _pegar(capa, est, x, y):
     capa.alpha_composite(est.crop((x0, y0, x1, y1)), (x + x0, y + y0))
 
 
-@lru_cache(maxsize=12)
+@lru_cache(maxsize=4)
 def capa_marca(w, h, texto, factor=0.042, logos=(), densa=False):
     """La capa de marca depende del tamaño, del texto y de los logos, no de
     la foto.
@@ -915,17 +1003,17 @@ def marcar(origen, destino, texto=None, ancho=None, factor=0.042, logos=(),
     im.draft("RGB", (ancho, ancho))
     im = ImageOps.exif_transpose(im)
     im.thumbnail((ancho, ancho), Image.LANCZOS)
-    im = im.convert("RGBA")
-
-    out = Image.alpha_composite(
-        im, capa_marca(im.width, im.height, MARCA if texto is None else texto,
-                       factor, tuple(logos), bool(densa))).convert("RGB")
+    if im.mode != "RGB":
+        im = im.convert("RGB")
+    capa = capa_marca(im.width, im.height, MARCA if texto is None else texto,
+                      factor, tuple(logos), bool(densa))
+    im.paste(capa, (0, 0), capa)
     # la firma va DESPUES y sin rotar: es la misma que se estampa en la
     # entrega, para que lo que se ve al elegir sea lo que llega
     if firma:
-        pegar_firma(out, *firma)
+        pegar_firma(im, *firma)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    guardar(out, destino, quality=82, optimize=True)
+    guardar(im, destino, quality=82, optimize=True)
 
 
 # WebP a 80 desde el original: medido sobre fotos reales a 480/800/1400 px,
@@ -941,6 +1029,22 @@ WEBP_OK = features.check("webp")      # Pillow sin libwebp: todo sigue en JPEG
 # y el 8TB no volvio. Las demas esperan su turno en vez de competir por memoria.
 TOPE_GENERANDO = int(os.environ.get("GALERIA_GENERANDO", 2))
 GENERANDO = threading.BoundedSemaphore(TOPE_GENERANDO)
+GENERANDO_ESPERA = int(os.environ.get("GALERIA_GENERANDO_ESPERA", 25))
+
+
+class ServidorOcupado(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def _turno_generar(espera=None):
+    ok = GENERANDO.acquire() if espera is None else GENERANDO.acquire(timeout=espera)
+    if not ok:
+        raise ServidorOcupado("demasiadas miniaturas en curso")
+    try:
+        yield
+    finally:
+        GENERANDO.release()
 
 
 def guardar(im, destino, **jpeg):
@@ -1049,17 +1153,17 @@ def ruta_firma(ruta, logo, pos, tam, ancho=None):
     return CACHE / clave[:2] / f"{clave}.jpg"
 
 
-def firmada(ruta, logo, pos, tam, ancho=None):
+def firmada(ruta, logo, pos, tam, ancho=None, espera=None):
     """La copia firmada, cacheada. ancho=None es la que se entrega."""
     destino = ruta_firma(ruta, logo, pos, tam, ancho)
     if not destino.exists():
-        with GENERANDO:
+        with _turno_generar(espera):
             if not destino.exists():
                 firmar(ruta, destino, logo, pos, tam, ancho)
     return str(destino)
 
 
-def preview_de(gal, foto_id, ruta, ancho=None):
+def preview_de(gal, foto_id, ruta, ancho=None, espera=None):
     """La imagen que /p/ sirve para esta foto.
 
     La comparten la vista y el calentado del cache: si cada uno eligiera por
@@ -1067,9 +1171,10 @@ def preview_de(gal, foto_id, ruta, ancho=None):
     quedaria igual de fria, ocupando el doble.
     """
     if gal["marca"] == 0:
-        return sin_marca(ruta, ancho)
+        return sin_marca(ruta, ancho, espera=espera)
     return preview(foto_id, ruta, gal["marca_texto"], ancho,
-                   logos=logos_de(gal), firma=firma_de(gal), densa=gal["marca_densa"])
+                   logos=logos_de(gal), firma=firma_de(gal),
+                   densa=gal["marca_densa"], espera=espera)
 
 
 def clave_preview_de(gal, ruta, ancho=None, logos=None, firma=None):
@@ -1096,7 +1201,7 @@ def entregable(ruta, firma):
 
 
 def preview(foto_id, ruta, texto=None, ancho=None, factor=0.042, logos=(),
-            firma=None, webp=False, densa=False):
+            firma=None, webp=False, densa=False, espera=None):
     """Cachea por (ruta, mtime, texto de la marca, logos, ancho).
 
     El texto y los logos van en la clave a proposito: cambiar la marca de una
@@ -1110,7 +1215,7 @@ def preview(foto_id, ruta, texto=None, ancho=None, factor=0.042, logos=(),
     if webp:
         destino = destino.with_suffix(".webp")   # misma clave: la limpieza la encuentra
     if not destino.exists():
-        with GENERANDO:
+        with _turno_generar(espera):
             if not destino.exists():    # otro hilo la pudo terminar en la espera
                 marcar(ruta, destino, texto, ancho, factor, logos, firma, densa)
     return destino
@@ -1202,14 +1307,14 @@ def _clave_sin_marca(ruta, ancho=None):
     return CACHE / clave[:2] / f"{clave}.jpg"
 
 
-def sin_marca(ruta, ancho=None, webp=False):
+def sin_marca(ruta, ancho=None, webp=False, espera=None):
     """Como preview() pero sin marca de agua y mas grande. Mismo cache."""
     ancho = ancho or ANCHO_MUESTRA
     destino = _clave_sin_marca(ruta, ancho)
     if webp:
         destino = destino.with_suffix(".webp")
     if not destino.exists():
-        with GENERANDO:
+        with _turno_generar(espera):
             if not destino.exists():
                 destino.parent.mkdir(parents=True, exist_ok=True)
                 im = Image.open(ruta)
@@ -1666,6 +1771,19 @@ CAMPOS = (
         ("mi_boton", "Boton al final (vacio = sin boton)", 1,
          "Escríbeme por WhatsApp"),
     )),
+    ("Pagina de trabajo (/t/)", (
+        ("trab_bajada", "Bajada bajo el titulo", 3,
+         "Aquí está todo lo del trabajo en un solo lugar: qué incluye, cuánto "
+         "sale y qué pasa cada día. Puedes reenviar este link a quien tenga "
+         "que aprobarlo: ve exactamente lo mismo."),
+        ("trab_extras", "Si algo cambia (una por linea; {hora} = valor de la hora)", 6,
+         "Hora extra: {hora} la hora, cobrada por tercios (20 min). Los primeros 15 minutos no se cobran.\n"
+         "Pedido urgente (fotos el mismo día o al siguiente): se cobra aparte, avísame antes.\n"
+         "Lluvia: si la fecha se suspende, el anticipo queda para la fecha siguiente.\n"
+         "Plazo para elegir: si se pasa, la edición se agenda de nuevo según mi calendario.\n"
+         "Redes: las fotos que suban van con crédito a @RB.Deportes_."),
+        ("trab_transferencia", "Datos de transferencia (vacio = no se muestran)", 6, ""),
+    )),
     ("Pie de todas las paginas", (
         ("pie", "Linea del pie", 1,
          "Fotografia deportiva y de eventos \u00b7 Chile"),
@@ -1969,11 +2087,20 @@ def clave_camara(nombre):
 
 
 def ids_de_caras(filas, pares):
-    """foto.id de las filas que salieron en la busqueda. Con ruta entera calza
-    exacto: los DSC se repiten entre carpetas y traerian fotos de otra persona."""
-    rutas = {a for a, _s in pares if "/" in a}
-    claves = {clave_camara(a) for a, _s in pares if "/" not in a}
-    return [r["id"] for r in filas if r["ruta"] in rutas or clave_camara(r["ruta"]) in claves]
+    """foto.id de las filas que salieron en la busqueda, conservando el orden
+    de parecido. Con ruta entera calza exacto: los DSC se repiten entre carpetas
+    y traerian fotos de otra persona."""
+    rutas = {a: i for i, (a, _s) in enumerate(pares) if "/" in a}
+    claves = {clave_camara(a): i for i, (a, _s) in enumerate(pares) if "/" not in a}
+    elegidas = []
+    for r in filas:
+        pos = rutas.get(r["ruta"])
+        if pos is None:
+            pos = claves.get(clave_camara(r["ruta"]))
+        if pos is not None:
+            elegidas.append((pos, r["id"]))
+    elegidas.sort(key=lambda x: x[0])
+    return [fid for _pos, fid in elegidas]
 
 
 def estado_caras(gal):
@@ -2002,20 +2129,73 @@ def estado_caras(gal):
     return e
 
 
+_CANDADO_CARA = threading.Lock()
+_PROC_CARA = None
+
+
+def _pedir_caras_pi(indice, selfie, timeout=120):
+    """Manda el pedido al worker efimero (caras_pi.py --servidor). Si no esta
+    corriendo o justo se apago por los 45 s de inactividad, lo levanta."""
+    global _PROC_CARA
+    py = BASE / "venv_caras" / "bin" / "python"
+    cmd = [str(py if py.exists() else sys.executable), str(BASE / "caras_pi.py"), "--servidor"]
+    pedido = json.dumps({"indice": str(indice), "selfie": str(selfie)}) + "\n"
+    for intento in (1, 2):
+        reusado = _PROC_CARA is not None and _PROC_CARA.poll() is None
+        if not reusado:
+            _PROC_CARA = subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, bufsize=1)
+            # cosecha el PID cuando se apague solo a los 45 s (sin zombies)
+            threading.Thread(target=_PROC_CARA.wait, daemon=True).start()
+        proc = _PROC_CARA
+        salida = []
+
+        def leer():
+            try:
+                proc.stdin.write(pedido)
+                proc.stdin.flush()
+                salida.append(proc.stdout.readline())
+            except Exception as e:
+                salida.append(e)
+
+        h = threading.Thread(target=leer, daemon=True)
+        h.start()
+        h.join(timeout)
+        if h.is_alive():
+            proc.kill()
+            _PROC_CARA = None
+            raise RuntimeError("timeout en caras_pi.py")
+        linea = salida[0] if salida else ""
+        if isinstance(linea, str) and linea.strip():
+            res = json.loads(linea)
+            if "error" in res:
+                raise RuntimeError(res["error"])
+            return res["ok"]
+        # si un worker ya abierto acababa de cerrar por inactividad, reintenta
+        proc.kill()
+        _PROC_CARA = None
+        if not reusado or intento == 2:
+            err = ""
+            try:
+                err = proc.stderr.read()[-500:]
+            except Exception:
+                pass
+            raise RuntimeError(err or "caras_pi.py cerro sin responder")
+
+
 def buscar_cara(gal, selfie):
     """foto.id de esta galeria donde aparece la cara de *selfie*, o None si
-    la selfie no tiene cara. Corre caras_pi.py como proceso aparte con el
-    Python de venv_caras/ (el unico con onnxruntime): pide ~500 MB y asi la
-    memoria vuelve apenas termina. Tarda ~15 s en la Pi, 11 de ellos en
-    cargar librerias y modelo; dejarlo residente costaria esos 500 MB fijos."""
-    py = BASE / "venv_caras" / "bin" / "python"
-    hecho = subprocess.run(
-        [str(py if py.exists() else sys.executable), str(BASE / "caras_pi.py"),
-         str(indice_caras(gal)), str(selfie)],
-        capture_output=True, text=True, timeout=180)
-    if hecho.returncode != 0:
-        raise RuntimeError(hecho.stderr[-500:])
-    pares = json.loads(hecho.stdout)
+    la selfie no tiene cara. Usa caras_pi.py --servidor: con external_data +
+    disable_prepacking los modelos se mapean por mmap (~12 MB de heap privado),
+    atiende una rafaga de 20 jugadores a ~0,6 s por selfie sin reimportar
+    librerias, y a los 45 s de inactividad se apaga solo devolviendo toda la RAM."""
+    if not _CANDADO_CARA.acquire(timeout=60):   # Cloudflare corta a los 100 s
+        raise RuntimeError("fila de busquedas por cara llena")
+    try:
+        pares = _pedir_caras_pi(indice_caras(gal), selfie)
+    finally:
+        _CANDADO_CARA.release()
     if pares is None:
         return None
     return ids_de_caras(db().execute(
@@ -2630,6 +2810,33 @@ def _tarjeta(gal, cuantas=None):
 
 
 _REVISADA = {}      # galeria_id -> cuando se miro por ultima vez si faltan archivos
+_REVISADA_LOCK = threading.Lock()
+_SACANDO_GALS = set()
+
+
+def _sacar_borradas_bg(gid, cada=300):
+    ahora = time.time()
+    with _REVISADA_LOCK:
+        if ahora - _REVISADA.get(gid, 0) < cada or gid in _SACANDO_GALS:
+            return
+        _SACANDO_GALS.add(gid)
+
+    def correr():
+        try:
+            cx = conectar()
+            try:
+                g_ = cx.execute("SELECT * FROM galeria WHERE id = ?", (gid,)).fetchone()
+                if g_ is not None:
+                    sacar_borradas(cx, g_, cada=cada)
+            finally:
+                cx.close()
+        except Exception:
+            app.logger.exception("sacar_borradas en segundo plano fallo para %s", gid)
+        finally:
+            with _REVISADA_LOCK:
+                _SACANDO_GALS.discard(gid)
+
+    threading.Thread(target=correr, daemon=True).start()
 
 
 def sacar_borradas(cx, gal, gracia=600, cada=60):
@@ -2648,10 +2855,12 @@ def sacar_borradas(cx, gal, gracia=600, cada=60):
     Devuelve cuantas saco.
     """
     ahora = time.time()
-    if ahora - _REVISADA.get(gal["id"], 0) < cada:
-        return 0
-    _REVISADA[gal["id"]] = ahora
-    filas = cx.execute("SELECT id, ruta FROM foto WHERE galeria_id = ?", (gal["id"],)).fetchall()
+    gid = gal["id"]
+    with _REVISADA_LOCK:
+        if ahora - _REVISADA.get(gid, 0) < cada:
+            return 0
+        _REVISADA[gid] = ahora
+    filas = cx.execute("SELECT id, ruta FROM foto WHERE galeria_id = ?", (gid,)).fetchall()
     faltan = [f for f in filas if not os.path.exists(f["ruta"])]
     if not faltan or len(faltan) == len(filas):
         return 0
@@ -2708,7 +2917,7 @@ def galeria(slug):
                 (gal["id"],)).fetchone()["c"]))
     if slug == VIDEOS_SLUG:
         return videos(gal)
-    sacar_borradas(db(), gal)
+    _sacar_borradas_bg(gal["id"])
 
     cid = cliente_actual(gal["id"])
     # el criterio y la direccion salen de ?por= y ?dir=. Lo que antes era
@@ -2793,6 +3002,8 @@ def galeria(slug):
     fotos = db().execute(
         "SELECT foto.id, foto.raw IS NOT NULL AS tiene_raw, "
         "  foto.id IN (" + EN_TODAS + ") AS mia, "
+        "  EXISTS(SELECT 1 FROM indicacion WHERE indicacion.foto_id = foto.id AND indicacion.cliente_id = ? "
+        "         AND (indicacion.modo = 'indicado' OR indicacion.nota <> '')) AS tiene_ind, "
         "  EXISTS(SELECT 1 FROM lista_foto JOIN lista ON lista.id = lista_foto.lista_id"
         "         WHERE lista_foto.foto_id = foto.id AND lista.cliente_id = ?"
         "           AND lista.nombre = ?) AS en_carro, "
@@ -2803,13 +3014,22 @@ def galeria(slug):
         "      AND lista.nombre <> ?) AS en_listas "
         f"{donde} ORDER BY {ORDENES[por][1]} {dire}, {DESEMPATE} {dire}, "
         f"foto.id {dire} LIMIT ? OFFSET ?",
-        (cid, cid, cid, CARRITO, cid, CARRITO) + args
+        (cid, cid, cid, cid, CARRITO, cid, CARRITO) + args
         + (PAGINA, (p - 1) * PAGINA)).fetchall()
     marcadas = cuenta_marcadas(db(), cid)
     if trozo:
         # solo las celdas: lo que el scroll pega al final de la grilla
         return render_template_string(CELDAS, gal=gal, fotos=fotos, vende=vende,
                                       repetidas=repetidas)
+    listas_c = db().execute("SELECT id, nombre FROM lista WHERE cliente_id = ?", (cid,)).fetchall()
+    completas_lids = [r["id"] for r in listas_c if _es_lista_completa(r["nombre"])]
+    if completas_lids:
+        q_m = ",".join("?" * len(completas_lids))
+        completas_fids = [r[0] for r in db().execute(
+            f"SELECT DISTINCT foto_id FROM lista_foto WHERE lista_id IN ({q_m})",
+            completas_lids).fetchall()]
+    else:
+        completas_fids = []
     top_fotos = (top_fotos_de(db(), gal, cid)
                  if (not lista and not cara and not grupo
                      and vdesde == 0 and vhasta == largo)
@@ -2817,7 +3037,7 @@ def galeria(slug):
     return render_template_string(BASE_HTML, **_tarjeta(gal, total),
         cuerpo=render_template_string(
         GRILLA, gal=gal, fotos=fotos, total=total, marcadas=marcadas,
-        top_fotos=top_fotos,
+        top_fotos=top_fotos, completas_ids=completas_fids,
         p=p, paginas=paginas, lista=lista, marca=gal["marca_texto"] or MARCA,
         tapa=tiene_tapa(gal), tarifas=tramos(gal), pesos=pesos, T=textos(),
         entrega=indicaciones(gal),
@@ -3144,7 +3364,7 @@ def video_guardar(slug, eid):
 @app.get("/p/<int:foto_id>")
 def ver_preview(foto_id):
     f = foto_autorizada(foto_id)
-    if not dentro_de_raiz(f["ruta"]) or not os.path.exists(f["ruta"]):
+    if not dentro_de_raiz(f["ruta"]):
         abort(404)
     try:
         # NULL o 1 = con marca. Solo un 0 explicito la saca, asi una galeria
@@ -3152,7 +3372,13 @@ def ver_preview(foto_id):
         # ?g=1 lo pide el visor: la misma foto, mas grande y con la misma
         # marca. La grilla sigue trayendo la de 1000 px.
         img = preview_de(f, foto_id, f["ruta"],
-                         ANCHO_VISOR if request.args.get("g") else None)
+                         ANCHO_VISOR if request.args.get("g") else None,
+                         espera=GENERANDO_ESPERA)
+    except ServidorOcupado:
+        return Response("", status=503,
+                        headers={"Retry-After": "2", "Cache-Control": "no-store"})
+    except FileNotFoundError:
+        abort(404)
     except Exception:
         # una foto ilegible rompe su miniatura, no la pagina entera del cliente
         app.logger.exception("no pude generar preview de %s", f["ruta"])
@@ -3160,7 +3386,8 @@ def ver_preview(foto_id):
     # solo la miniatura se anota sola. La grande la pide tambien la precarga
     # (3 adelante), asi que contarla aca inflaba "la abrio en grande": eso lo
     # avisa el visor con /api/visto cuando estuvo de verdad en pantalla.
-    if not request.args.get("g"):
+    # HEAD lo usa la pagina para confirmar si un 404 real falta del disco.
+    if request.method == "GET" and not request.args.get("g"):
         anotar_vista(f["galeria_id"], foto_id, False, request.args.get("cara"))
     return send_file(img, mimetype="image/jpeg", max_age=86400)
 
@@ -3747,6 +3974,98 @@ def megusta():
     return jsonify(d)
 
 
+def _es_lista_completa(nombre):
+    """True si el nombre de la lista contiene 'completa' (sin tildes ni mayúsculas)."""
+    if not nombre:
+        return False
+    s = unicodedata.normalize("NFKD", str(nombre)).encode("ASCII", "ignore").decode("ASCII").lower()
+    return "completa" in s
+
+
+def _foto_en_lista_completa(cx, cid, foto_id):
+    """Verifica si la foto pertenece a alguna lista 'completa' de este cliente."""
+    filas = cx.execute(
+        "SELECT l.nombre FROM lista l "
+        "JOIN lista_foto lf ON lf.lista_id = l.id "
+        "WHERE l.cliente_id = ? AND lf.foto_id = ?",
+        (cid, foto_id)).fetchall()
+    return any(_es_lista_completa(r["nombre"]) for r in filas)
+
+
+def _validar_cajas_indicacion(cajas):
+    """Valida lista de cajas [x1, y1, x2, y2] con 0 <= x1 < x2 <= 1 y 0 <= y1 < y2 <= 1, máx 6."""
+    if not isinstance(cajas, list):
+        return False, "Debe ser una lista de cajas"
+    if len(cajas) > 6:
+        return False, "Máximo 6 cajas por tipo"
+    for c in cajas:
+        if not isinstance(c, (list, tuple)) or len(c) != 4:
+            return False, "Cada caja debe tener 4 coordenadas [x1, y1, x2, y2]"
+        try:
+            x1, y1, x2, y2 = [float(v) for v in c]
+        except (ValueError, TypeError):
+            return False, "Las coordenadas deben ser números"
+        if not (0.0 <= x1 < x2 <= 1.0 and 0.0 <= y1 < y2 <= 1.0):
+            return False, "Coordenadas fuera de rango [0, 1] o x1 >= x2 / y1 >= y2"
+    return True, ""
+
+
+@app.get("/api/indicacion/<int:foto_id>")
+def ver_indicacion(foto_id):
+    """Retorna la indicación guardada de esta foto para el cliente actual y si está en completa."""
+    f = foto_autorizada(foto_id)
+    cid = cliente_actual(f["galeria_id"])
+    if cid is None:
+        abort(403)
+    cx = db()
+    completa = _foto_en_lista_completa(cx, cid, foto_id)
+    ind = cx.execute(
+        "SELECT modo, protas, quitar, nota FROM indicacion WHERE cliente_id = ? AND foto_id = ?",
+        (cid, foto_id)).fetchone()
+    if ind:
+        return jsonify(
+            modo=ind["modo"],
+            protas=json.loads(ind["protas"] or "[]"),
+            quitar=json.loads(ind["quitar"] or "[]"),
+            nota=ind["nota"] or "",
+            completa=completa)
+    return jsonify(modo="fotografo", protas=[], quitar=[], nota="", completa=completa)
+
+
+@app.post("/api/indicacion/<int:foto_id>")
+def guardar_indicacion(foto_id):
+    """Guarda indicaciones de encuadre/distracciones para una foto de lista completa."""
+    f = foto_autorizada(foto_id)
+    cid = cliente_actual(f["galeria_id"])
+    if cid is None:
+        abort(403)
+    cx = db()
+    if not _foto_en_lista_completa(cx, cid, foto_id):
+        return jsonify(error="Solo se pueden dar indicaciones en fotos de la lista de edición completa"), 400
+    datos = request.get_json(silent=True) or {}
+    modo = str(datos.get("modo", "fotografo") or "fotografo").strip().lower()
+    if modo not in ("fotografo", "indicado"):
+        modo = "fotografo"
+    protas = datos.get("protas", [])
+    quitar = datos.get("quitar", [])
+    nota = str(datos.get("nota", "") or "").strip()
+    if len(nota) > 300:
+        return jsonify(error="La nota no puede tener más de 300 caracteres"), 400
+    ok_p, err_p = _validar_cajas_indicacion(protas)
+    if not ok_p:
+        return jsonify(error=f"Cajas de protagonistas inválidas: {err_p}"), 400
+    ok_q, err_q = _validar_cajas_indicacion(quitar)
+    if not ok_q:
+        return jsonify(error=f"Cajas a quitar inválidas: {err_q}"), 400
+
+    cx.execute(
+        "INSERT OR REPLACE INTO indicacion (cliente_id, foto_id, modo, protas, quitar, nota, cuando) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (cid, foto_id, modo, json.dumps(protas), json.dumps(quitar), nota, ahora_iso()))
+    cx.commit()
+    return jsonify(ok=True, modo=modo, protas=protas, quitar=quitar, nota=nota)
+
+
 LARGO_COMENTARIO = 500
 
 
@@ -4294,24 +4613,31 @@ def trabajos_seleccion():
     return out
 
 
-def top_fotos_de(cx, gal, cid):
-    """Las elegidas de Claude/Pasa presentes en esta galeria, para la tira
-    'Top fotos de la fecha' arriba de /g/<slug>."""
-    modo = (gal["top_trabajo"] or "").strip() if "top_trabajo" in gal.keys() else ""
-    if modo == OCULTO:
-        return []
-    vende = bool(gal["venta"] and not gal["descargas"])
-    if not modo and not vende:
-        return []
-    rev = RAIZ_FOTOS / "_para_publicar"
-    if not rev.is_dir():
-        return []
+_TOP_LOCK = threading.Lock()
+_TOP_GAL_LOCKS = {}
+_TOP_CACHE = {}
+TOP_CACHE_TTL = 60.0
 
+
+def _top_lock_de(gid):
+    with _TOP_LOCK:
+        lk = _TOP_GAL_LOCKS.get(gid)
+        if lk is None:
+            lk = _TOP_GAL_LOCKS[gid] = threading.Lock()
+        return lk
+
+
+def _limpiar_top_cache():
+    with _TOP_LOCK:
+        _TOP_CACHE.clear()
+
+
+def _calcular_top_ids(cx, gal, modo, rev):
     filas = cx.execute(
         "SELECT id, ruta, tomada FROM foto WHERE galeria_id = ? ORDER BY orden, id",
         (gal["id"],)).fetchall()
     if not filas:
-        return []
+        return ()
 
     por_ruta = {r["ruta"]: r for r in filas}
     por_stem, por_clave = {}, {}
@@ -4325,7 +4651,7 @@ def top_fotos_de(cx, gal, cid):
     if modo:
         d = rev / modo
         if "/" in modo or "\\" in modo or not dentro_de_raiz(d) or not (d / "seleccion.json").is_file():
-            return []
+            return ()
         elegido_d = d
         fecha_d = _fecha_iso_en(d.name)
     else:
@@ -4350,7 +4676,7 @@ def top_fotos_de(cx, gal, cid):
                 elegido_d, fecha_d = d, f_tr
 
     if elegido_d is None:
-        return []
+        return ()
 
     sel = _seccion(elegido_d, "")
     ver = _veredictos(elegido_d)
@@ -4395,6 +4721,52 @@ def top_fotos_de(cx, gal, cid):
             ids.append(r["id"])
             if len(ids) >= MAX_TOP:
                 break
+    return tuple(ids)
+
+
+def top_fotos_de(cx, gal, cid):
+    """Las elegidas de Claude/Pasa presentes en esta galeria, para la tira
+    'Top fotos de la fecha' arriba de /g/<slug>."""
+    modo = (gal["top_trabajo"] or "").strip() if "top_trabajo" in gal.keys() else ""
+    if modo == OCULTO:
+        return []
+    vende = bool(gal["venta"] and not gal["descargas"])
+    if not modo and not vende:
+        return []
+    rev = RAIZ_FOTOS / "_para_publicar"
+    try:
+        if not rev.is_dir():
+            return []
+        rev_mt = rev.stat().st_mtime_ns
+    except OSError:
+        return []
+
+    cnt = cx.execute(
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM foto WHERE galeria_id = ?",
+        (gal["id"],)).fetchone()
+    if not cnt or not cnt[0]:
+        return []
+
+    clave = (str(RAIZ_FOTOS), gal["id"], modo, vende, gal["fecha"] or "",
+             rev_mt, cnt[0], cnt[1])
+    ahora = time.monotonic()
+    with _TOP_LOCK:
+        hit = _TOP_CACHE.get(clave)
+    if hit is not None and ahora - hit[0] < TOP_CACHE_TTL:
+        ids = hit[1]
+    else:
+        with _top_lock_de(gal["id"]):
+            ahora = time.monotonic()
+            with _TOP_LOCK:
+                hit = _TOP_CACHE.get(clave)
+            if hit is not None and ahora - hit[0] < TOP_CACHE_TTL:
+                ids = hit[1]
+            else:
+                ids = _calcular_top_ids(cx, gal, modo, rev)
+                with _TOP_LOCK:
+                    if len(_TOP_CACHE) > 256:
+                        _TOP_CACHE.clear()
+                    _TOP_CACHE[clave] = (time.monotonic(), ids)
     if not ids:
         return []
 
@@ -4549,6 +4921,7 @@ def _votar(trabajo, n):
     tmp = d / "revision.json.tmp"
     tmp.write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, d / "revision.json")
+    _limpiar_top_cache()
     return jsonify(ok=True, pasa=pasa, clase=_clase(entrada),
                    pasan=sum(1 for x in v.values() if x.get("pasa")),
                    faltan=sum(len(_seccion(d, s).get("elegidas", [])) for s in SECCIONES) - len(v))
@@ -4663,6 +5036,7 @@ def subir_logo():
     if not abrible(destino):
         destino.unlink(missing_ok=True)
         return redirect(url_for("logos_form", error="no es una imagen"))
+    _LOGOS_CACHE.pop(str(LOGOS), None)
     return redirect(url_for("logos_form"))
 
 
@@ -4676,6 +5050,7 @@ def borrar_logo():
     if ("/" not in nombre and "\\" not in nombre and f.is_file()
             and f.resolve().parent == LOGOS.resolve()):
         f.unlink()
+        _LOGOS_CACHE.pop(str(LOGOS), None)
     return redirect(url_for("logos_form"))
 
 
@@ -4746,15 +5121,108 @@ def restaurar_tarifas():
     return redirect(url_for("tarifas_form"))
 
 
+def _json_script(val):
+    return (json.dumps(val, ensure_ascii=False)
+            .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
+
+
+def _cotizacion_resumen(fila):
+    return {
+        "id": fila["id"],
+        "organizador": fila["organizador"],
+        "evento": fila["evento"],
+        "numero": fila["numero"],
+        "total": fila["total"],
+        "resumen": fila["resumen"],
+        "creada": fila["creada"],
+        "actualizada": fila["actualizada"],
+    }
+
+
+def _cotizaciones_lista(cx):
+    return [_cotizacion_resumen(r) for r in cx.execute(
+        "SELECT id, organizador, evento, numero, total, resumen, creada, actualizada "
+        "FROM cotizacion ORDER BY actualizada DESC, rowid DESC"
+    )]
+
+
 @app.get("/panel/cotizador")
 def cotizador():
     """La calculadora de cotizaciones para organizadores. Solo panel: Caddy
     la protege con basic_auth como al resto de /panel*."""
+    cx = db()
+    cid = (request.args.get("id") or "").strip()
+    inicial = None
+    if cid:
+        fila = cx.execute("SELECT * FROM cotizacion WHERE id = ?", (cid,)).fetchone()
+        if fila:
+            try:
+                datos = json.loads(fila["datos"])
+            except ValueError:
+                datos = {}
+            inicial = dict(_cotizacion_resumen(fila), datos=datos)
     return render_template_string(
         BASE_HTML, titulo="Cotizador \u00b7 panel",
         cuerpo=render_template_string(PANEL_CSS + PANEL_BARRA)
-        + "<script>const TARIFAS = %s;</script>" % json.dumps(tarifas())
+        + "<script>const TARIFAS = %s; const COTIZACIONES = %s; const COT_INICIAL = %s;</script>"
+        % (_json_script(tarifas()), _json_script(_cotizaciones_lista(cx)), _json_script(inicial))
         + PANEL_COTIZADOR)
+
+
+@app.get("/panel/cotizador/<cid>")
+def cotizador_leer(cid):
+    fila = db().execute("SELECT * FROM cotizacion WHERE id = ?", (cid,)).fetchone()
+    if not fila:
+        abort(404)
+    try:
+        datos = json.loads(fila["datos"])
+    except ValueError:
+        datos = {}
+    return jsonify({"ok": True, "cotizacion": dict(_cotizacion_resumen(fila), datos=datos)})
+
+
+@app.post("/panel/cotizador/guardar")
+def cotizador_guardar():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("datos"), dict):
+        abort(400)
+    cx = db()
+    cid = str(payload.get("id") or "").strip()[:60]
+    organizador = " ".join(str(payload.get("organizador") or "").split())[:100]
+    evento = " ".join(str(payload.get("evento") or "").split())[:120]
+    numero = " ".join(str(payload.get("numero") or "").split())[:60]
+    try:
+        total = max(0, int(round(float(payload.get("total") or 0))))
+    except (TypeError, ValueError):
+        total = 0
+    resumen = " ".join(str(payload.get("resumen") or "").split())[:200]
+    datos_json = json.dumps(payload["datos"], ensure_ascii=False)
+    ahora = ahora_iso()
+    existente = cx.execute("SELECT creada FROM cotizacion WHERE id = ?", (cid,)).fetchone() if cid else None
+    if existente:
+        cx.execute(
+            "UPDATE cotizacion SET organizador=?, evento=?, numero=?, total=?, "
+            "resumen=?, datos=?, actualizada=? WHERE id=?",
+            (organizador, evento, numero, total, resumen, datos_json, ahora, cid))
+    else:
+        if not cid:
+            base = re.sub(r"[^a-z0-9]+", "-", _norm(organizador or evento or "cot")).strip("-")[:24] or "cot"
+            cid = "%s-%s" % (base, secrets.token_hex(4))
+        cx.execute(
+            "INSERT INTO cotizacion (id, organizador, evento, numero, total, resumen, datos, creada, actualizada) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (cid, organizador, evento, numero, total, resumen, datos_json, ahora, ahora))
+    cx.commit()
+    fila = cx.execute("SELECT * FROM cotizacion WHERE id = ?", (cid,)).fetchone()
+    return jsonify({"ok": True, "cotizacion": _cotizacion_resumen(fila)})
+
+
+@app.post("/panel/cotizador/<cid>/borrar")
+def cotizador_borrar(cid):
+    cx = db()
+    cx.execute("DELETE FROM cotizacion WHERE id = ?", (cid,))
+    cx.commit()
+    return jsonify({"ok": True})
 
 
 @app.get("/panel/textos")
@@ -4928,6 +5396,7 @@ def ajustes(slug):
         top_tr = ""
     cx.execute("UPDATE galeria SET top_trabajo = ? WHERE id = ?",
                (top_tr or None, gal["id"]))
+    _limpiar_top_cache()
 
     # listas que se le crean al cliente: los ticks + las escritas a mano
     nombres = [n for n in request.form.getlist("lista_auto") if n in LISTAS_SUGERIDAS]
@@ -5082,8 +5551,9 @@ PANEL_BARRA = """<nav class="pbarra">
 {% set sec = request.path.split('/')[2] if request.path.count('/') > 1 else '' %}
 <a class="logo" href="/panel">rb<span>.</span>fotos</a>
 <div class="links">
-<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas','revision','revision-foto','cotizador','tarifas','editar') }}"
+<a href="/panel" class="{{ 'on' if sec not in ('subir','eventos','textos','logos','carpetas','revision','revision-foto','cotizador','tarifas','editar','trabajos') }}"
   >Galerias</a>
+<a href="/panel/trabajos" class="{{ 'on' if sec == 'trabajos' }}">Trabajos</a>
 <a href="/panel/revision" class="{{ 'on' if sec in ('revision','revision-foto') }}">Revision</a>
 <a href="/panel/carpetas" class="{{ 'on' if sec == 'carpetas' }}">Carpetas</a>
 <a href="/panel/subir" class="{{ 'on' if sec == 'subir' }}">Subir</a>
@@ -5351,6 +5821,8 @@ code{background:var(--panel);border:1px solid var(--linea);border-radius:2px;
 
 PANEL_VISOR = """
 <div id="pv" hidden><span id="pvpos"></span><img id="pvimg" alt="">
+<svg id="pvoverlay" style="position:fixed;pointer-events:none;z-index:95"></svg>
+<div id="pvnota" style="position:absolute;bottom:4.5rem;left:50%;transform:translateX(-50%);background:#181c16;border:1px solid #303a2c;border-radius:6px;padding:.4rem .9rem;font-size:.82rem;color:#eee;max-width:min(28rem,90vw);text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.6)" hidden></div>
 <button id="pvcerrar" title="Cerrar (Esc)">&times;</button>
 <button id="pvant" title="Anterior">&lsaquo;</button>
 <button id="pvsig" title="Siguiente">&rsaquo;</button>
@@ -5392,6 +5864,36 @@ function pvAbrir(i) {
   pvi = (i + pvs.length) % pvs.length;
   pvimg.src = pvs[pvi].src;
   pvpos.textContent = (pvi + 1) + " / " + pvs.length + "  ·  " + (pvs[pvi].dataset.ver || "");
+  const im = pvs[pvi];
+  const pvo = document.getElementById("pvoverlay");
+  const pvn = document.getElementById("pvnota");
+  if (pvo) pvo.innerHTML = "";
+  if (pvn) pvn.hidden = true;
+  pvimg.onload = () => {
+    if (!pvo) return;
+    const r = pvimg.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    pvo.style.left = r.left + "px";
+    pvo.style.top = r.top + "px";
+    pvo.style.width = r.width + "px";
+    pvo.style.height = r.height + "px";
+    pvo.setAttribute("viewBox", `0 0 ${r.width} ${r.height}`);
+    let protas = [], quitar = [];
+    try { protas = JSON.parse(im.dataset.protas || "[]"); } catch(_) {}
+    try { quitar = JSON.parse(im.dataset.quitar || "[]"); } catch(_) {}
+    let s = "";
+    protas.forEach(c => {
+      s += `<rect x="${c[0]*r.width}" y="${c[1]*r.height}" width="${(c[2]-c[0])*r.width}" height="${(c[3]-c[1])*r.height}" fill="rgba(74,222,128,0.22)" stroke="#4ade80" stroke-width="2"/>`;
+    });
+    quitar.forEach(c => {
+      s += `<rect x="${c[0]*r.width}" y="${c[1]*r.height}" width="${(c[2]-c[0])*r.width}" height="${(c[3]-c[1])*r.height}" fill="rgba(248,113,113,0.22)" stroke="#f87171" stroke-width="2"/>`;
+    });
+    pvo.innerHTML = s;
+  };
+  if (pvn && im.dataset.nota) {
+    pvn.textContent = "Nota: " + im.dataset.nota;
+    pvn.hidden = false;
+  }
   const caja = pvCaja(pvi);
   pvmarca.hidden = !caja;
   if (caja) {
@@ -5402,7 +5904,15 @@ function pvAbrir(i) {
   pv.hidden = false;
   document.body.style.overflow = "hidden";
 }
-function pvCerrar() { pv.hidden = true; pvimg.src = ""; document.body.style.overflow = ""; }
+function pvCerrar() {
+  pv.hidden = true;
+  pvimg.src = "";
+  const pvo = document.getElementById("pvoverlay");
+  if (pvo) pvo.innerHTML = "";
+  const pvn = document.getElementById("pvnota");
+  if (pvn) pvn.hidden = true;
+  document.body.style.overflow = "";
+}
 function pvMarcar() {
   const caja = pvCaja(pvi);
   if (!caja) return;
@@ -5631,8 +6141,10 @@ entregada los RAW pasan a <code>{{ win(compra.ent) }}\\RAW</code> y la carpeta d
 {% else %}<p><b>Entregada.</b> RAW y Export en <code>{{ win(compra.ent) }}</code></p>{% endif %}
 {% if compra.sin_raw %}<p class="nota">{{ compra.sin_raw }} foto(s) sin RAW vinculado: esas buscalas a mano.</p>{% endif %}
 </div>{% endif %}
-<div class="grid">{% for f in fotos %}<figure class="celda" style="margin:0">
-<img src="/panel/p/{{ f['id'] }}" loading="lazy" alt="" data-ver="{{ nombre(f['ruta']) }}">
+<div class="grid">{% for f in fotos %}<figure class="celda" style="margin:0;position:relative">
+<img src="/panel/p/{{ f['id'] }}" loading="lazy" alt="" data-ver="{{ nombre(f['ruta']) }}"
+  {% if ind_map and f['id'] in ind_map %}data-ind-modo="{{ ind_map[f['id']]['modo'] }}" data-protas='{{ ind_map[f['id']]['protas'] }}' data-quitar='{{ ind_map[f['id']]['quitar'] }}' data-nota="{{ ind_map[f['id']]['nota']|e }}"{% endif %}>
+{% if ind_map and f['id'] in ind_map and (ind_map[f['id']]['modo'] == 'indicado' or ind_map[f['id']]['nota']) %}<span class="nind" style="position:absolute;left:.4rem;bottom:.4rem;background:#000a;border-radius:1rem;padding:.1rem .5rem;font-size:.8rem;color:#4ade80" title="Tiene indicaciones">&#9998;</span>{% endif %}
 </figure>{% else %}<p>La lista esta vacia.</p>{% endfor %}</div>
 {% if fotos %}<h3>Los nombres de archivo</h3>
 <p class="nota">Separados por espacio, que es como los come el buscador de
@@ -6078,8 +6590,17 @@ def panel_lista(slug, lid):
             compra = {"estado": "error", "error": str(e)}
     if request.args.get("error"):
         compra = {"estado": "error", "error": request.args["error"]}
+    cx = db()
+    ind_map = {}
+    if fotos:
+        q_marks = ",".join("?" * len(fotos))
+        filas_ind = cx.execute(
+            f"SELECT foto_id, modo, protas, quitar, nota FROM indicacion "
+            f"WHERE cliente_id = ? AND foto_id IN ({q_marks})",
+            [l["cliente_id"]] + [f["id"] for f in fotos]).fetchall()
+        ind_map = {r["foto_id"]: dict(r) for r in filas_ind}
     return render_template_string(BASE_HTML, cuerpo=render_template_string(
-        PANEL_LISTA, gal=gal, l=l, fotos=fotos, nombre=os.path.basename,
+        PANEL_LISTA, gal=gal, l=l, fotos=fotos, ind_map=ind_map, nombre=os.path.basename,
         codigo=codigo_lista(lid), compra=compra, win=ruta_windows,
         # separados por espacio: es lo que Lightroom acepta de una
         # pegada. Un nombre con espacio adentro rompe la vuelta, pero
@@ -6359,6 +6880,15 @@ def panel(slug=None):
         "SELECT COUNT(*) AS total, COUNT(raw) AS con_raw, "
         "  SUM(descargable) AS descargables FROM foto WHERE galeria_id = ?",
         (gal["id"],)).fetchone()
+    total_ind = cx.execute(
+        "SELECT COUNT(DISTINCT i.foto_id) AS c FROM indicacion i "
+        "JOIN foto f ON f.id = i.foto_id WHERE f.galeria_id = ? "
+        "AND (i.modo = 'indicado' OR i.nota <> '')", (gal["id"],)).fetchone()["c"]
+    ind_por_lista = {r["lista_id"]: r["c"] for r in cx.execute(
+        "SELECT lf.lista_id, COUNT(DISTINCT i.foto_id) AS c FROM indicacion i "
+        "JOIN lista_foto lf ON lf.foto_id = i.foto_id "
+        "JOIN lista l ON l.id = lf.lista_id AND l.cliente_id = i.cliente_id "
+        "WHERE (i.modo = 'indicado' OR i.nota <> '') GROUP BY lf.lista_id").fetchall()}
     calentadas, _total_cal = calentadas_de(cx, gal["id"])
     # cuatro repartidas a lo largo de la galeria: la primera y la ultima
     # suelen ser del calentamiento, y en el medio esta el partido de verdad
@@ -6395,6 +6925,7 @@ def panel(slug=None):
             caras_de=caras_por_cli, caras_sueltas=caras_sueltas,
             hora_local=hora_local, marcas=MARCAS,
             total=cuenta["total"], con_raw=cuenta["con_raw"],
+            total_ind=total_ind, ind_por_lista=ind_por_lista,
             descargables=cuenta["descargables"] or 0,
             calentadas=calentadas,
             corriendo=_calentando(gal["slug"]) or en_notebook(gal["slug"]),
@@ -6455,11 +6986,18 @@ header .tit span b{font:inherit;letter-spacing:inherit;color:#fff}
 #plistas{right:2.2rem;border-radius:0}
 .celda .ncom{position:absolute;left:.4rem;top:.4rem;background:#000a;
   border-radius:1rem;padding:.1rem .5rem;font-size:.75rem}
+.celda .nind{position:absolute;left:.4rem;bottom:.4rem;background:#000a;
+  border-radius:1rem;padding:.1rem .5rem;font-size:.8rem;color:#4ade80}
 /* arriba del visor (z-index 50): con 40 el cajon se abria detras del fondo
    negro y parecia que el boton no hacia nada */
 #pcom{position:fixed;left:50%;transform:translateX(-50%);bottom:5.2rem;z-index:60;
   width:min(30rem,92vw);max-height:60vh;overflow:auto;background:#1b1b1b;
   border:1px solid #333;border-radius:8px;padding:.8rem}
+#pind{position:fixed;left:50%;transform:translateX(-50%);bottom:5.2rem;z-index:60;
+  width:min(23rem,92vw);max-height:65vh;overflow-y:auto;background:#181c16;
+  border:1px solid #303a2c;border-radius:8px;padding:.8rem;box-shadow:0 10px 30px rgba(0,0,0,.6);color:#eee}
+#vind{font-size:.8rem;padding:.35rem .7rem}
+#vind.on{background:var(--cancha);color:#0b0f09}
 #pcom .uno{padding:.45rem 0;border-bottom:1px solid #2a2a2a}
 #pcom .uno:last-of-type{border-bottom:0}
 #pcom textarea{width:100%;background:#111;color:#eee;border:1px solid #333;
@@ -6683,7 +7221,6 @@ header.pcab{position:fixed;top:0;left:0;right:0;min-height:var(--barra)}
   #blistas{grid-column:2;grid-row:1;margin-left:0;padding:.35rem .6rem;font-size:.82rem}
   .bcomprar{grid-column:3;grid-row:1;padding:.35rem .7rem;font-size:.82rem}
   #plistas{right:.6rem;left:.6rem;width:auto}
-}
 }
 #blistas{margin-left:auto;background:#1f1f1f;border:1px solid #3a3a3a;color:#eee;
   border-radius:7px;padding:.45rem .9rem;cursor:pointer;font-size:.9rem}
@@ -8593,6 +9130,7 @@ visor.addEventListener("click", ev => { if (ev.target === visor) visor.close(); 
 CELDAS = """{% for f in fotos %}<figure class="celda" style="margin:0">
 <img data-src="/p/{{ f['id'] }}" decoding="async" alt="" draggable="false">
 {% if repetidas and f['en_listas'] %}<span class="enls">{{ f['en_listas'] }}</span>{% endif %}
+{% if f['tiene_ind'] %}<span class="nind" title="Tiene indicaciones">&#9998;</span>{% endif %}
 {% if gal['comentarios'] and f['ncom'] %}<span class="ncom" title="comentarios">&#128172; {{ f['ncom'] }}</span>{% endif %}
 <div class="acc">
 <button class="fav {{ 'on' if f['mia'] }}" data-id="{{ f['id'] }}" title="Me gusta"></button>
@@ -8630,7 +9168,7 @@ document.getElementById('bterminar').onclick = async function () {
 {% if vende %}<a class="bcomprar" href="/g/{{ gal['slug'] }}/comprar">Comprar
 <b id="ncar">{{ ncarro }}</b></a>{% endif %}</header>
 <main>{% if tapa and not lista %}<section class="tapa">
-<img src="/portada/{{ gal['slug'] }}?v={{ gal['portada_archivo'] or gal['portada_foto_id'] }}" alt="">
+{{ foto(url_tapa(gal), "100vw", grande=2200, alt="", fetchpriority="high") }}
 <div class="cen">
 <h1>{{ gal['nombre'] }}</h1>
 <p class="fecha">{{ gal['creada'][:10] }}</p>
@@ -8708,14 +9246,52 @@ lista y toca el corazon de la foto.</p>{% endif %}
    iPhone convierte su HEIC a JPEG antes de subir #}
 <label>Buscar mis fotos con una selfie
 <input type="file" name="selfie" accept="image/jpeg,image/png" hidden id="icara"></label>
-<span id="ocara" hidden>Buscando tu cara en las fotos, tarda unos 15 segundos...</span>
+<span id="ocara" hidden>Buscando tu cara en las fotos, tarda unos segundos...</span>
 <small>La selfie solo se usa para buscar y se borra al instante.</small>
 </form>
 <script>
-document.getElementById('icara').onchange = function () {
-  document.getElementById('ocara').hidden = false;
-  this.form.submit();
-};
+(function () {
+  var inp = document.getElementById('icara'), lbl = inp.parentElement, enviando = false;
+  function soltar() {
+    enviando = false;
+    inp.disabled = false;
+    lbl.style.pointerEvents = '';
+    lbl.style.opacity = '';
+  }
+  window.addEventListener('pageshow', soltar);
+  inp.onchange = function () {
+    var f = inp.files[0];
+    if (!f || enviando) return;
+    enviando = true;
+    lbl.style.pointerEvents = 'none';
+    lbl.style.opacity = '.6';
+    document.getElementById('ocara').hidden = false;
+    // la selfie del telefono pesa 3-15 MB y en la cancha sube lento: a 960 px
+    // la cara sobra (el detector usa 640 px). <img> ya viene derecha segun el EXIF;
+    // si toBlob devuelve null (falta de RAM en el celular), cae a la original.
+    if (!window.DataTransfer) return inp.form.submit();
+    var im = new Image();
+    im.onerror = function () { inp.form.submit(); };
+    im.onload = function () {
+      var k = Math.min(1, 960 / Math.max(im.naturalWidth, im.naturalHeight)),
+          c = document.createElement('canvas');
+      c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(im.src);
+      c.toBlob(function (b) {
+        if (b && b.size > 0) {
+          try {
+            var dt = new DataTransfer();
+            dt.items.add(new File([b], 'selfie.jpg', {type: 'image/jpeg'}));
+            inp.files = dt.files;
+          } catch (e) {}
+        }
+        inp.form.submit();
+      }, 'image/jpeg', 0.85);
+    };
+    im.src = URL.createObjectURL(f);
+  };
+})();
 </script>
 {% if cara %}<p class="nota">Apareces en <b>{{ total }}</b> fotos.
 <a href="?por={{ por }}&amp;dir={{ 'desc' if dire == 'DESC' else 'asc' }}">ver todas</a></p>
@@ -8741,16 +9317,48 @@ todas</a></p>{% endif %}
 
 <div id="pop" class="pop" hidden></div>
 {% if gal['comentarios'] %}<div id="pcom" hidden></div>{% endif %}
+<div id="pind" hidden>
+  <p class="ptit" style="margin:0 0 .5rem;font-weight:600;font-size:.9rem;color:#eee">Indicaciones de edición</p>
+  <div style="display:flex;flex-direction:column;gap:.4rem;font-size:.82rem;margin-bottom:.5rem">
+    <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+      <input type="radio" name="ind_modo" value="fotografo" checked>
+      <span>Dejar que el fotógrafo decida la composición</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+      <input type="radio" name="ind_modo" value="protas">
+      <span style="color:#4ade80">&#9632; Marcar protagonistas</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+      <input type="radio" name="ind_modo" value="quitar">
+      <span style="color:#f87171">&#9632; Marcar algo a quitar</span>
+    </label>
+  </div>
+  <p id="ind_ayuda" style="margin:.3rem 0;font-size:.75rem;opacity:.75;line-height:1.3" hidden>
+    Arrastra el dedo o mouse sobre la foto para marcar rectángulos.
+  </p>
+  <div id="ind_acciones_cajas" style="display:flex;gap:.4rem;margin:.3rem 0" hidden>
+    <button type="button" class="btn" id="ind_borrar_ultimo" style="font-size:.72rem;padding:.2rem .5rem">Borrar último</button>
+    <button type="button" class="btn hueco" id="ind_limpiar" style="font-size:.72rem;padding:.2rem .5rem">Limpiar todo</button>
+  </div>
+  <textarea id="ind_nota" maxlength="300" placeholder="Nota opcional (máx 300 caracteres)"
+    style="width:100%;box-sizing:border-box;background:#111;color:#eee;border:1px solid #333;border-radius:6px;padding:.4rem;font:inherit;font-size:.82rem;resize:vertical;min-height:2.8rem;margin:.4rem 0"></textarea>
+  <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:.4rem">
+    <button type="button" class="btn hueco" id="ind_cancelar" style="font-size:.78rem;padding:.3rem .7rem">Cancelar</button>
+    <button type="button" class="btn" id="ind_guardar" style="font-size:.78rem;padding:.3rem .7rem">Guardar</button>
+  </div>
+</div>
 <div id="aviso" class="aviso" hidden role="status"></div>
 <div id="visor" hidden>
   <span class="vpos" id="vpos"></span>
   <button class="cerrar" id="vcerrar" title="Cerrar (Esc)">&times;</button>
   <button class="ant" id="vant" title="Anterior">&lsaquo;</button>
   <img id="vimg" alt="" draggable="false">
+  <svg id="voverlay" style="position:fixed;pointer-events:none;z-index:55"></svg>
   <button class="sig" id="vsig" title="Siguiente">&rsaquo;</button>
   <div class="vacc">
     <button id="vlike" title="Me gusta (z)"></button>
     <button id="vlistas" title="Elegir en que listas va (l)">&#9776;</button>
+    <button id="vind" title="Indicaciones" hidden>Indicaciones</button>
     {% if gal['comentarios'] %}<button id="vcom" title="Comentarios (k)">&#128172;</button>{% endif %}
     {% if vende %}<button id="vcar" title="Agregar al carrito (c)"></button>{% endif %}
     {% if gal['descargas'] %}<a id="vdl" title="Descargar JPG">&#8595;</a>
@@ -8768,14 +9376,25 @@ const ncar = document.getElementById("ncar");
 const vcar = document.getElementById("vcar");
 function pintarCarrito(n) { if (ncar) ncar.textContent = n; }
 
+const enCursoCar = new Set(), enCursoFav = new Set();
+
 async function alCarrito(id) {
-  const r = await fetch("/api/carrito", {method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({foto_id: +id})});
-  if (!r.ok) return null;
-  const d = await r.json();
-  pintarCarrito(d.carrito);
-  return d.en;
+  if (enCursoCar.has(id)) return null;
+  enCursoCar.add(id);
+  try {
+    const r = await fetch("/api/carrito", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({foto_id: +id})});
+    if (!r.ok) { avisar("No se pudo actualizar el carrito"); return null; }
+    const d = await r.json();
+    pintarCarrito(d.carrito);
+    return d.en;
+  } catch (e) {
+    avisar("Sin conexion, intenta de nuevo");
+    return null;
+  } finally {
+    enCursoCar.delete(id);
+  }
 }
 let figs = [];
 const topFigs = [...document.querySelectorAll("#toptira .tcelda")];
@@ -8787,16 +9406,25 @@ function syncCar(id, en) {
 }
 
 async function marcar(id) {
-  const r = await fetch("/api/megusta", {method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({foto_id: +id})});
-  if (!r.ok) return null;
-  const d = await r.json();
-  // los numeros de Listas se repintan al tiro: si quedaban quietos hasta
-  // reabrir el menu, el cliente creia que no habia entrado y tocaba de nuevo
-  pintarListas(d);
-  avisar((d.mia ? "Agregada a " : "Sacada de ") + d.en.join(" y "));
-  return d.mia;
+  if (enCursoFav.has(id)) return null;
+  enCursoFav.add(id);
+  try {
+    const r = await fetch("/api/megusta", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({foto_id: +id})});
+    if (!r.ok) { avisar("No se pudo guardar, intenta de nuevo"); return null; }
+    const d = await r.json();
+    // los numeros de Listas se repintan al tiro: si quedaban quietos hasta
+    // reabrir el menu, el cliente creia que no habia entrado y tocaba de nuevo
+    pintarListas(d);
+    avisar((d.mia ? "Agregada a " : "Sacada de ") + d.en.join(" y "));
+    return d.mia;
+  } catch (e) {
+    avisar("Sin conexion, intenta de nuevo");
+    return null;
+  } finally {
+    enCursoFav.delete(id);
+  }
 }
 
 // aviso corto abajo: que hizo el ultimo toque
@@ -8854,7 +9482,16 @@ function cablearAcciones(fig, alAbrir) {
   return im;
 }
 
-topFigs.forEach((fig, k) => cablearAcciones(fig, () => abrir(k, topFigs)));
+topFigs.forEach((fig, k) => {
+  const im = cablearAcciones(fig, () => abrir(k, topFigs));
+  const base = im.getAttribute("src");
+  im.addEventListener("error", () => {
+    const n = +im.dataset.intento || 0;
+    if (n >= 2) return;
+    im.dataset.intento = n + 1;
+    setTimeout(() => { im.src = base + "?r=" + (n + 1); }, 800 * (n + 1));
+  });
+});
 const topTira = document.getElementById("toptira");
 if (topTira) {
   const ti = document.getElementById("topIzq"), td = document.getElementById("topDer");
@@ -8897,7 +9534,7 @@ function lejania(im) {
   return r.bottom < 0 ? -r.bottom : Math.max(0, r.top - innerHeight);
 }
 function repartir() {
-  [...cerca].filter(im => !im.dataset.vuela)
+  [...cerca].filter(im => !im.dataset.vuela && !im.dataset.espera)
     .sort((a, b) => lejania(a) - lejania(b))
     .slice(0, Math.max(0, EN_VUELO - vuelan))
     .forEach(im => {
@@ -8917,8 +9554,14 @@ function bajada(im, ok) {
   delete im.dataset.vuela;
   vuelan--;
   const n = +im.dataset.intento || 0;
-  if (!ok && n < 2) im.dataset.intento = n + 1;  // sigue en `cerca`: se repide
-  else {
+  if (!ok && n < 2) {
+    im.dataset.intento = n + 1;
+    im.dataset.espera = "1";
+    setTimeout(() => {
+      delete im.dataset.espera;
+      if (cerca.has(im)) repartir();
+    }, 700 * (n + 1));
+  } else {
     cerca.delete(im);
     ojo.unobserve(im);                           // lista (o rota de verdad)
     if (!ok) retirarSiNoExiste(im);
@@ -8927,10 +9570,15 @@ function bajada(im, ok) {
 }
 // Una foto que el servidor ya no tiene (404: la borraron del disco con la
 // pagina abierta) se saca de la grilla en vez de quedar como icono roto. Solo
-// con 404: si lo que fallo es la red, la celda se queda y carga al recargar.
+// con 404: si lo que fallo es la red o 503, la celda se queda y se reintenta.
 async function retirarSiNoExiste(im) {
   try {
     const r = await fetch(im.dataset.src, {method: "HEAD"});
+    if (r.ok) {
+      const q = (CARA ? "cara=" + encodeURIComponent(CARA) + "&" : "") + "r=3";
+      im.src = im.dataset.src + "?" + q;
+      return;
+    }
     if (r.status !== 404) return;
   } catch (e) { return; }
   const fig = im.closest(".celda");
@@ -8971,14 +9619,20 @@ function masFotos() {
       u.searchParams.set("hasta", HASTA);
     }
     const r = await fetch(u);
+    if (!r.ok) throw new Error(r.status);
     const html = (await r.text()).trim();
-    if (!r.ok || !html) hayMas = false;
+    if (!html) hayMas = false;
     else {
       pagina++;
       fin.insertAdjacentHTML("beforebegin", html);
       enganchar();
     }
-  } catch (e) { /* se reintenta solo en el proximo scroll */ }
+  } catch (e) {
+    cargando = null;
+    fin.innerHTML = '<button type="button" class="btn hueco" id="reintentarMas">No cargaron más fotos · Reintentar</button>';
+    document.getElementById("reintentarMas").onclick = () => masFotos();
+    return;
+  }
   cargando = null;
   fin.textContent = hayMas ? "" : "no hay mas fotos";
   })();
@@ -9153,15 +9807,37 @@ function abrir(i, lista) {
   else vimg.removeAttribute("src");
   const grande = vGrande = new Image();
   precargas = [];
+  let gIntentos = 0;
   grande.onload = () => {
     if (vGrande !== grande) return;              // ya pasaste a otra
     vimg.src = grande.src;
     vListo();
     precargar(fig);
+    if (typeof ajustarOverlay === "function") ajustarOverlay();
   };
-  grande.onerror = () => { if (vGrande === grande) vListo(); };
+  grande.onerror = () => {
+    if (vGrande !== grande) return;
+    if (gIntentos < 2) {
+      gIntentos++;
+      setTimeout(() => {
+        if (vGrande === grande) grande.src = "/p/" + id + "?g=1&r=" + gIntentos;
+      }, 700 * gIntentos);
+      return;
+    }
+    vListo();
+    avisar("No se pudo cargar en alta resolucion");
+  };
   grande.src = "/p/" + id + "?g=1";
   if (pcom) pcom.hidden = true;
+  if (typeof pind !== "undefined" && pind) pind.hidden = true;
+  if (typeof voverlay !== "undefined" && voverlay) {
+    voverlay.innerHTML = "";
+    voverlay.style.pointerEvents = "none";
+    voverlay.hidden = true;
+  }
+  if (typeof vind !== "undefined" && vind) {
+    vind.hidden = !completasIds.has(+id);
+  }
   // "la vio" es que haya quedado en pantalla, no que el navegador la haya
   // bajado: pasando en seco con la flecha apretada no cuenta ninguna
   clearTimeout(tVisto);
@@ -9183,12 +9859,12 @@ function abrir(i, lista) {
   visor.hidden = false;
   document.body.style.overflow = "hidden";
 }
-// precarga 3 hacia donde vas y 1 para atras: al avanzar la foto ya esta en
+// precarga 2 hacia donde vas y 1 para atras: al avanzar la foto ya esta en
 // el navegador. Recien cuando llego la actual: antes partian juntas y la que
 // estabas abriendo se repartia el ancho de banda con las otras tres.
 // Se guardan las Image: sin referencia la descarga se cancela.
 function precargar(fig) {
-  precargas = [1, 2, 3, -1].map(k => {
+  precargas = [1, -1, 2].map(k => {
     const v = vLista[(idx + k * rumbo + vLista.length) % vLista.length];
     if (!v || v === fig) return null;
     const im = new Image();
@@ -9199,6 +9875,12 @@ function precargar(fig) {
 function cerrar() {
   clearTimeout(tVisto);
   if (pcom) pcom.hidden = true;
+  if (typeof pind !== "undefined" && pind) pind.hidden = true;
+  if (typeof voverlay !== "undefined" && voverlay) {
+    voverlay.innerHTML = "";
+    voverlay.style.pointerEvents = "none";
+    voverlay.hidden = true;
+  }
   visor.hidden = true;
   vGrande = null;
   precargas = [];
@@ -9350,13 +10032,18 @@ async function abrirPop(fid, ancla) {
   const y = b.top - pop.offsetHeight - 8 > 8 ? b.top - pop.offsetHeight - 8 : b.bottom + 8;
   pop.style.top = Math.max(8, Math.min(y, innerHeight - pop.offsetHeight - 8)) + "px";
   pop.querySelectorAll("input").forEach(i => i.onchange = async () => {
-    const r2 = await fetch(`/api/listas/${SLUG}/${i.dataset.l}/foto`, {method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({foto_id: +fid, en: i.checked})});
-    if (!r2.ok) { i.checked = !i.checked; return; }
-    pintarListas(await r2.json());
-    refrescarCorazones();
-    avisar((i.checked ? "Agregada a " : "Sacada de ") + i.parentNode.textContent.trim());
+    try {
+      const r2 = await fetch(`/api/listas/${SLUG}/${i.dataset.l}/foto`, {method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({foto_id: +fid, en: i.checked})});
+      if (!r2.ok) { i.checked = !i.checked; avisar("No se pudo actualizar la lista"); return; }
+      pintarListas(await r2.json());
+      refrescarCorazones();
+      avisar((i.checked ? "Agregada a " : "Sacada de ") + i.parentNode.textContent.trim());
+    } catch (e) {
+      i.checked = !i.checked;
+      avisar("Sin conexion, intenta de nuevo");
+    }
   });
 }
 document.addEventListener("click", e => {
@@ -9414,6 +10101,242 @@ visor.addEventListener("touchend", e => {
   x0 = null;
   if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) navegar(dx < 0 ? 1 : -1);
 }, {passive: true});
+
+// ------------------------------------------------ indicaciones de encuadre
+const completasIds = new Set({{ completas_ids|default([])|tojson }});
+const vind = document.getElementById("vind");
+const pind = document.getElementById("pind");
+const voverlay = document.getElementById("voverlay");
+const indAyuda = document.getElementById("ind_ayuda");
+const indAccCajas = document.getElementById("ind_acciones_cajas");
+const indBorrarUltimo = document.getElementById("ind_borrar_ultimo");
+const indLimpiar = document.getElementById("ind_limpiar");
+const indNota = document.getElementById("ind_nota");
+const indCancelar = document.getElementById("ind_cancelar");
+const indGuardar = document.getElementById("ind_guardar");
+const indModos = pind ? pind.querySelectorAll("input[name=ind_modo]") : [];
+
+let indActual = {modo: "fotografo", protas: [], quitar: [], nota: ""};
+let indHistorial = [];
+let indArrastrando = false;
+let indX0 = 0, indY0 = 0;
+
+function ajustarOverlay() {
+  if (!voverlay || !vimg) return;
+  const r = vimg.getBoundingClientRect();
+  if (!r.width || !r.height) { voverlay.hidden = true; return; }
+  voverlay.style.left = r.left + "px";
+  voverlay.style.top = r.top + "px";
+  voverlay.style.width = r.width + "px";
+  voverlay.style.height = r.height + "px";
+  voverlay.setAttribute("viewBox", `0 0 ${r.width} ${r.height}`);
+  voverlay.hidden = false;
+  repintarOverlay();
+}
+
+function repintarOverlay(cajaTemp) {
+  if (!voverlay || !vimg) return;
+  const r = vimg.getBoundingClientRect();
+  const w = r.width, h = r.height;
+  if (!w || !h) return;
+  let svg = "";
+  (indActual.protas || []).forEach(c => {
+    const x = c[0] * w, y = c[1] * h, bw = (c[2] - c[0]) * w, bh = (c[3] - c[1]) * h;
+    svg += `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="rgba(74,222,128,0.22)" stroke="#4ade80" stroke-width="2"/>`;
+  });
+  (indActual.quitar || []).forEach(c => {
+    const x = c[0] * w, y = c[1] * h, bw = (c[2] - c[0]) * w, bh = (c[3] - c[1]) * h;
+    svg += `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="rgba(248,113,113,0.22)" stroke="#f87171" stroke-width="2"/>`;
+  });
+  if (cajaTemp) {
+    const col = cajaTemp.tipo === "protas" ? "#4ade80" : "#f87171";
+    const fill = cajaTemp.tipo === "protas" ? "rgba(74,222,128,0.3)" : "rgba(248,113,113,0.3)";
+    const x = cajaTemp.box[0] * w, y = cajaTemp.box[1] * h;
+    const bw = (cajaTemp.box[2] - cajaTemp.box[0]) * w, bh = (cajaTemp.box[3] - cajaTemp.box[1]) * h;
+    svg += `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="${fill}" stroke="${col}" stroke-width="2" stroke-dasharray="4"/>`;
+  }
+  voverlay.innerHTML = svg;
+  const totalC = (indActual.protas || []).length + (indActual.quitar || []).length;
+  if (indAccCajas) indAccCajas.hidden = totalC === 0;
+  if (indBorrarUltimo) indBorrarUltimo.hidden = totalC === 0;
+}
+
+function modoSeleccionado() {
+  const sel = pind ? pind.querySelector("input[name=ind_modo]:checked") : null;
+  return sel ? sel.value : "fotografo";
+}
+
+function actualizarInteraccion() {
+  const m = modoSeleccionado();
+  const dibuja = (m === "protas" || m === "quitar") && pind && !pind.hidden;
+  if (voverlay) {
+    voverlay.style.pointerEvents = dibuja ? "auto" : "none";
+    voverlay.style.touchAction = dibuja ? "none" : "auto";
+    voverlay.style.cursor = dibuja ? "crosshair" : "default";
+  }
+  if (indAyuda) indAyuda.hidden = !dibuja;
+}
+
+if (voverlay) {
+  voverlay.addEventListener("pointerdown", e => {
+    const m = modoSeleccionado();
+    if (m !== "protas" && m !== "quitar") return;
+    const r = voverlay.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    indArrastrando = true;
+    try { voverlay.setPointerCapture(e.pointerId); } catch (_) {}
+    indX0 = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    indY0 = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+  });
+
+  voverlay.addEventListener("pointermove", e => {
+    if (!indArrastrando) return;
+    const m = modoSeleccionado();
+    const r = voverlay.getBoundingClientRect();
+    const x1 = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const y1 = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+    const box = [Math.min(indX0, x1), Math.min(indY0, y1), Math.max(indX0, x1), Math.max(indY0, y1)];
+    repintarOverlay({tipo: m, box: box});
+  });
+
+  const finTrazo = e => {
+    if (!indArrastrando) return;
+    indArrastrando = false;
+    try { voverlay.releasePointerCapture(e.pointerId); } catch (_) {}
+    const m = modoSeleccionado();
+    const r = voverlay.getBoundingClientRect();
+    const x1 = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const y1 = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+    const bx1 = Math.min(indX0, x1), bx2 = Math.max(indX0, x1);
+    const by1 = Math.min(indY0, y1), by2 = Math.max(indY0, y1);
+    if (bx2 - bx1 >= 0.02 && by2 - by1 >= 0.02) {
+      const arr = m === "protas" ? indActual.protas : indActual.quitar;
+      if (arr.length < 6) {
+        arr.push([round4(bx1), round4(by1), round4(bx2), round4(by2)]);
+        indHistorial.push(m);
+      } else {
+        avisar("Máximo 6 cajas");
+      }
+    }
+    repintarOverlay();
+  };
+
+  voverlay.addEventListener("pointerup", finTrazo);
+  voverlay.addEventListener("pointercancel", finTrazo);
+}
+
+function round4(n) { return Math.round(n * 10000) / 10000; }
+
+if (indBorrarUltimo) {
+  indBorrarUltimo.onclick = () => {
+    const ultimo = indHistorial.pop();
+    if (ultimo === "protas" && indActual.protas.length) indActual.protas.pop();
+    else if (ultimo === "quitar" && indActual.quitar.length) indActual.quitar.pop();
+    else if (indActual.protas.length) indActual.protas.pop();
+    else if (indActual.quitar.length) indActual.quitar.pop();
+    repintarOverlay();
+  };
+}
+
+if (indLimpiar) {
+  indLimpiar.onclick = () => {
+    indActual.protas = [];
+    indActual.quitar = [];
+    indHistorial = [];
+    repintarOverlay();
+  };
+}
+
+indModos.forEach(radio => {
+  radio.addEventListener("change", () => {
+    actualizarInteraccion();
+  });
+});
+
+if (vind) {
+  vind.onclick = async () => {
+    if (!pind.hidden) {
+      pind.hidden = true;
+      actualizarInteraccion();
+      return;
+    }
+    if (pcom) pcom.hidden = true;
+    if (pop) pop.hidden = true;
+    const fid = boton(vLista[idx]).dataset.id;
+    const r = await fetch("/api/indicacion/" + fid);
+    if (r.ok) {
+      const d = await r.json();
+      indActual = {
+        modo: d.modo || "fotografo",
+        protas: d.protas || [],
+        quitar: d.quitar || [],
+        nota: d.nota || ""
+      };
+      indHistorial = [];
+      indActual.protas.forEach(() => indHistorial.push("protas"));
+      indActual.quitar.forEach(() => indHistorial.push("quitar"));
+      if (indNota) indNota.value = indActual.nota;
+      const rad = pind.querySelector(`input[name=ind_modo][value="${indActual.modo}"]`) ||
+                  pind.querySelector("input[name=ind_modo][value=fotografo]");
+      if (rad) rad.checked = true;
+      ajustarOverlay();
+      pind.hidden = false;
+      actualizarInteraccion();
+    }
+  };
+}
+
+if (indGuardar) {
+  indGuardar.onclick = async () => {
+    const fid = boton(vLista[idx]).dataset.id;
+    const selModo = modoSeleccionado();
+    const payload = {
+      modo: selModo,
+      protas: selModo === "fotografo" ? [] : indActual.protas,
+      quitar: selModo === "fotografo" ? [] : indActual.quitar,
+      nota: (indNota ? indNota.value : "").trim().slice(0, 300)
+    };
+    const r = await fetch("/api/indicacion/" + fid, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload)
+    });
+    if (r.ok) {
+      pind.hidden = true;
+      actualizarInteraccion();
+      avisar("Indicación guardada");
+      const tiene = payload.modo === "indicado" || payload.nota.length > 0;
+      figs.filter(f => boton(f).dataset.id === fid).forEach(fig => {
+        let n = fig.querySelector(".nind");
+        if (tiene) {
+          if (!n) {
+            n = document.createElement("span");
+            n.className = "nind";
+            n.title = "Tiene indicaciones";
+            n.innerHTML = "&#9998;";
+            fig.appendChild(n);
+          }
+        } else if (n) {
+          n.remove();
+        }
+      });
+    } else {
+      const d = await r.json().catch(() => ({}));
+      avisar(d.error || "No se pudo guardar la indicación");
+    }
+  };
+}
+
+if (indCancelar) {
+  indCancelar.onclick = () => {
+    pind.hidden = true;
+    actualizarInteraccion();
+    repintarOverlay();
+  };
+}
+addEventListener("resize", () => {
+  if (typeof ajustarOverlay === "function" && !visor.hidden) ajustarOverlay();
+});
 </script>"""
 
 PANEL_INDICE = PANEL_CSS + PANEL_BARRA + """<main>
@@ -10167,8 +11090,9 @@ estos campos (n&uacute;mero inv&aacute;lido, negativo o un porcentaje de 100 o m
 #   con conteo. Cualquiera puede ir como cortesia.
 # - Boleta de honorarios: el total se brutea con la retencion (15,25 % en
 #   2026), asi el cliente transfiere el total y la retencion la declara Renzo.
-# Lo escrito en el formulario se guarda en localStorage del navegador: no toca
-# la base. Los datos de transferencia se llenan una vez y quedan ahi.
+# Lo escrito se guarda en la tabla `cotizacion` de galeria.db (por organizador
+# y evento) para poder abrir y revisar cotizaciones anteriores desde cualquier
+# dispositivo. Los datos de transferencia tambien quedan guardados localmente.
 PANEL_COTIZADOR = r"""<main class="cotz">
 <style>
 /* El cotizador para organizadores. El formulario va con el tema oscuro del
@@ -10178,6 +11102,42 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 .cotz{--cz-tinta:#16181d;--cz-tenue:#5b616e;--cz-linea:#e3e5ea;--cz-papel:#fff;
   --cz-marca:#d98a2b;--cz-marca-suave:#fdf3e6;--cz-ok:#2f7d4f;--cz-ok-suave:#e8f4ec;
   --cz-alerta:#a4441c;--cz-c1:#2b4c7e;--cz-c2:#d98a2b;--cz-c3:#6a8f3f;--cz-c4:#8a5a9e;--cz-c5:#9aa1ad}
+.cotz .btn+.btn{margin-left:0}
+.cotz .btn{cursor:pointer}
+.cotz .btn.cz-chico{font-size:.58rem;padding:.24rem .52rem}
+
+/* ---------- indice de organizadores y cotizaciones ---------- */
+.cotz .cz-indice{max-width:960px;margin:0 auto}
+.cotz .cz-ind-cab{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-bottom:1.2rem}
+.cotz .cz-ind-cab h1{margin:0 0 .2rem;font-size:1.35rem;color:var(--cal)}
+.cotz .cz-ind-cab .cz-sub{color:var(--humo);font-size:.82rem;margin:0}
+.cotz .cz-ind-acciones{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+.cotz .cz-ind-acciones input{min-width:14rem;font-size:.86rem;padding:.45rem .65rem}
+.cotz .cz-org{background:var(--panel);border:1px solid var(--linea);border-radius:3px;padding:.9rem 1rem;margin-bottom:.9rem}
+.cotz .cz-org-cab{display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap;padding-bottom:.65rem;border-bottom:1px solid var(--linea)}
+.cotz .cz-org-nom{font-size:1.05rem;font-weight:600;color:var(--cal)}
+.cotz .cz-org-meta{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--humo);margin-top:.1rem}
+.cotz .cz-ev{margin-top:.75rem;padding-left:.85rem;border-left:2px solid var(--linea2)}
+.cotz .cz-ev-cab{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.35rem}
+.cotz .cz-ev-nom{font-size:.94rem;font-weight:600;color:var(--cal)}
+.cotz .cz-cot-fila{display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap;padding:.48rem .55rem;border-top:1px solid var(--linea);border-radius:2px}
+.cotz .cz-cot-fila:hover{background:rgba(255,255,255,.025)}
+.cotz .cz-cot-info{all:unset;cursor:pointer;display:flex;gap:.7rem;align-items:baseline;flex-wrap:wrap;flex:1;min-width:12rem}
+.cotz .cz-cot-info:hover .cz-cot-num{color:var(--cancha)}
+.cotz .cz-cot-num{font-family:var(--mono);font-size:.8rem;font-weight:600;color:var(--cal)}
+.cotz .cz-cot-res{font-size:.84rem;color:var(--humo)}
+.cotz .cz-cot-fec{font-family:var(--mono);font-size:.68rem;color:var(--humo);opacity:.75}
+.cotz .cz-cot-der{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
+.cotz .cz-cot-tot{font-family:var(--mono);font-size:.9rem;font-weight:700;color:var(--cancha);margin-right:.35rem;font-variant-numeric:tabular-nums}
+.cotz .cz-vacio{background:var(--panel);border:1px dashed var(--linea2);border-radius:3px;padding:1.5rem;text-align:center;color:var(--humo);font-size:.9rem}
+
+/* ---------- barra del editor ---------- */
+.cotz .cz-ed-barra{display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem;padding:.55rem .9rem;background:var(--panel);border:1px solid var(--linea);border-radius:3px}
+.cotz .cz-ed-estado{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;color:var(--humo)}
+.cotz .cz-ed-estado.ok{color:var(--cancha)}
+.cotz .cz-ed-estado.err{color:#ff8a9b}
+.cotz .cz-ed-der{display:flex;gap:.45rem;flex-wrap:wrap}
+
 .cotz .cz-app{display:grid;grid-template-columns:minmax(300px,400px) 1fr;gap:1.4rem;align-items:start}
 @media (max-width:980px){.cotz .cz-app{grid-template-columns:1fr}}
 
@@ -10189,6 +11149,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 .cotz .cz-form .cz-sub{color:var(--humo);font-size:.75rem;margin:0 0 .8rem}
 .cotz .cz-presets{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem}
 .cotz .cz-form .btn{font-size:.62rem;padding:.45rem .8rem;cursor:pointer}
+.cotz .cz-form .btn.cz-chico{font-size:.58rem;padding:.2rem .45rem}
 .cotz fieldset{border:1px solid var(--linea2);border-radius:3px;padding:.6rem .75rem .75rem;margin:0 0 .8rem}
 .cotz legend{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;
   color:var(--cal);padding:0 .3rem}
@@ -10199,6 +11160,16 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 .cotz .cz-form input,.cotz .cz-form select,.cotz .cz-form textarea{width:100%;font-size:.85rem;padding:.3rem .45rem}
 .cotz .cz-form input[type=checkbox]{width:auto}
 .cotz .cz-ayuda{font-size:.7rem;color:var(--humo);margin:.3rem 0 0}
+.cotz .cz-fecha-cab{display:flex;justify-content:space-between;align-items:center;gap:.4rem;margin:.6rem 0 .4rem;padding-top:.55rem;border-top:1px solid var(--linea2)}
+.cotz .cz-fecha-cab strong{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--cal)}
+.cotz .cz-fecha-card{border:1px solid var(--linea2);border-radius:3px;padding:.55rem .65rem;margin-top:.65rem;background:rgba(255,255,255,.02)}
+.cotz .cz-fecha-card .cz-fecha-cab{margin:0 0 .45rem;padding-top:0;border-top:0}
+.cotz .cz-mini-btns{display:flex;gap:.3rem}
+.cotz .cz-subfotos{margin-top:.55rem;padding-top:.55rem;border-top:1px solid var(--linea2)}
+.cotz .cz-subfotos-cab{display:flex;justify-content:space-between;align-items:center;gap:.4rem;margin-bottom:.35rem}
+.cotz .cz-subfotos-cab span{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--humo)}
+.cotz .cz-det-otros{margin-top:.55rem;padding-top:.45rem;border-top:1px solid var(--linea2)}
+.cotz .cz-det-otros summary{font-size:.72rem;color:var(--humo);cursor:pointer;user-select:none}
 .cotz table.cz-precios{width:100%;border-collapse:collapse;margin:0}
 .cotz table.cz-precios th,.cotz table.cz-precios td{font-size:.72rem;padding:.15rem .2rem;text-align:left;border:0}
 .cotz table.cz-precios tr:hover td{background:transparent}
@@ -10225,6 +11196,8 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 .cotz .cz-caja h3::before{content:none}
 .cotz .cz-caja dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px}
 .cotz .cz-caja dt{color:var(--cz-tenue)}
+.cotz .cz-fechas-list{list-style:none;padding:0;margin:0}
+.cotz .cz-fechas-list li+li{margin-top:3px}
 .cotz .cz-total-caja{background:var(--cz-tinta);color:#fff;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;justify-content:center}
 .cotz .cz-total-caja small{text-transform:uppercase;letter-spacing:.1em;font-size:11px;opacity:.7}
 .cotz .cz-total-caja .cz-monto{font-size:32px;font-weight:700;letter-spacing:-.02em;color:#ffc27a}
@@ -10273,11 +11246,11 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 @media (max-width:600px){.cotz .cz-pago{grid-template-columns:1fr}}
 .cotz .cz-pie{margin-top:18px;border-top:1px solid var(--cz-linea);padding-top:8px;font-size:11px;color:var(--cz-tenue);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
 
-/* al imprimir queda solo la hoja: sin barra del panel ni formulario */
+/* al imprimir queda solo la hoja: sin barra del panel, indice ni formulario */
 @media print{
   @page{size:A4;margin:12mm}
   html,body{background:#fff!important;color-scheme:light}
-  .pbarra,.cotz .cz-form,header{display:none!important}
+  .pbarra,.cotz .cz-form,.cotz .cz-indice,.cotz .cz-ed-barra,header{display:none!important}
   main.cotz{padding:0}
   .cotz .cz-app{display:block}
   .cotz .cz-hoja{border-radius:0;padding:0;max-width:none}
@@ -10286,12 +11259,40 @@ PANEL_COTIZADOR = r"""<main class="cotz">
   .cotz .cz-niveles,.cotz .cz-pago,.cotz table.cz-det tr{break-inside:avoid}
 }
 </style>
+
+<!-- ===================== INDICE DE ORGANIZADORES ===================== -->
+<section class="cz-indice" id="czIndice">
+  <div class="cz-ind-cab">
+    <div>
+      <h1>Cotizaciones</h1>
+      <p class="cz-sub">Organizadores, sus eventos y cada cotización hecha anteriormente.</p>
+    </div>
+    <div class="cz-ind-acciones">
+      <input id="czBuscar" placeholder="Buscar organizador, evento o N°..." autocomplete="off">
+      <button type="button" class="btn" id="nuevoOrg">+ Nuevo organizador</button>
+    </div>
+  </div>
+  <div id="czListaOrgs"></div>
+</section>
+
+<!-- ===================== EDITOR + BOLETA ===================== -->
+<section id="czEditor" hidden>
+<div class="cz-ed-barra">
+  <button type="button" class="btn hueco" id="volverIndice">&larr; Organizadores</button>
+  <span class="cz-ed-estado" id="edEstado"></span>
+  <div class="cz-ed-der">
+    <button type="button" class="btn" id="guardarCot">Guardar</button>
+    <button type="button" class="btn hueco" id="guardarNueva" style="display:none">Guardar como nueva</button>
+    <button type="button" class="btn mal" id="borrarCot" style="display:none">Borrar</button>
+  </div>
+</div>
+
 <div class="cz-app">
 
 <!-- ===================== FORMULARIO ===================== -->
 <form class="cz-form" id="form">
   <h1>Cotizador para organizadores</h1>
-  <p class="cz-sub">Todo se recalcula al escribir y queda guardado en este navegador.</p>
+  <p class="cz-sub">Todo se recalcula al escribir y se guarda en el servidor.</p>
   <div class="cz-presets">
     <button type="button" class="btn hueco" data-preset="lista">Precio de lista</button>
     <button type="button" class="btn hueco" data-preset="renato">Renato · Liga ExScuola</button>
@@ -10308,24 +11309,50 @@ PANEL_COTIZADOR = r"""<main class="cotz">
     <div class="cz-f" style="margin-top:8px">
       <div><label>Organizador</label><input id="cliente" placeholder="Nombre"></div>
       <div><label>Liga / evento</label><input id="evento" placeholder="Liga ExScuola 2026-2"></div>
-      <div><label>Fecha del evento</label><input id="fechaEvento" type="date"></div>
-      <div><label>Lugar</label><input id="lugar" placeholder="Recinto, comuna"></div>
-      <div><label>Inicio</label><input id="horaInicio" type="time" value="19:00"></div>
-      <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
-      <div class="solo-liga"><label>Cada partido dura</label><select id="durPartido"><option value="20">20 min</option>
-        <option value="30">30 min</option><option value="60" selected>60 min</option></select></div>
+    </div>
+
+    <div id="czFecha1">
+      <div class="cz-fecha-cab" id="czFecha1Cab" style="display:none">
+        <strong>Fecha 1</strong>
+        <input id="fecha1Nombre" placeholder="Etiqueta (ej. Fecha 1)" style="width:auto;flex:1;max-width:12rem">
+      </div>
+      <div class="cz-f" style="margin-top:8px">
+        <div><label>Fecha del evento</label><input id="fechaEvento" type="date"></div>
+        <div><label>Lugar</label><input id="lugar" placeholder="Recinto, comuna"></div>
+        <div><label>Inicio</label><input id="horaInicio" type="time" value="19:00"></div>
+        <div><label>Término</label><input id="horaFin" type="time" value="21:00"></div>
+        <div class="solo-liga"><label>Cada partido dura</label><select id="durPartido"><option value="20">20 min</option>
+          <option value="30">30 min</option><option value="60" selected>60 min</option></select></div>
+        <div><label>Recargo última hora (%)</label><input id="recargoUrg" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
+      </div>
+      <div class="solo-liga"><label style="margin-top:8px">Partidos a la vez en cada horario</label>
+      <div class="cz-bloques" id="czBloques"></div></div>
+      <input type="hidden" id="simult" value="{}">
+    </div>
+
+    <div id="czFechasExtra"></div>
+    <input type="hidden" id="fechasExtra" value="[]">
+    <div style="margin-top:8px;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+      <button type="button" class="btn hueco" id="agregarFecha">+ Agregar otra fecha</button>
+      <span class="cz-ayuda" id="avisoMulti" style="margin:0;display:none"></span>
+    </div>
+
+    <div class="cz-f" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--linea2)">
       <div><label id="horaValorL">Valor de la hora ($)</label><input id="horaValor" type="number" min="0" step="500" inputmode="numeric"></div>
       <div><label>Descuento a la hora (%)</label><input id="descHora" type="number" min="0" max="100" step="0.5" value="0"></div>
-      <div><label>Recargo última hora (%)</label><input id="recargoUrg" type="number" min="0" step="5" value="0" inputmode="numeric"></div>
       <div><label>N° cotización</label><input id="numero"></div>
       <div><label>Válida por (días)</label><input id="validez" type="number" min="1" value="15"></div>
     </div>
-    <div class="solo-liga"><label style="margin-top:8px">Partidos a la vez en cada horario</label>
-    <div class="cz-bloques" id="czBloques"></div></div>
-    <input type="hidden" id="simult" value="{}">
   </fieldset>
 
-  <fieldset><legend>2. Fotos seleccionadas</legend>
+  <fieldset><legend id="legFotos">2. Fotos seleccionadas</legend>
+    <div id="bloqueFotosModo" style="display:none;margin-bottom:8px">
+      <label>Fotos en varias fechas</label>
+      <select id="fotosModo">
+        <option value="por_fecha">Cada fecha elige sus fotos (se suman)</option>
+        <option value="unico">Un solo pack para toda la cotización</option>
+      </select>
+    </div>
     <label>Pack</label>
     <select id="packFotos"><option value="">Personalizado: precio por foto, sin descuento</option></select>
     <div class="cz-f cz-tres" style="margin-top:8px">
@@ -10363,10 +11390,19 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 
   <fieldset><legend>4. Add-ons</legend>
     <label class="cz-chk solo-liga"><input type="checkbox" id="aLogo"> Logo/marco del cliente + exportación para redes</label>
+    <div id="bloqueAlcanceLogo" class="solo-liga" style="display:none;margin:.25rem 0 .4rem 1.4rem">
+      <select id="alcanceLogo"><option value="por_fecha">Logo/marco: en cada fecha</option><option value="una">Logo/marco: una sola vez</option></select>
+    </div>
     <label class="cz-chk solo-liga"><input type="checkbox" id="aPartidos"> Separación por partidos con conteo de fotos</label>
+    <div id="bloqueAlcancePartidos" class="solo-liga" style="display:none;margin:.25rem 0 .4rem 1.4rem">
+      <select id="alcancePartidos"><option value="por_fecha">Separación por partidos: en cada fecha</option><option value="una">Separación por partidos: una sola vez</option></select>
+    </div>
     <div class="cz-f solo-liga" style="margin-top:4px"><div><label>N° de partidos (opcional)</label><input id="nPartidos" type="number" min="0" value=""></div></div>
     <label class="cz-chk"><input type="checkbox" id="aSeleccion"> Selección personal (yo elijo por el organizador), por tramos según las fotos del pedido</label>
     <label class="cz-chk" style="margin-left:1.4rem"><input type="checkbox" id="gSel"> como cortesía</label>
+    <div id="bloqueAlcanceSel" style="display:none;margin:.25rem 0 .4rem 1.4rem">
+      <select id="alcanceSel"><option value="por_fecha">Selección personal: tramo por cada fecha</option><option value="total">Selección personal: tramo sobre el total de fotos</option></select>
+    </div>
   </fieldset>
 
   <fieldset><legend>5. Precios: lista y cliente</legend>
@@ -10384,9 +11420,9 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 
   <fieldset><legend>6. Traslado, boleta y pago</legend>
     <div class="cz-f">
-      <div><label>Traslado: km de ida</label><input id="km" type="number" min="0" step="0.1" value="0" inputmode="decimal">
+      <div><label id="lblKm">Traslado: km de ida</label><input id="km" type="number" min="0" step="0.1" value="0" inputmode="decimal">
         <label class="cz-chk" style="margin:4px 0 0"><input type="checkbox" id="gKm"> como cortesía</label></div>
-      <div><label>Estacionamiento ($)</label><input id="estac" type="number" min="0" value="0">
+      <div><label id="lblEstac">Estacionamiento ($)</label><input id="estac" type="number" min="0" value="0">
         <label class="cz-chk" style="margin:4px 0 0"><input type="checkbox" id="gEstac"> como cortesía</label></div>
       <div><label>&nbsp;</label><label class="cz-chk" style="margin:0"><input type="checkbox" id="anticipo" checked> Anticipo: la cobertura</label></div>
       <div><label>Boleta de honorarios</label><select id="boleta"><option value="si">Sí (bruteada)</option><option value="no">No</option></select></div>
@@ -10412,7 +11448,7 @@ PANEL_COTIZADOR = r"""<main class="cotz">
   </fieldset>
 
   <fieldset><legend>7. Liquidación final (después del evento)</legend>
-    <label>Hora real en que terminé de fotografiar</label>
+    <label id="lblHoraReal">Hora real en que terminé de fotografiar</label>
     <input id="horaReal" type="time">
     <p class="cz-ayuda">Tolerancia de 15 min. Después, cada bloque de 20 min iniciado cuesta 1/3 de la hora acordada. Déjalo vacío para la cotización previa.</p>
   </fieldset>
@@ -10430,59 +11466,65 @@ PANEL_COTIZADOR = r"""<main class="cotz">
 <!-- ===================== BOLETA ===================== -->
 <div class="cz-hoja" id="hoja"></div>
 </div>
+</section>
 
 <script>
 (function(){
 "use strict";
 const $ = id => document.getElementById(id);
 const CLAVE = "rbdeportes_cotizador_v1";
+const CLAVE_MIGRADO = "rbdeportes_cotizador_migrado_v1";
+const CLAVE_PAGO = "rbdeportes_pago_v1";
 const PAGO = ["pTitular","pRut","pBanco","pTipo","pNumero","pMail"];
-// varias cuentas de banco, guardadas aparte (solo en este navegador)
 const CLAVE_CUENTAS = "rbdeportes_cuentas_v1";
 
 const T = TARIFAS, TS = TARIFAS.social;
-// packs y niveles cambian con el tipo de evento (liga o social); el preset
-// de matrimonio es el social con su hora (se arma mas abajo)
 let NIVELES = T.niveles, PACKS = T.packs, modoPintado = "";
-// cumpleanos y matrimonios son "social": mismos niveles y packs, distinta hora
 const esSocial = () => $("tipoEvento").value !== "liga";
 const PRESETS = {
-  // Los precios por foto de lista son los del pack Personalizado; los packs
-  // cerrados tienen su precio en TARIFAS.packs. Todo sale de TARIFAS (Python).
   lista: {packFotos:"liga",durPartido:"60",simult:"{}",lHora:T.hora,cHora:T.hora,lBasica:T.foto.basica,cBasica:T.foto.basica,
           lCompleta:T.foto.completa,cCompleta:T.foto.completa,lPro:T.foto.pro,cPro:T.foto.pro,
           lLogo:T.logo,cLogo:T.logo,gLogo:false,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:false,
           gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,recargoUrg:0,volumen:0,boleta:"si",
           anticipo:true,retencion:T.retencion,recargoExcl:T.exclusivo_pct,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
-          aLogo:false,aPartidos:false,aSeleccion:false,tipoEvento:"liga"},
-  // cumpleanos y eventos sociales: su hora y sus precios; sin basica, sin
-  // partidos ni venta a jugadores (todo eso se esconde)
+          aLogo:false,aPartidos:false,aSeleccion:false,tipoEvento:"liga",fotosModo:"por_fecha",
+          alcanceLogo:"por_fecha",alcancePartidos:"por_fecha",alcanceSel:"por_fecha"},
   social: {tipoEvento:"social",packFotos:"celebracion",lHora:TS.hora,cHora:TS.hora,lBasica:0,cBasica:0,
           lCompleta:TS.foto.completa,cCompleta:TS.foto.completa,lPro:TS.foto.pro,cPro:TS.foto.pro,qBasica:0,
           pack:"abierto",recargoExcl:T.exclusivo_pct,recargoUrg:0,gExcl:false,aLogo:false,aPartidos:false,aSeleccion:false,gSel:false,
           durPartido:"60",simult:"{}",volumen:0,boleta:"no",anticipo:true,plazo:T.entrega_dias,plazoGaleria:T.galeria_horas,
-          horaInicio:"13:00",horaFin:"16:00",evento:""},
-  // Renato: tarifa preferente. Hora y basica/completa como en la planilla 2026-2;
-  // logo y separacion por partidos ya los recibia sin costo: van como cortesia.
+          horaInicio:"13:00",horaFin:"16:00",evento:"",fotosModo:"por_fecha",alcanceSel:"por_fecha"},
   renato: {cliente:"Renato Negroni",evento:"Liga ExScuola 2026-2",lugar:"",
           packFotos:"",durPartido:"60",simult:"{}",lHora:T.hora,cHora:6000,lBasica:T.foto.basica,cBasica:110,lCompleta:T.foto.completa,cCompleta:250,lPro:T.foto.pro,cPro:420,aSeleccion:false,
           lLogo:T.logo,cLogo:T.logo,gLogo:true,aLogo:true,lPartidos:T.partidos,cPartidos:T.partidos,gPartidos:true,aPartidos:true,
           gSel:false,gExcl:false,gKm:false,gEstac:false,km:0,estac:0,recargoUrg:0,volumen:0,
-          boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00",tipoEvento:"liga"}
+          boleta:"no",anticipo:false,qBasica:64,qCompleta:36,qPro:0,horaInicio:"19:00",horaFin:"21:00",tipoEvento:"liga",
+          fotosModo:"por_fecha",alcanceLogo:"por_fecha",alcancePartidos:"por_fecha",alcanceSel:"por_fecha"}
 };
-
-// Packs cerrados (19/10/2026). Liga es el que se empuja. Su "lista" en la boleta
-// es lo que costaria armarlo foto a foto como Personalizado: ese contraste es
-// el decoy, el pack siempre sale mas barato que armarlo a mano.
 
 const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
 const ent = id => Math.max(0, Math.round(num(id)));
 const pesos = n => "$" + Math.round(n).toLocaleString("es-CL");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const normTxt = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 
 PRESETS.matrimonio = Object.assign({}, PRESETS.social,
   {tipoEvento:"matrimonio",lHora:TS.hora_matrimonio,cHora:TS.hora_matrimonio,packFotos:"completo",horaInicio:"16:00",horaFin:"22:00"});
-// la lista de packs del tipo de evento elegido (se rehace al cambiar de tipo)
+
+let extraDates = [];
+let extraFirmas = [];
+let firmaCz = "";
+let listaCot = Array.isArray(COTIZACIONES) ? COTIZACIONES.slice() : [];
+let idActual = null;
+let sucio = false;
+let timerGuardado = null;
+let enVuelo = null;
+
+function packOpcionesHTML(){
+  return '<option value="">Personalizado: precio por foto, sin descuento</option>'
+    + Object.entries(PACKS).map(([k,P]) => `<option value="${k}">${P.nombre} · ${P.q[0]+P.q[1]+P.q[2]} fotos · ${pesos(P.precio)}${P.reco?" · recomendado":""}</option>`).join("");
+}
+
 function pintarModo(){
   const m = $("tipoEvento").value === "liga" ? "liga" : "social";
   if(m === modoPintado) return;
@@ -10492,45 +11534,194 @@ function pintarModo(){
   PACKS = social ? TS.packs : T.packs;
   document.querySelector("main.cotz").classList.toggle("es-social", social);
   const elegido = $("packFotos").value;
-  $("packFotos").innerHTML = '<option value="">Personalizado: precio por foto, sin descuento</option>'
-    + Object.entries(PACKS).map(([k,P]) => `<option value="${k}">${P.nombre} · ${P.q[0]+P.q[1]+P.q[2]} fotos · ${pesos(P.precio)}${P.reco?" · recomendado":""}</option>`).join("");
+  $("packFotos").innerHTML = packOpcionesHTML();
   $("packFotos").value = PACKS[elegido] ? elegido : "";
+  document.querySelectorAll('#czFechasExtra select[data-campo="packFotos"]').forEach(sel => {
+    const idx = +sel.closest("[data-fecha-idx]").dataset.fechaIdx;
+    const cur = (extraDates[idx] && extraDates[idx].packFotos) || "";
+    sel.innerHTML = packOpcionesHTML();
+    sel.value = PACKS[cur] ? cur : "";
+    if(extraDates[idx]) extraDates[idx].packFotos = sel.value;
+  });
+  syncExtraInput();
 }
-// cambiar el tipo de evento carga los precios de lista de ese tipo
-$("tipoEvento").addEventListener("change", () => {
-  const datos = {}; ["cliente","evento","fechaEvento","lugar","numero","validez","notas"].concat(PAGO).forEach(id => datos[id] = $(id).value);
-  aplicar(PRESETS[{social:"social", matrimonio:"matrimonio"}[$("tipoEvento").value] || "lista"]); aplicar(datos);
-});
-pintarModo();
 
 function minutos(h){ if(!h) return null; const [a,b] = h.split(":").map(Number); return a*60+b; }
-function duracion(ini, fin){ // en minutos, cruza medianoche
+function duracion(ini, fin){
   const a = minutos(ini), b = minutos(fin); if(a===null||b===null) return 0;
   let d = b - a; if(d <= 0) d += 1440; return d;
 }
-// los horarios de la jornada, de a un partido (como en /tarifas). Cuantos
-// partidos hay a la vez en cada uno va en el input escondido #simult, asi se
-// guarda con el resto del formulario
 const hhmm = m => String(Math.floor(m/60)%24).padStart(2,"0") + ":" + String(m%60).padStart(2,"0");
-function bloquesCz(){
-  const a = minutos($("horaInicio").value), b0 = minutos($("horaFin").value), dur = +$("durPartido").value;
+function bloquesPara(ini, fin, dur){
+  const a = minutos(ini), b0 = minutos(fin), d = +dur || 60;
   if(a===null || b0===null) return [];
   const b = b0 <= a ? b0 + 1440 : b0, out = [];
-  for(let t = a; t < b && out.length < 36; t += dur) out.push([t, Math.min(t + dur, b)]);
+  for(let t = a; t < b && out.length < 36; t += d) out.push([t, Math.min(t + d, b)]);
   return out;
 }
 const simult = () => { try{ return JSON.parse($("simult").value || "{}") || {}; }catch(_){ return {}; } };
-let firmaCz = "";
-function pintarBloquesCz(bs){
+function pintarBloquesEn(el, bs, sim, prevFirma){
+  if(!el) return prevFirma;
   const f = bs.map(([a,b]) => a + "-" + b).join(",");
-  if(f === firmaCz) return;           // no rehacer mientras se escribe en uno
-  firmaCz = f;
-  const S = simult();
-  $("czBloques").innerHTML = bs.map(([t0,t1]) => { const k = hhmm(t0);
-    return `<label class="cz-bq"><span>${k}–${hhmm(t1)}</span><input type="number" min="1" max="4" value="${S[k]||1}" data-ini="${k}"></label>`; }).join("");
+  if(f === prevFirma) return prevFirma;
+  el.innerHTML = bs.map(([t0,t1]) => { const k = hhmm(t0);
+    return `<label class="cz-bq"><span>${k}–${hhmm(t1)}</span><input type="number" min="1" max="4" value="${sim[k]||1}" data-ini="${k}"></label>`; }).join("");
+  return f;
 }
-// el descuento a la hora escribe el precio cliente de la hora (tabla de
-// precios); si se cambia ese precio a mano, el descuento se recalcula solo
+
+const parseExtra = () => {
+  try{ const a = JSON.parse($("fechasExtra").value || "[]"); return Array.isArray(a) ? a : []; }
+  catch(_){ return []; }
+};
+const syncExtraInput = () => { $("fechasExtra").value = JSON.stringify(extraDates); };
+
+function leerFecha1(){
+  return {
+    titulo: $("fecha1Nombre").value.trim(),
+    fecha: $("fechaEvento").value,
+    lugar: $("lugar").value.trim(),
+    horaInicio: $("horaInicio").value,
+    horaFin: $("horaFin").value,
+    durPartido: $("durPartido").value,
+    simult: simult(),
+    recargoUrg: Math.max(0, num("recargoUrg")),
+    packFotos: $("packFotos").value,
+    qBasica: ent("qBasica"),
+    qCompleta: ent("qCompleta"),
+    qPro: ent("qPro"),
+    km: Math.max(0, num("km")),
+    gKm: $("gKm").checked,
+    estac: Math.max(0, num("estac")),
+    gEstac: $("gEstac").checked,
+    horaReal: $("horaReal").value
+  };
+}
+
+function nuevaFechaDesde(base, esCopia){
+  return {
+    titulo: "",
+    fecha: "",
+    lugar: base.lugar || "",
+    horaInicio: base.horaInicio || "19:00",
+    horaFin: base.horaFin || "21:00",
+    durPartido: base.durPartido || "60",
+    simult: Object.assign({}, base.simult || {}),
+    recargoUrg: esCopia ? (base.recargoUrg || 0) : 0,
+    packFotos: base.packFotos || "",
+    qBasica: base.qBasica != null ? base.qBasica : 0,
+    qCompleta: base.qCompleta != null ? base.qCompleta : 40,
+    qPro: base.qPro != null ? base.qPro : 0,
+    km: esCopia ? (base.km || 0) : 0,
+    gKm: esCopia ? !!base.gKm : false,
+    estac: esCopia ? (base.estac || 0) : 0,
+    gEstac: esCopia ? !!base.gEstac : false,
+    horaReal: ""
+  };
+}
+
+function reconstruirFechasExtra(){
+  extraFirmas = extraDates.map(() => "");
+  const cont = $("czFechasExtra");
+  cont.innerHTML = extraDates.map((d, i) => {
+    const abrirOtros = +(d.km) > 0 || +(d.estac) > 0 || !!(d.horaReal);
+    return `<div class="cz-fecha-card" data-fecha-idx="${i}">
+      <div class="cz-fecha-cab">
+        <strong>Fecha ${i + 2}</strong>
+        <div class="cz-mini-btns">
+          <button type="button" class="btn hueco cz-chico" data-accion="duplicar">Duplicar</button>
+          <button type="button" class="btn hueco cz-chico" data-accion="quitar">Quitar</button>
+        </div>
+      </div>
+      <div class="cz-f">
+        <div><label>Nombre (opcional)</label><input data-campo="titulo" value="${esc(d.titulo || "")}" placeholder="Ej. Final"></div>
+        <div><label>Fecha</label><input data-campo="fecha" type="date" value="${esc(d.fecha || "")}"></div>
+        <div><label>Lugar</label><input data-campo="lugar" value="${esc(d.lugar || "")}" placeholder="Recinto, comuna"></div>
+        <div><label>Recargo última hora (%)</label><input data-campo="recargoUrg" type="number" min="0" step="5" value="${esc(d.recargoUrg != null ? d.recargoUrg : 0)}" inputmode="numeric"></div>
+        <div><label>Inicio</label><input data-campo="horaInicio" type="time" value="${esc(d.horaInicio || "19:00")}"></div>
+        <div><label>Término</label><input data-campo="horaFin" type="time" value="${esc(d.horaFin || "21:00")}"></div>
+        <div class="solo-liga"><label>Cada partido dura</label><select data-campo="durPartido"><option value="20">20 min</option><option value="30">30 min</option><option value="60">60 min</option></select></div>
+      </div>
+      <div class="solo-liga"><label style="margin-top:6px">Partidos a la vez en cada horario</label><div class="cz-bloques" data-bloques></div></div>
+      <div class="cz-subfotos" data-bloque-fotos>
+        <div class="cz-subfotos-cab">
+          <span>Fotos de esta fecha</span>
+          <button type="button" class="btn hueco cz-chico" data-accion="copiar-fotos">Copiar de Fecha 1</button>
+        </div>
+        <select data-campo="packFotos">${packOpcionesHTML()}</select>
+        <div class="cz-f cz-tres" style="margin-top:6px">
+          <div class="solo-liga"><label>Básica</label><input data-campo="qBasica" type="number" min="0" value="${esc(d.qBasica != null ? d.qBasica : 0)}"></div>
+          <div><label>Completa</label><input data-campo="qCompleta" type="number" min="0" value="${esc(d.qCompleta != null ? d.qCompleta : 40)}"></div>
+          <div><label>Profesional</label><input data-campo="qPro" type="number" min="0" value="${esc(d.qPro != null ? d.qPro : 0)}"></div>
+        </div>
+        <p class="cz-ayuda" data-min-aviso></p>
+      </div>
+      <details class="cz-det-otros"${abrirOtros ? " open" : ""}>
+        <summary>Traslado, estacionamiento y hora real</summary>
+        <div class="cz-f" style="margin-top:6px">
+          <div><label>Traslado: km de ida</label><input data-campo="km" type="number" min="0" step="0.1" value="${esc(d.km || 0)}" inputmode="decimal">
+            <label class="cz-chk" style="margin:4px 0 0"><input data-campo="gKm" type="checkbox"${d.gKm ? " checked" : ""}> como cortesía</label></div>
+          <div><label>Estacionamiento ($)</label><input data-campo="estac" type="number" min="0" value="${esc(d.estac || 0)}">
+            <label class="cz-chk" style="margin:4px 0 0"><input data-campo="gEstac" type="checkbox"${d.gEstac ? " checked" : ""}> como cortesía</label></div>
+          <div style="grid-column:1/-1"><label>Hora real en que terminé de fotografiar</label><input data-campo="horaReal" type="time" value="${esc(d.horaReal || "")}"></div>
+        </div>
+      </details>
+    </div>`;
+  }).join("");
+  [...cont.children].forEach((card, i) => {
+    const d = extraDates[i];
+    const sd = card.querySelector('select[data-campo="durPartido"]');
+    if(sd) sd.value = String(d.durPartido || "60");
+    const sp = card.querySelector('select[data-campo="packFotos"]');
+    if(sp) sp.value = PACKS[d.packFotos] ? d.packFotos : "";
+  });
+  syncExtraInput();
+}
+
+$("czFechasExtra").addEventListener("input", e => {
+  const card = e.target.closest("[data-fecha-idx]"); if(!card) return;
+  const idx = +card.dataset.fechaIdx, d = extraDates[idx]; if(!d) return;
+  const bq = e.target.closest("input[data-ini]");
+  if(bq){
+    if(!d.simult || typeof d.simult !== "object") d.simult = {};
+    d.simult[bq.dataset.ini] = Math.min(4, Math.max(1, Math.round(+bq.value || 1)));
+    syncExtraInput(); render(); marcarSucio(); return;
+  }
+  const campo = e.target.dataset.campo; if(!campo) return;
+  d[campo] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+  syncExtraInput(); render(); marcarSucio();
+});
+$("czFechasExtra").addEventListener("change", e => {
+  const card = e.target.closest("[data-fecha-idx]"); if(!card) return;
+  const idx = +card.dataset.fechaIdx, d = extraDates[idx]; if(!d) return;
+  const campo = e.target.dataset.campo; if(!campo) return;
+  d[campo] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+  syncExtraInput(); render(); marcarSucio();
+});
+$("czFechasExtra").addEventListener("click", e => {
+  const btn = e.target.closest("[data-accion]"); if(!btn) return;
+  const card = btn.closest("[data-fecha-idx]"); if(!card) return;
+  const idx = +card.dataset.fechaIdx, acc = btn.dataset.accion;
+  if(acc === "quitar"){
+    extraDates.splice(idx, 1);
+    reconstruirFechasExtra(); render(); marcarSucio();
+  } else if(acc === "duplicar"){
+    extraDates.splice(idx + 1, 0, nuevaFechaDesde(extraDates[idx], true));
+    reconstruirFechasExtra(); render(); marcarSucio();
+  } else if(acc === "copiar-fotos"){
+    const f1 = leerFecha1(), d = extraDates[idx];
+    d.packFotos = f1.packFotos; d.qBasica = f1.qBasica; d.qCompleta = f1.qCompleta; d.qPro = f1.qPro;
+    const sp = card.querySelector('select[data-campo="packFotos"]'); if(sp) sp.value = d.packFotos;
+    ["qBasica","qCompleta","qPro"].forEach(k => { const inp = card.querySelector(`[data-campo="${k}"]`); if(inp) inp.value = d[k]; });
+    syncExtraInput(); render(); marcarSucio();
+  }
+});
+
+$("agregarFecha").addEventListener("click", () => {
+  const base = extraDates.length ? extraDates[extraDates.length - 1] : leerFecha1();
+  extraDates.push(nuevaFechaDesde(base, false));
+  reconstruirFechasExtra(); render(); marcarSucio();
+});
+
 $("horaValor").addEventListener("input", () => { $("cHora").value = num("horaValor"); });
 $("descHora").addEventListener("input", () => {
   $("cHora").value = Math.round(num("lHora") * (1 - Math.min(100, num("descHora")) / 100));
@@ -10546,146 +11737,250 @@ function fechaLarga(iso){
   const [y,m,d] = iso.split("-").map(Number);
   return new Date(y,m-1,d).toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 }
+function fechaCorta(iso, conAnio){
+  if(!iso) return "Por definir";
+  const [y,m,d] = iso.split("-").map(Number);
+  const opts = conAnio ? {day:"numeric",month:"short",year:"numeric"} : {day:"numeric",month:"short"};
+  return new Date(y,m-1,d).toLocaleDateString("es-CL", opts).replace(/\./g, "");
+}
 function numeroNuevo(){
   const d = new Date(), p = n => String(n).padStart(2,"0");
   return "COT-" + d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes());
+}
+function numeroUnico(){
+  const base = numeroNuevo(), usados = new Set(listaCot.map(c => c.numero));
+  if(!usados.has(base)) return base;
+  let k = 2; while(usados.has(base + "-" + k)) k++;
+  return base + "-" + k;
 }
 
 function calcular(){
   pintarModo();
   const social = esSocial();
-  // la lista sale siempre de las tarifas: el 26/10/2026 la completa social
-  // quedo a mano en $590 (el precio en pack) y el pack mostraba $500 de ahorro
-  // en vez de $6.500. Lo que se negocia va en la columna Cliente.
   const TT = social ? TS : T;
   [["lHora", $("tipoEvento").value === "matrimonio" ? TS.hora_matrimonio : TT.hora],
    ["lBasica", TT.foto.basica], ["lCompleta", TT.foto.completa], ["lPro", TT.foto.pro],
    ["lLogo", T.logo], ["lPartidos", T.partidos]].forEach(([id, val]) => { $(id).value = val; });
-  const horas = duracion($("horaInicio").value, $("horaFin").value) / 60;
-  // un pack cerrado fija las cantidades; Personalizado las deja libres
-  const P = PACKS[$("packFotos").value];
-  ["qBasica","qCompleta","qPro"].forEach((id,i) => { $(id).readOnly = !!P; if(P) $(id).value = P.q[i]; });
-  const q = {basica:ent("qBasica"), completa:ent("qCompleta"), pro:ent("qPro")};
-  const totalFotos = q.basica + q.completa + q.pro;
-  // minimo del pedido a medida: fotos por hora, mezclable entre niveles
-  const M = T.minimo_hora, hM = (Math.round(horas*100)/100).toLocaleString("es-CL");
-  const cubreMin = horas ? (q.basica/M.basica + q.completa/M.completa + q.pro/M.pro) / horas : 1;
-  const minTxt = `el mínimo es ${M.completa} fotos con edición completa por hora de cobertura (o ${M.pro} profesionales`
-    + (social ? "" : `, o ${M.basica} básicas`) + `, o una mezcla equivalente). Para ${hM} h: ${Math.ceil(M.completa*horas)} completas`
-    + ` o ${Math.ceil(M.pro*horas)} profesionales` + (social ? "" : ` o ${Math.ceil(M.basica*horas)} básicas`) + ".";
-  const volPct = num("volumen");
-  const pack = $("pack").value;
-  const exclPct = pack === "exclusivo" ? num("recargoExcl") : 0;
 
-  // Cada linea: concepto, detalle, cantidad, unidad lista, unidad cliente, total lista, total cliente
-  const L = [];
-  const linea = (grupo, concepto, detalle, cant, uL, uC, cortesia) => {
-    const tC = cortesia ? 0 : cant * uC;
-    L.push({grupo, concepto, detalle, cant, uL, uC: cortesia ? 0 : uC, tL: cant*uL, tC, cortesia: !!cortesia});
-  };
-
-  const hTxt = (Math.round(horas*100)/100).toLocaleString("es-CL");
   const dH = num("lHora") ? Math.max(0, Math.round((1 - num("cHora")/num("lHora"))*1000)/10) : 0;
-  // el valor de la hora se edita aca o en la columna Cliente: son el mismo
   $("horaValorL").textContent = "Valor de la hora ($) · lista " + pesos(num("lHora"));
   if(document.activeElement !== $("horaValor")) $("horaValor").value = num("cHora");
   if(document.activeElement !== $("descHora")) $("descHora").value = dH;
-  linea("Cobertura","Cobertura de la jornada",
-        `${$("horaInicio").value || "--:--"} a ${$("horaFin").value || "--:--"} · ${hTxt} h`
-        + (dH > 0 ? ` · descuento ${dH.toLocaleString("es-CL")} % a la hora` : ""), horas, num("lHora"), num("cHora"));
-  // partidos a la vez, horario por horario: hasta 2 incluidos; cada uno extra
-  // suma cancha_extra_pct de la hora, solo en los horarios que lo tienen
-  const bs = social ? [] : bloquesCz(); if(!social) pintarBloquesCz(bs);
-  const S = simult(), dur = +$("durPartido").value, cpct = T.cancha_extra_pct;
-  let hExtra = 0, partidos = 0, maxC = 1;
-  for(const [t0,t1] of bs){
-    const c = S[hhmm(t0)] || 1;
-    partidos += c; maxC = Math.max(maxC, c);
-    hExtra += (t1 - t0) / 60 * Math.max(0, c - T.canchas_incluidas);
-  }
-  document.querySelectorAll(".cz-bq").forEach(el => el.classList.toggle("cz-mas", +el.querySelector("input").value > T.canchas_incluidas));
-  if(hExtra) L.push({grupo:"Cobertura",concepto:`Partidos simultáneos (hasta ${maxC} a la vez)`,
-                     detalle:`${T.canchas_incluidas} incluidos · +${cpct} % de la hora por cada uno extra, en su horario`,
-                     cant:null,tL:hExtra*num("lHora")*cpct/100,tC:hExtra*num("cHora")*cpct/100});
-  // partidos cortos: recargo sobre toda la cobertura
-  const dpct = social ? 0 : (T.duracion_pct[String(dur)] || 0);
-  if(dpct){
-    const cob = L.filter(x=>x.grupo==="Cobertura");
-    L.push({grupo:"Cobertura",concepto:`Partidos de ${dur} minutos (+${dpct} %)`,detalle:`${partidos} partidos en total`,
-            cant:null,tL:cob.reduce((s,x)=>s+x.tL,0)*dpct/100,tC:cob.reduce((s,x)=>s+x.tC,0)*dpct/100});
-  }
-  // solicitud de ultima hora: % variable sobre toda la cobertura. Es un cobro
-  // real, no un descuento: va igual en lista y cliente para no tocar el ahorro
-  const rec = Math.max(0, num("recargoUrg"));
-  if(rec){
-    const m = L.filter(x=>x.grupo==="Cobertura").reduce((s,x)=>s+x.tC,0)*rec/100;
-    L.push({grupo:"Cobertura",concepto:`Solicitud de última hora (+${rec} %)`,
-            detalle:"Recargo sobre la cobertura, por contratarse con poca anticipación",cant:null,tL:m,tC:m});
+
+  const P0 = PACKS[$("packFotos").value];
+  ["qBasica","qCompleta","qPro"].forEach((id,i) => { $(id).readOnly = !!P0; if(P0) $(id).value = P0.q[i]; });
+  const cards = [...$("czFechasExtra").children];
+  const f0 = Object.assign(leerFecha1(), {bloquesEl: $("czBloques"), minEl: $("minAviso"), esPrimera: true});
+  const extrasCfg = extraDates.map((d, i) => {
+    const card = cards[i], P = PACKS[d.packFotos];
+    if(P){
+      d.qBasica = P.q[0]; d.qCompleta = P.q[1]; d.qPro = P.q[2];
+      if(card) ["qBasica","qCompleta","qPro"].forEach((k,j) => {
+        const inp = card.querySelector(`[data-campo="${k}"]`);
+        if(inp){ inp.readOnly = true; inp.value = P.q[j]; }
+      });
+    } else if(card){
+      ["qBasica","qCompleta","qPro"].forEach(k => {
+        const inp = card.querySelector(`[data-campo="${k}"]`);
+        if(inp) inp.readOnly = false;
+      });
+    }
+    return {
+      titulo: (d.titulo || "").trim(),
+      fecha: d.fecha || "",
+      lugar: (d.lugar || "").trim(),
+      horaInicio: d.horaInicio || "",
+      horaFin: d.horaFin || "",
+      durPartido: d.durPartido || "60",
+      simult: d.simult || {},
+      recargoUrg: Math.max(0, parseFloat(d.recargoUrg) || 0),
+      packFotos: d.packFotos || "",
+      qBasica: Math.max(0, Math.round(parseFloat(d.qBasica) || 0)),
+      qCompleta: Math.max(0, Math.round(parseFloat(d.qCompleta) || 0)),
+      qPro: Math.max(0, Math.round(parseFloat(d.qPro) || 0)),
+      km: Math.max(0, parseFloat(d.km) || 0),
+      gKm: !!d.gKm,
+      estac: Math.max(0, parseFloat(d.estac) || 0),
+      gEstac: !!d.gEstac,
+      horaReal: d.horaReal || "",
+      bloquesEl: card ? card.querySelector("[data-bloques]") : null,
+      minEl: card ? card.querySelector("[data-min-aviso]") : null,
+      extraIdx: i
+    };
+  });
+
+  const fechasCfg = [f0].concat(extrasCfg);
+  const multi = fechasCfg.length > 1;
+  const fotosModo = multi ? $("fotosModo").value : "por_fecha";
+  const volPct = num("volumen");
+  const pack = $("pack").value;
+  const exclPct = pack === "exclusivo" ? num("recargoExcl") : 0;
+  const M = T.minimo_hora;
+
+  const L = [];
+  const linea = (grupo, concepto, detalle, cant, uL, uC, cortesia, seccion, fechaIdx, extra) => {
+    const tC = cortesia ? 0 : cant * uC;
+    L.push(Object.assign({grupo, seccion: seccion || null, fechaIdx: fechaIdx != null ? fechaIdx : null,
+      concepto, detalle, cant, uL, uC: cortesia ? 0 : uC, tL: cant*uL, tC, cortesia: !!cortesia}, extra || {}));
+  };
+  const infoMin = (hs, qObj) => {
+    const hM = (Math.round(hs*100)/100).toLocaleString("es-CL");
+    const cubre = hs ? (qObj.basica/M.basica + qObj.completa/M.completa + qObj.pro/M.pro) / hs : 1;
+    const txt = `el mínimo es ${M.completa} fotos con edición completa por hora de cobertura (o ${M.pro} profesionales`
+      + (social ? "" : `, o ${M.basica} básicas`) + `, o una mezcla equivalente). Para ${hM} h: ${Math.ceil(M.completa*hs)} completas`
+      + ` o ${Math.ceil(M.pro*hs)} profesionales` + (social ? "" : ` o ${Math.ceil(M.basica*hs)} básicas`) + ".";
+    return {cubre, txt};
+  };
+
+  const fechasRes = [];
+  const qTotal = {basica: 0, completa: 0, pro: 0};
+  let totalHoras = 0, hayPasada = false;
+
+  fechasCfg.forEach((f, idx) => {
+    const titulo = f.titulo || (multi ? "Fecha " + (idx + 1) : "Fecha 1");
+    const sec = multi ? titulo + (f.fecha ? " · " + fechaLarga(f.fecha) : "") : null;
+    const horas = duracion(f.horaInicio, f.horaFin) / 60;
+    totalHoras += horas;
+    const hTxt = (Math.round(horas*100)/100).toLocaleString("es-CL");
+    linea("Cobertura", "Cobertura de la jornada",
+      `${f.horaInicio || "--:--"} a ${f.horaFin || "--:--"} · ${hTxt} h`
+      + (dH > 0 ? ` · descuento ${dH.toLocaleString("es-CL")} % a la hora` : ""),
+      horas, num("lHora"), num("cHora"), false, sec, idx);
+
+    const bs = social ? [] : bloquesPara(f.horaInicio, f.horaFin, f.durPartido);
+    if(!social && f.bloquesEl){
+      if(f.esPrimera) firmaCz = pintarBloquesEn(f.bloquesEl, bs, f.simult, firmaCz);
+      else extraFirmas[f.extraIdx] = pintarBloquesEn(f.bloquesEl, bs, f.simult, extraFirmas[f.extraIdx] || "");
+    }
+    const dur = +f.durPartido || 60, cpct = T.cancha_extra_pct;
+    let hExtra = 0, partidos = 0, maxC = 1;
+    for(const [t0,t1] of bs){
+      const c = f.simult[hhmm(t0)] || 1;
+      partidos += c; maxC = Math.max(maxC, c);
+      hExtra += (t1 - t0) / 60 * Math.max(0, c - T.canchas_incluidas);
+    }
+    if(f.bloquesEl) f.bloquesEl.querySelectorAll(".cz-bq").forEach(el => el.classList.toggle("cz-mas", +el.querySelector("input").value > T.canchas_incluidas));
+    if(hExtra) L.push({grupo:"Cobertura", seccion:sec, fechaIdx:idx, concepto:`Partidos simultáneos (hasta ${maxC} a la vez)`,
+      detalle:`${T.canchas_incluidas} incluidos · +${cpct} % de la hora por cada uno extra, en su horario`,
+      cant:null, tL:hExtra*num("lHora")*cpct/100, tC:hExtra*num("cHora")*cpct/100});
+
+    const dpct = social ? 0 : (T.duracion_pct[String(dur)] || 0);
+    if(dpct){
+      const cobF = L.filter(x => x.fechaIdx === idx && x.grupo === "Cobertura");
+      L.push({grupo:"Cobertura", seccion:sec, fechaIdx:idx, concepto:`Partidos de ${dur} minutos (+${dpct} %)`,
+        detalle:`${partidos} partidos en total`, cant:null,
+        tL:cobF.reduce((s,x)=>s+x.tL,0)*dpct/100, tC:cobF.reduce((s,x)=>s+x.tC,0)*dpct/100});
+    }
+    const rec = Math.max(0, f.recargoUrg);
+    if(rec){
+      const m = L.filter(x => x.fechaIdx === idx && x.grupo === "Cobertura").reduce((s,x)=>s+x.tC,0)*rec/100;
+      L.push({grupo:"Cobertura", seccion:sec, fechaIdx:idx, concepto:`Solicitud de última hora (+${rec} %)`,
+        detalle:"Recargo sobre la cobertura, por contratarse con poca anticipación", cant:null, tL:m, tC:m});
+    }
+
+    let P = null, qF = {basica:0, completa:0, pro:0}, totalFotosF = 0, minF = {cubre:1, txt:""};
+    if(!multi || fotosModo === "por_fecha"){
+      P = PACKS[f.packFotos];
+      qF = {basica: f.qBasica, completa: f.qCompleta, pro: f.qPro};
+      totalFotosF = qF.basica + qF.completa + qF.pro;
+      qTotal.basica += qF.basica; qTotal.completa += qF.completa; qTotal.pro += qF.pro;
+      if(P){
+        const armado = qF.basica*num("lBasica") + qF.completa*num("lCompleta") + qF.pro*num("lPro");
+        linea("Fotos", `Pack ${P.nombre}`, (social ? "" : `${qF.basica} básicas · `) + `${qF.completa} completas · ${qF.pro} profesionales · lista: armado foto a foto`,
+          1, armado, P.precio, false, sec, idx, {esPack:true, packKey:f.packFotos});
+      } else {
+        if(qF.basica)   linea("Fotos","Fotos con edición básica","", qF.basica, num("lBasica"), num("cBasica"), false, sec, idx);
+        if(qF.completa) linea("Fotos","Fotos con edición completa","Recomendada", qF.completa, num("lCompleta"), num("cCompleta"), false, sec, idx);
+        if(qF.pro)      linea("Fotos","Fotos con edición profesional","", qF.pro, num("lPro"), num("cPro"), false, sec, idx);
+      }
+      minF = infoMin(horas, qF);
+    }
+
+    if(f.km > 0) linea("Otros","Traslado",`${f.km.toLocaleString("es-CL")} km de ida · ida y vuelta a ${pesos(T.km)} el km`,
+      2*f.km, T.km, T.km, f.gKm, sec, idx);
+    if(f.estac) L.push({grupo:"Otros", seccion:sec, fechaIdx:idx, concepto:"Estacionamiento",
+      detalle:f.gEstac ? "Cortesía" : "", cant:null, tL:f.estac, tC:f.gEstac ? 0 : f.estac, cortesia:f.gEstac});
+
+    let pasada = null;
+    if(f.horaReal && f.horaFin){
+      let ex = minutos(f.horaReal) - minutos(f.horaFin);
+      if(ex < -720) ex += 1440;
+      const bloques = ex > 15 ? Math.ceil(ex/20) : 0;
+      pasada = {ex: Math.max(0,ex), bloques};
+      if(bloques){
+        hayPasada = true;
+        L.push({grupo:"Otros", seccion:sec, fechaIdx:idx, concepto:"Hora pasada",
+          detalle:`Terminé a las ${f.horaReal} (${ex} min después) · bloques de 20 min a 1/3 de la hora`,
+          cant:bloques, uL:num("lHora")/3, uC:num("cHora")/3*(1+rec/100),
+          tL:bloques*num("lHora")/3, tC:bloques*num("cHora")/3*(1+rec/100)});
+      }
+    }
+    fechasRes.push(Object.assign({}, f, {titulo, sec, horas, P, q: qF, totalFotos: totalFotosF, cubreMin: minF.cubre, minTxt: minF.txt, pasada}));
+  });
+
+  let PUnico = null, minUnico = {cubre:1, txt:""};
+  if(multi && fotosModo === "unico"){
+    PUnico = PACKS[f0.packFotos];
+    qTotal.basica = f0.qBasica; qTotal.completa = f0.qCompleta; qTotal.pro = f0.qPro;
+    const secF = "Fotos";
+    if(PUnico){
+      const armado = qTotal.basica*num("lBasica") + qTotal.completa*num("lCompleta") + qTotal.pro*num("lPro");
+      linea("Fotos", `Pack ${PUnico.nombre}`, (social ? "" : `${qTotal.basica} básicas · `) + `${qTotal.completa} completas · ${qTotal.pro} profesionales · lista: armado foto a foto`,
+        1, armado, PUnico.precio, false, secF, null, {esPack:true, packKey:f0.packFotos});
+    } else {
+      if(qTotal.basica)   linea("Fotos","Fotos con edición básica","", qTotal.basica, num("lBasica"), num("cBasica"), false, secF, null);
+      if(qTotal.completa) linea("Fotos","Fotos con edición completa","Recomendada", qTotal.completa, num("lCompleta"), num("cCompleta"), false, secF, null);
+      if(qTotal.pro)      linea("Fotos","Fotos con edición profesional","", qTotal.pro, num("lPro"), num("cPro"), false, secF, null);
+    }
+    minUnico = infoMin(totalHoras, qTotal);
   }
 
-  if(P){
-    const armado = q.basica*num("lBasica") + q.completa*num("lCompleta") + q.pro*num("lPro");
-    linea("Fotos",`Pack ${P.nombre}`,(social ? "" : `${q.basica} básicas · `) + `${q.completa} completas · ${q.pro} profesionales · lista: armado foto a foto`,
-          1, armado, P.precio);
-  } else {
-    if(q.basica)   linea("Fotos","Fotos con edición básica","", q.basica, num("lBasica"), num("cBasica"));
-    if(q.completa) linea("Fotos","Fotos con edición completa","Recomendada", q.completa, num("lCompleta"), num("cCompleta"));
-    if(q.pro)      linea("Fotos","Fotos con edición profesional","", q.pro, num("lPro"), num("cPro"));
-  }
+  const totalFotos = qTotal.basica + qTotal.completa + qTotal.pro;
   const fotosL = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tL,0);
   const fotosC = L.filter(x=>x.grupo==="Fotos").reduce((s,x)=>s+x.tC,0);
-  const ajustes = [];
-  // la exclusividad como cortesia: se muestra a precio de lista y no se cobra
+  const secAjustes = multi ? (fotosModo === "unico" ? "Fotos" : "Ajustes de fotos") : null;
   const exclC = $("gExcl").checked ? 0 : exclPct;
-  if(exclPct) ajustes.push({grupo:"Fotos",concepto:`Pack exclusivo (+${exclPct} %)`,
-                            detalle:"Sin venta individual posterior" + (exclC ? "" : " · cortesía"),
-                            cant:null,tL:fotosL*exclPct/100,tC:fotosC*exclC/100,cortesia:!exclC});
-  // el descuento rebaja solo lo que paga el cliente: si tambien rebajara la
-  // lista, la diferencia (el ahorro) no lo veria. Con 100 % salia 2,8 %.
+  if(exclPct) L.push({grupo:"Fotos", seccion:secAjustes, fechaIdx:null, concepto:`Pack exclusivo (+${exclPct} %)`,
+    detalle:"Sin venta individual posterior" + (exclC ? "" : " · cortesía"),
+    cant:null, tL:fotosL*exclPct/100, tC:fotosC*exclC/100, cortesia:!exclC});
   if(volPct){
     const baseC = fotosC*(1+exclC/100);
-    ajustes.push({grupo:"Fotos",concepto:`Descuento en las fotos (${volPct} %)`,detalle:`${totalFotos} fotos`,
-                  cant:null,tL:0,tC:-baseC*Math.min(100, volPct)/100,desc:true});
+    L.push({grupo:"Fotos", seccion:secAjustes, fechaIdx:null, concepto:`Descuento en las fotos (${volPct} %)`,
+      detalle:`${totalFotos} fotos`, cant:null, tL:0, tC:-baseC*Math.min(100, volPct)/100, desc:true});
   }
-  ajustes.forEach(a => L.push(a));
 
-  if(!social && $("aLogo").checked) linea("Add-ons","Logo/marco del cliente","Incluye exportación adaptada a redes sociales",
-                               1, num("lLogo"), num("cLogo"), $("gLogo").checked);
+  const secAddons = multi ? "Add-ons" : null;
+  const nFechas = fechasRes.length;
+  if(!social && $("aLogo").checked){
+    const cantLogo = multi && $("alcanceLogo").value === "por_fecha" ? nFechas : 1;
+    linea("Add-ons","Logo/marco del cliente","Incluye exportación adaptada a redes sociales" + (cantLogo > 1 ? ` · ${cantLogo} fechas` : ""),
+      cantLogo, num("lLogo"), num("cLogo"), $("gLogo").checked, secAddons, null);
+  }
   if(!social && $("aPartidos").checked){
     const np = ent("nPartidos");
-    linea("Add-ons","Separación por partidos", (np ? np + " partidos · " : "") + "con conteo de fotos por partido",
-          1, num("lPartidos"), num("cPartidos"), $("gPartidos").checked);
+    const cantPart = multi && $("alcancePartidos").value === "por_fecha" ? nFechas : 1;
+    linea("Add-ons","Separación por partidos", (np ? np + " partidos · " : "") + "con conteo de fotos por partido" + (cantPart > 1 ? ` · ${cantPart} fechas` : ""),
+      cantPart, num("lPartidos"), num("cPartidos"), $("gPartidos").checked, secAddons, null);
   }
+  const precioTramo = n => {
+    const tr = T.seleccion, i = tr.findIndex(([cant]) => n <= cant);
+    if(i >= 0) return {p: tr[i][1], det: `tramo hasta ${tr[i][0]}`};
+    const [cant, precio] = tr[tr.length-1];
+    return {p: precio + Math.round((n-cant)*precio/cant/100)*100, det: `sobre ${cant}, a su precio por foto`};
+  };
   if($("aSeleccion").checked && totalFotos){
-    // por tramos, como la pagina publica: el tramo que cubre las fotos del pedido
-    const tr = T.seleccion, i = tr.findIndex(([cant]) => totalFotos <= cant);
-    let pSel;
-    if(i >= 0) pSel = tr[i][1];
-    else { const [cant, precio] = tr[tr.length-1]; pSel = precio + Math.round((totalFotos-cant)*precio/cant/100)*100; }
-    linea("Add-ons","Selección personal",
-          `Elijo las ${totalFotos} fotos por el organizador · ` + (i >= 0 ? `tramo hasta ${tr[i][0]}` : `sobre ${tr[tr.length-1][0]}, a su precio por foto`),
-          1, pSel, pSel, $("gSel").checked);
-  }
-
-  // traslado: los km de ida (los de Google Maps) por 2, al valor del km de las
-  // tarifas; el estacionamiento va aparte. Los dos pueden ir de cortesia.
-  const km = num("km");
-  if(km > 0) linea("Otros","Traslado",`${km.toLocaleString("es-CL")} km de ida · ida y vuelta a ${pesos(T.km)} el km`,
-                   2*km, T.km, T.km, $("gKm").checked);
-  const est = num("estac"), estG = $("gEstac").checked;
-  if(est) L.push({grupo:"Otros",concepto:"Estacionamiento",detalle:estG ? "Cortesía" : "",
-                  cant:null,tL:est,tC:estG ? 0 : est,cortesia:estG});
-
-  // Hora pasada: tolerancia 15 min, despues bloques de 20 min iniciados a 1/3 de la hora
-  let pasada = null;
-  const real = $("horaReal").value;
-  if(real && $("horaFin").value){
-    let ex = minutos(real) - minutos($("horaFin").value);
-    if(ex < -720) ex += 1440;            // termino pasada la medianoche
-    const bloques = ex > 15 ? Math.ceil(ex/20) : 0;
-    pasada = {ex: Math.max(0,ex), bloques};
-    if(bloques) L.push({grupo:"Otros",concepto:"Hora pasada",detalle:`Terminé a las ${real} (${ex} min después) · bloques de 20 min a 1/3 de la hora`,
-                        cant:bloques,uL:num("lHora")/3,uC:num("cHora")/3*(1+rec/100),tL:bloques*num("lHora")/3,tC:bloques*num("cHora")/3*(1+rec/100)});
+    if(multi && fotosModo === "por_fecha" && $("alcanceSel").value === "por_fecha"){
+      fechasRes.forEach((f, idx) => {
+        if(!f.totalFotos) return;
+        const t = precioTramo(f.totalFotos);
+        linea("Add-ons","Selección personal", `Elijo las ${f.totalFotos} fotos por el organizador · ${t.det}`,
+          1, t.p, t.p, $("gSel").checked, f.sec, idx);
+      });
+    } else {
+      const t = precioTramo(totalFotos);
+      linea("Add-ons","Selección personal", `Elijo las ${totalFotos} fotos por el organizador · ${t.det}`,
+        1, t.p, t.p, $("gSel").checked, secAddons, null);
+    }
   }
 
   const subL = L.reduce((s,x)=>s+x.tL,0), subC = L.reduce((s,x)=>s+x.tC,0);
@@ -10693,19 +11988,40 @@ function calcular(){
   const ret = num("retencion")/100;
   const total = conBoleta ? Math.round(subC/(1-ret)) : Math.round(subC);
   const impuesto = total - Math.round(subC);
-  // el anticipo son las horas (con el recargo de canchas), no un % del total;
-  // con boleta va bruteado igual que el total
   const cob = L.filter(x=>x.grupo==="Cobertura").reduce((s,x)=>s+x.tC,0);
   const anticipo = $("anticipo").checked ? Math.min(total, Math.round(conBoleta ? cob/(1-ret) : cob)) : 0;
-  return {L, horas, q, totalFotos, pack, P, social, cubreMin, minTxt, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
-          ahorro: subL - subC, conBoleta, ret, pasada};
+
+  let PComun = null;
+  if(!multi) PComun = P0;
+  else if(fotosModo === "unico") PComun = PUnico;
+  else if(fechasRes.every(f => f.packFotos && f.packFotos === fechasRes[0].packFotos)) PComun = fechasRes[0].P;
+
+  return {L, fechas: fechasRes, horas: totalHoras, q: qTotal, totalFotos, pack, P: PComun,
+          social, fotosModo, minUnico, subL, subC, total, impuesto, anticipo, saldo: total-anticipo,
+          ahorro: subL - subC, conBoleta, ret, pasada: hayPasada};
 }
 
 function render(){
   const r = calcular();
   const v = id => esc($(id).value.trim());
+  const multi = r.fechas.length > 1;
+
   $("bloqueAbierto").style.display = r.pack === "abierto" ? "" : "none";
   $("bloqueExclusivo").style.display = r.pack === "exclusivo" ? "" : "none";
+  $("czFecha1Cab").style.display = multi ? "" : "none";
+  $("bloqueFotosModo").style.display = multi ? "" : "none";
+  $("legFotos").textContent = multi && r.fotosModo === "por_fecha" ? "2. Fotos seleccionadas · " + r.fechas[0].titulo : "2. Fotos seleccionadas";
+  $("lblKm").textContent = multi ? "Traslado Fecha 1: km de ida" : "Traslado: km de ida";
+  $("lblEstac").textContent = multi ? "Estacionamiento Fecha 1 ($)" : "Estacionamiento ($)";
+  $("lblHoraReal").textContent = multi ? "Fecha 1 · Hora real en que terminé de fotografiar" : "Hora real en que terminé de fotografiar";
+  $("avisoMulti").style.display = multi ? "" : "none";
+  $("avisoMulti").textContent = multi ? `${r.fechas.length} fechas en esta cotización` : "";
+  document.querySelectorAll("#czFechasExtra [data-bloque-fotos]").forEach(el => {
+    el.style.display = r.fotosModo === "por_fecha" ? "" : "none";
+  });
+  $("bloqueAlcanceLogo").style.display = multi && !r.social && $("aLogo").checked ? "" : "none";
+  $("bloqueAlcancePartidos").style.display = multi && !r.social && $("aPartidos").checked ? "" : "none";
+  $("bloqueAlcanceSel").style.display = multi && r.fotosModo === "por_fecha" && $("aSeleccion").checked ? "" : "none";
 
   const valida = (() => { const d = new Date(); d.setDate(d.getDate()+ent("validez")); return d.toLocaleDateString("es-CL"); })();
   const pct = r.subL ? Math.round(r.ahorro/r.subL*1000)/10 : 0;
@@ -10713,7 +12029,16 @@ function render(){
   // tabla de detalle
   let filas = "", grupoAct = "";
   r.L.forEach(x => {
-    if(x.grupo !== grupoAct){ grupoAct = x.grupo; filas += `<tr class="cz-grupo"><td colspan="5">${x.grupo}</td></tr>`; }
+    const sec = multi ? (x.seccion || x.grupo) : x.grupo;
+    if(sec !== grupoAct){
+      grupoAct = sec;
+      if(multi){
+        const subSec = r.L.filter(y => (y.seccion || y.grupo) === sec).reduce((s,y) => s + y.tC, 0);
+        filas += `<tr class="cz-grupo"><td colspan="5"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${esc(sec)}</span><span>Subtotal: ${pesos(subSec)}</span></div></td></tr>`;
+      } else {
+        filas += `<tr class="cz-grupo"><td colspan="5">${esc(sec)}</td></tr>`;
+      }
+    }
     const cant = x.cant == null ? "" : (Number.isInteger(x.cant) ? x.cant : x.cant.toLocaleString("es-CL"));
     let unit = "", lista = x.tL > x.tC && !x.desc ? `<s>${pesos(x.tL)}</s>` : "";
     if(x.uL != null){
@@ -10727,7 +12052,6 @@ function render(){
   if(r.conBoleta) filas += `<tr><td>Impuesto de segunda categoría (${(r.ret*100).toLocaleString("es-CL")} %)<span class="cz-d">Emito boleta de honorarios: la retención la declaro y pago yo</span></td><td></td><td></td><td></td><td>${pesos(r.impuesto)}</td></tr>`;
   filas += `<tr class="cz-tot"><td>Total a pagar</td><td></td><td></td><td></td><td>${pesos(r.total)}</td></tr>`;
 
-  // composicion del cobro (como el grafico de consumo de la cuenta de luz)
   const comp = [["Cobertura","var(--cz-c1)"],["Fotos","var(--cz-c2)"],["Add-ons","var(--cz-c3)"],["Otros","var(--cz-c4)"]]
     .map(([g,c]) => [g, c, r.L.filter(x=>x.grupo===g).reduce((s,x)=>s+x.tC,0)]).filter(x=>x[2]>0);
   if(r.impuesto>0) comp.push(["Impuesto","var(--cz-c5)",r.impuesto]);
@@ -10735,7 +12059,6 @@ function render(){
   const barra = comp.map(([g,c,m]) => `<div style="width:${m/compTot*100}%;background:${c}" title="${g}"></div>`).join("");
   const leyenda = comp.map(([g,c,m]) => `<span><i style="background:${c}"></i>${g} ${pesos(m)} · ${Math.round(m/compTot*100)} %</span>`).join("");
 
-  // niveles de edicion (Completa marcada como recomendada)
   const pu = (l,c) => c < l ? `<s>${pesos(l)}</s> ${pesos(c)}` : pesos(c);
   const niveles = [["basica",num("lBasica"),num("cBasica")],["completa",num("lCompleta"),num("cCompleta")],["pro",num("lPro"),num("cPro")]]
     .filter(([k]) => NIVELES[k])
@@ -10746,7 +12069,6 @@ function render(){
       <p class="cz-resol">${NIVELES[k].resolucion[0]} · ${NIVELES[k].resolucion[1].toLocaleString("es-CL")} px en el borde largo</p>
       <ul>${NIVELES[k].items.map(i=>`<li>${i}</li>`).join("")}</ul></div>`).join("");
 
-  // condiciones de venta posterior
   let venta = "";
   const quienes = r.social ? "invitados" : "jugadores", quien = r.social ? "invitado" : "jugador";
   if(r.pack === "exclusivo"){
@@ -10754,25 +12076,61 @@ function render(){
   } else {
     const c = $("comparte").value;
     venta = `<li><b>Pack abierto:</b> después de la entrega publicaré una galería con marca de agua donde los ${quienes} podrán comprar fotos de forma individual, a precios propios que no tienen relación con el cliente.</li>`;
-    // que nadie diga despues que no sabia: el cliente avisa, y quien no quiera
-    // aparecer pide que saquen sus fotos de la venta
     venta += `<li><b>Aviso a los asistentes:</b> al aceptar esta cotización, el cliente se compromete a informar a todos los ${r.social ? "invitados" : "jugadores, apoderados y representantes"} que la galería se publicará después del evento para su venta individual, con búsqueda por cara. Quien no quiera aparecer puede pedírmelo y retiro sus fotos de la venta.</li>`;
-    // toda galeria a la venta la lleva desde el 4/11/2026: ya no es una opcion
     venta += `<li><b>Búsqueda por cara:</b> analizaré con IA las caras de las fotos de la galería de venta para que cada ${quien} encuentre las suyas subiendo una selfie, sin revisar el evento completo. La selfie solo se usa para buscar y se borra al instante.</li>`;
     if(c === "si") venta += `<li>El cliente indicó que <b>compartirá con los ${quienes} las fotos que compró</b>: esas fotos quedan fuera de la venta individual, para que nadie pague por una foto que ya tiene.</li>`;
     else if(c === "no") venta += `<li>El cliente indicó que <b>no compartirá</b> las fotos que compró: todas las fotos del evento pueden quedar a la venta individual.</li>`;
   }
   const avisoComparte = r.pack === "abierto" && !$("comparte").value
     ? `<div class="cz-aviso">Pendiente: el cliente debe indicar si compartirá con los ${quienes} las fotos que compra. Es obligatorio, para no cobrarle a un ${quien} una foto que ya tiene.</div>` : "";
-  const avisoPasada = r.pasada && !r.pasada.bloques && r.pasada.ex > 0
-    ? `<li>Terminé ${r.pasada.ex} min después de la hora acordada, dentro de la tolerancia: sin cobro.</li>` : "";
+  const avisoPasada = r.fechas
+    .filter(f => f.pasada && !f.pasada.bloques && f.pasada.ex > 0)
+    .map(f => `<li>${multi ? `<b>${esc(f.titulo)}:</b> t` : "T"}erminé ${f.pasada.ex} min después de la hora acordada, dentro de la tolerancia: sin cobro.</li>`)
+    .join("");
 
-  // pedido a medida: el minimo va en la boleta y, si no se cumple, aviso en el formulario
-  const minLi = !r.P && r.horas ? `<li><b>Pedido a medida:</b> ${r.minTxt}</li>` : "";
-  $("minAviso").textContent = r.P || !r.horas ? "" : "Pedido a medida: " + r.minTxt
-    + (r.cubreMin < 1 ? ` Este pedido cubre el ${Math.floor(r.cubreMin*100)} %.` : "");
-  $("minAviso").style.color = !r.P && r.cubreMin < 1 ? "#e0a84a" : "";
+  // avisos de minimo por fecha (o unico)
+  let minLi = "";
+  if(multi && r.fotosModo === "unico"){
+    $("minAviso").textContent = r.P || !r.horas ? "" : "Pedido a medida: " + r.minUnico.txt
+      + (r.minUnico.cubre < 1 ? ` Este pedido cubre el ${Math.floor(r.minUnico.cubre*100)} %.` : "");
+    $("minAviso").style.color = !r.P && r.minUnico.cubre < 1 ? "#e0a84a" : "";
+    if(!r.P && r.horas) minLi = `<li><b>Pedido a medida:</b> ${r.minUnico.txt}</li>`;
+  } else {
+    r.fechas.forEach(f => {
+      if(!f.minEl) return;
+      f.minEl.textContent = f.P || !f.horas ? "" : "Pedido a medida: " + f.minTxt
+        + (f.cubreMin < 1 ? ` Este pedido cubre el ${Math.floor(f.cubreMin*100)} %.` : "");
+      f.minEl.style.color = !f.P && f.cubreMin < 1 ? "#e0a84a" : "";
+    });
+    const sinPack = r.fechas.filter(f => !f.P && f.horas);
+    if(sinPack.length){
+      const M = T.minimo_hora;
+      if(!multi) minLi = `<li><b>Pedido a medida:</b> ${sinPack[0].minTxt}</li>`;
+      else {
+        const hPers = sinPack.reduce((s,f) => s + f.horas, 0);
+        const hPTxt = (Math.round(hPers*100)/100).toLocaleString("es-CL");
+        minLi = `<li><b>Pedido a medida:</b> el mínimo es ${M.completa} fotos con edición completa por hora de cobertura (o ${M.pro} profesionales${r.social ? "" : `, o ${M.basica} básicas`}, o una mezcla equivalente). Para ${hPTxt} h en pedido a medida: ${Math.ceil(M.completa*hPers)} completas o ${Math.ceil(M.pro*hPers)} profesionales${r.social ? "" : ` o ${Math.ceil(M.basica*hPers)} básicas`}.</li>`;
+      }
+    }
+  }
+
   const hayPago = PAGO.some(id => $(id).value.trim());
+  const f0 = r.fechas[0];
+  const lugarComun = r.fechas.every(f => f.lugar && f.lugar === f0.lugar) ? f0.lugar : "";
+  const fechasHtml = !multi
+    ? `<dt>Fecha</dt><dd>${fechaLarga(f0.fecha)}</dd>
+       <dt>Horario</dt><dd>${esc(f0.horaInicio) || "--:--"} a ${esc(f0.horaFin) || "--:--"} hrs${r.social ? "" : " · partidos de " + esc(f0.durPartido) + " min"}</dd>
+       ${f0.lugar ? `<dt>Lugar</dt><dd>${esc(f0.lugar)}</dd>` : ""}`
+    : `<dt>Fechas</dt><dd><ul class="cz-fechas-list">${r.fechas.map(f =>
+        `<li><b>${esc(f.titulo)}:</b> ${fechaLarga(f.fecha)} · ${esc(f.horaInicio) || "--:--"} a ${esc(f.horaFin) || "--:--"} hrs${r.social ? "" : " · partidos de " + esc(f.durPartido) + " min"}${!lugarComun && f.lugar ? " · " + esc(f.lugar) : ""}</li>`
+      ).join("")}</ul></dd>
+      ${lugarComun ? `<dt>Lugar</dt><dd>${esc(lugarComun)}</dd>` : ""}`;
+  const packDetalle = multi && r.fotosModo === "por_fecha" && r.fechas.length <= 4
+    ? ` (${r.fechas.map(f => f.totalFotos).join(" + ")})`
+    : (multi && r.fotosModo === "unico" ? ` (para las ${r.fechas.length} fechas)` : "");
+
+  const urgUnica = r.fechas.every(f => f.recargoUrg === r.fechas[0].recargoUrg) ? r.fechas[0].recargoUrg : 0;
+  const valorBloque = pesos(num("cHora")/3*(1+urgUnica/100));
 
   $("hoja").innerHTML = `
   <div class="cz-cab">
@@ -10786,10 +12144,8 @@ function render(){
     <div class="cz-caja"><h3>Cliente y evento</h3><dl>
       <dt>Organizador</dt><dd>${v("cliente") || "—"}</dd>
       <dt>Evento</dt><dd>${v("evento") || "—"}</dd>
-      <dt>Fecha</dt><dd>${fechaLarga($("fechaEvento").value)}</dd>
-      <dt>Horario</dt><dd>${v("horaInicio") || "--:--"} a ${v("horaFin") || "--:--"} hrs${r.social ? "" : " · partidos de " + $("durPartido").value + " min"}</dd>
-      ${$("lugar").value.trim() ? `<dt>Lugar</dt><dd>${v("lugar")}</dd>` : ""}
-      <dt>Pack</dt><dd>${r.P ? r.P.nombre + " · " : ""}${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas</dd>
+      ${fechasHtml}
+      <dt>Pack</dt><dd>${r.P ? r.P.nombre + (multi && r.fotosModo === "por_fecha" ? " × " + r.fechas.length : "") + " · " : ""}${r.pack === "exclusivo" ? "Exclusivo" : "Abierto"} · ${r.totalFotos} fotos seleccionadas${packDetalle}</dd>
     </dl></div>
     <div class="cz-total-caja"><small>Total a pagar</small><div class="cz-monto">${pesos(r.total)}</div>
       ${r.anticipo > 0 ? `<div class="cz-linea"><span>Anticipo para reservar (la cobertura)</span><span>${pesos(r.anticipo)}</span></div>
@@ -10797,10 +12153,13 @@ function render(){
     </div>
   </div>
 
-  ${r.ahorro > 0 ? `<div class="cz-ahorro"><span>Valor a precio de lista: <s style="color:inherit">${pesos(r.subL)}</s><br>${(() => { const lp = r.P && r.L.find(x => x.concepto === "Pack " + r.P.nombre);
-      // "con el pack" solo si el ahorro es nada mas que el del pack
-      return lp && Math.abs(r.ahorro - (lp.tL - lp.tC)) < 1 ? "Con el pack " + r.P.nombre + " ahorra"
-           : r.P ? "Su ahorro total" : "Su tarifa preferente le ahorra"; })()}</span>
+  ${r.ahorro > 0 ? `<div class="cz-ahorro"><span>Valor a precio de lista: <s style="color:inherit">${pesos(r.subL)}</s><br>${(() => {
+      const packsL = r.L.filter(x => x.esPack);
+      const ahorroPacks = packsL.reduce((s,x)=>s+x.tL-x.tC, 0);
+      return packsL.length && Math.abs(r.ahorro - ahorroPacks) < 1
+        ? (r.P ? "Con el pack " + r.P.nombre + " ahorra" : "Con los packs elegidos ahorra")
+        : (packsL.length ? "Su ahorro total" : "Su tarifa preferente le ahorra");
+    })()}</span>
     <span><b>${pesos(r.ahorro)}</b> (${pct.toLocaleString("es-CL")} %)</span></div>` : ""}
   ${avisoComparte}
 
@@ -10820,17 +12179,17 @@ function render(){
     <li>Cubro el evento completo: los momentos que me pidan, los que nadie pide y las fotos grupales con la familia y los invitados.</li>
     ${$("aSeleccion").checked
       ? `<li>Yo elijo las mejores fotos y las entrego editadas en 4K (3.840 px en el borde largo), sin marca de agua, ${ent("plazo")} días hábiles después del evento, por galería privada o Google Drive.</li>`
-      : `<li>Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para que elijan con calma. Las elegidas se entregan editadas en 4K (3.840 px en el borde largo), sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>`}
+      : `<li>Dentro de ${ent("plazoGaleria")} horas${multi ? " tras cada jornada" : ""} subo la galería completa con marca de agua para que elijan con calma. Las elegidas se entregan editadas en 4K (3.840 px en el borde largo), sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>`}
     <li>La edición completa incluye limpieza leve de piel de hasta 2 protagonistas por foto; la profesional, retoque de hasta 5 rostros protagonistas.</li>
-    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si el evento se alarga y sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3*(1+Math.max(0,num("recargoUrg"))/100))} por bloque).</li>
+    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si el evento se alarga y sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${valorBloque} por bloque).</li>
     ${avisoPasada}${minLi}
     ${venta}
     <li>Puedo usar algunas fotos en mi portafolio, salvo que me pidan lo contrario.</li>
     ${r.anticipo > 0 ? `<li>El anticipo reserva la fecha. Si el evento se cancela o se reprograma, el anticipo se usa para la nueva fecha (sujeto a disponibilidad).</li>` : ""}
     ${$("notas").value.trim() ? `<li>${v("notas")}</li>` : ""}` : `
-    <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} partidos a la vez sin recargo; desde el siguiente, +${T.cancha_extra_pct} % de la hora por cada uno, en el horario que lo tiene. Partidos de 30 minutos: +${T.duracion_pct["30"]} % de la cobertura; de 20 minutos: +${T.duracion_pct["20"]} %. Dentro de ${ent("plazoGaleria")} horas subo la galería completa con marca de agua para seleccionar.</li>
+    <li>Cubro la jornada completa sin límite de disparos, hasta ${T.canchas_incluidas} partidos a la vez sin recargo; desde el siguiente, +${T.cancha_extra_pct} % de la hora por cada uno, en el horario que lo tiene. Partidos de 30 minutos: +${T.duracion_pct["30"]} % de la cobertura; de 20 minutos: +${T.duracion_pct["20"]} %. Dentro de ${ent("plazoGaleria")} horas${multi ? " tras cada jornada" : ""} subo la galería completa con marca de agua para seleccionar.</li>
     <li>Las fotos seleccionadas se entregan editadas y en alta resolución, sin marca, ${ent("plazo")} días hábiles después de recibir la selección.</li>
-    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${pesos(num("cHora")/3*(1+Math.max(0,num("recargoUrg"))/100))} por bloque).</li>
+    <li><b>Hora pasada:</b> la cobertura se cobra por las horas acordadas. Si después del término sigo fotografiando, hay 15 minutos de tolerancia; luego se cobra cada bloque de 20 minutos iniciado a 1/3 del valor de la hora (${valorBloque} por bloque).</li>
     ${avisoPasada}${minLi}
     ${venta}
     <li>Derechos de uso para las redes del club y de los jugadores. No se permite su venta ni uso comercial sin acuerdo previo.</li>
@@ -10849,24 +12208,47 @@ function render(){
       ${$("pMail").value.trim() ? `<dt>Comprobante</dt><dd>${v("pMail")}</dd>` : ""}</dl>`
       : `<p class="cz-cond">Se envían junto con la confirmación.</p>`}</div>
     <div class="cz-caja"><h3>Resumen</h3><dl>
+      ${multi ? `<dt>Fechas</dt><dd>${r.fechas.length}</dd>` : ""}
       <dt>Fotos</dt><dd>${r.social ? "" : r.q.basica + " básicas · "}${r.q.completa} completas · ${r.q.pro} profesionales</dd>
       <dt>Boleta</dt><dd>${r.conBoleta ? "Sí, boleta de honorarios" : "No"}</dd>
       <dt>Total</dt><dd><b>${pesos(r.total)}</b></dd></dl></div>
   </div>
 
   <div class="cz-pie"><span>${r.social ? "rb.fotos · rbfotos.studio" : "RB.Deportes_ · @rb.deportes_"}</span><span>Valores en pesos chilenos</span></div>`;
-
-  guardar();
 }
 
+const fmtLineaWsp = x => `• ${x.concepto}${x.cant!=null?` (${Number.isInteger(x.cant)?x.cant:x.cant.toLocaleString("es-CL")})`:""}: ${x.cortesia?"cortesía":(x.tC<0?"−"+pesos(-x.tC):pesos(x.tC))}`;
+
 function resumenWsp(){
-  const r = calcular();
+  const r = calcular(), multi = r.fechas.length > 1;
   const t = [];
   t.push(`*Cotización ${$("numero").value}*`);
-  t.push(`${$("evento").value || "Evento"}: ${fechaLarga($("fechaEvento").value)}, ${$("horaInicio").value} a ${$("horaFin").value}` + (esSocial() ? "" : `, partidos de ${$("durPartido").value} min`));
-  t.push("");
-  r.L.forEach(x => t.push(`• ${x.concepto}${x.cant!=null?` (${Number.isInteger(x.cant)?x.cant:x.cant.toLocaleString("es-CL")})`:""}: ${x.cortesia?"cortesía":(x.tC<0?"−"+pesos(-x.tC):pesos(x.tC))}`));
-  if(r.conBoleta) t.push(`• Impuesto boleta: ${pesos(r.impuesto)}`);
+  if(!multi){
+    const f = r.fechas[0];
+    t.push(`${$("evento").value || "Evento"}: ${fechaLarga(f.fecha)}, ${f.horaInicio} a ${f.horaFin}` + (r.social ? "" : `, partidos de ${f.durPartido} min`));
+    t.push("");
+    r.L.forEach(x => t.push(fmtLineaWsp(x)));
+  } else {
+    t.push(`*${$("evento").value || "Evento"}* (${r.fechas.length} fechas)`);
+    r.fechas.forEach((f, idx) => {
+      t.push("");
+      t.push(`*${f.titulo}*: ${fechaLarga(f.fecha)}, ${f.horaInicio || "--:--"} a ${f.horaFin || "--:--"}`
+        + (f.lugar ? ` · ${f.lugar}` : "")
+        + (r.social ? "" : `, partidos de ${f.durPartido} min`));
+      const items = r.L.filter(x => x.fechaIdx === idx);
+      items.forEach(x => t.push(fmtLineaWsp(x)));
+      if(items.length > 1) t.push(`_Subtotal ${f.titulo}: ${pesos(items.reduce((s,x)=>s+x.tC,0))}_`);
+    });
+    const compartidos = r.L.filter(x => x.fechaIdx == null);
+    if(compartidos.length){
+      t.push("");
+      t.push("*Adicionales / compartido*");
+      compartidos.forEach(x => t.push(fmtLineaWsp(x)));
+    }
+    t.push("");
+    t.push(`Subtotal neto: ${pesos(r.subC)}`);
+  }
+  if(r.conBoleta) t.push(`• Impuesto boleta (${(r.ret*100).toLocaleString("es-CL")} %): ${pesos(r.impuesto)}`);
   t.push("");
   if(r.ahorro>0) t.push(`Precio de lista ${pesos(r.subL)}. Tu descuento: ${pesos(r.ahorro)}`);
   t.push(`*Total: ${pesos(r.total)}*`);
@@ -10876,24 +12258,111 @@ function resumenWsp(){
   return t.join("\n");
 }
 
-// ---------- persistencia (solo comodidad local) ----------
+function resumenCortoDe(r){
+  if(r.fechas.length === 1){
+    const f = r.fechas[0];
+    return [f.fecha ? fechaCorta(f.fecha, true) : "Sin fecha", (f.horaInicio && f.horaFin) ? `${f.horaInicio}–${f.horaFin}` : "", f.lugar].filter(Boolean).join(" · ");
+  }
+  return `${r.fechas.length} fechas (` + r.fechas.map(f => f.fecha ? fechaCorta(f.fecha, false) : f.titulo).join(", ") + ")";
+}
+
+// ---------- persistencia del formulario y guardado en el servidor ----------
 function campos(){ return [...document.querySelectorAll("#form input, #form select, #form textarea")].filter(e=>e.id); }
-function guardar(){
+function leerFormulario(){
   const d = {}; campos().forEach(e => d[e.id] = e.type === "checkbox" ? e.checked : e.value);
-  try{ localStorage.setItem(CLAVE, JSON.stringify(d)); }catch(_){}
+  return d;
 }
 function aplicar(d){
   firmaCz = "";
   if(d.tipoEvento){ $("tipoEvento").value = d.tipoEvento; pintarModo(); }
   Object.entries(d).forEach(([k,val]) => { const e = $(k); if(!e) return;
     if(e.type === "checkbox") e.checked = !!val; else e.value = val; });
+  if("fechasExtra" in d){
+    extraDates = parseExtra();
+    reconstruirFechasExtra();
+  }
 }
-function cargar(){
-  try{ const d = JSON.parse(localStorage.getItem(CLAVE) || "null");
-    if(d){ if(d.pCuenta && !d.pNumero) d.pNumero = d.pCuenta;   // el campo viejo "Tipo y N° cuenta"
-           if(+d.traslado && !+d.estac){ d.estac = d.traslado; d.gEstac = d.gTraslado; }  // y "Traslado y estacionamiento"
-           aplicar(d); return true; } }catch(_){}
-  return false;
+function guardarPagoLocal(){
+  const p = {}; PAGO.forEach(id => p[id] = $(id).value);
+  try{ localStorage.setItem(CLAVE_PAGO, JSON.stringify(p)); }catch(_){}
+}
+function cargarPagoLocal(){
+  try{
+    const p = JSON.parse(localStorage.getItem(CLAVE_PAGO) || "null");
+    if(p && typeof p === "object") return p;
+  }catch(_){}
+  return {};
+}
+
+function actualizarEstadoBarra(){
+  const el = $("edEstado");
+  el.className = "cz-ed-estado" + (sucio ? "" : (idActual ? " ok" : ""));
+  if(idActual){
+    el.textContent = sucio ? "Cambios sin guardar..." : `Guardada · ${$("numero").value || "—"}`;
+    $("guardarNueva").style.display = "";
+    $("borrarCot").style.display = "";
+  } else {
+    el.textContent = sucio ? "Sin guardar todavía..." : "Nueva cotización";
+    $("guardarNueva").style.display = "none";
+    $("borrarCot").style.display = "none";
+  }
+}
+
+function marcarSucio(){
+  sucio = true;
+  actualizarEstadoBarra();
+  clearTimeout(timerGuardado);
+  const tieneAlgo = idActual || $("cliente").value.trim() || $("evento").value.trim() || $("fechaEvento").value || extraDates.length > 0;
+  if(tieneAlgo) timerGuardado = setTimeout(() => guardarServidor(false), 700);
+}
+
+async function guardarServidor(forzar, comoNueva){
+  clearTimeout(timerGuardado);
+  if(enVuelo){
+    await enVuelo;
+    if(!sucio && !forzar && !comoNueva) return true;
+  }
+  const r = calcular();
+  const datos = leerFormulario();
+  const cid = comoNueva ? "" : (idActual || "");
+  enVuelo = (async () => {
+    $("edEstado").className = "cz-ed-estado";
+    $("edEstado").textContent = "Guardando...";
+    try{
+      const resp = await fetch("/panel/cotizador/guardar", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          id: cid,
+          organizador: $("cliente").value.trim(),
+          evento: $("evento").value.trim(),
+          numero: $("numero").value.trim(),
+          total: Math.round(r.total),
+          resumen: resumenCortoDe(r),
+          datos
+        })
+      });
+      if(!resp.ok) throw new Error("http " + resp.status);
+      const j = await resp.json();
+      if(!j.ok || !j.cotizacion) throw new Error("respuesta");
+      const saved = j.cotizacion;
+      idActual = saved.id;
+      sucio = false;
+      const idx = listaCot.findIndex(x => x.id === saved.id);
+      if(idx >= 0) listaCot[idx] = saved; else listaCot.unshift(saved);
+      listaCot.sort((a,b) => String(b.actualizada || "").localeCompare(String(a.actualizada || "")));
+      if(location.search !== "?id=" + encodeURIComponent(idActual)){
+        history.replaceState({vista:"editor", id:idActual}, "", "/panel/cotizador?id=" + encodeURIComponent(idActual));
+      }
+      actualizarEstadoBarra();
+      return true;
+    }catch(_){
+      $("edEstado").className = "cz-ed-estado err";
+      $("edEstado").textContent = "No se pudo guardar (revisa conexión)";
+      return false;
+    }
+  })();
+  try{ return await enVuelo; } finally { enVuelo = null; }
 }
 
 // ---------- cuentas de banco guardadas ----------
@@ -10906,16 +12375,16 @@ function pintarCuentas(sel){
 }
 $("pSel").addEventListener("change", () => {
   const c = cuentas()[+$("pSel").value];
-  if(c) PAGO.forEach(id => { $(id).value = c[id] || ""; });
+  if(c){ PAGO.forEach(id => { $(id).value = c[id] || ""; }); guardarPagoLocal(); }
   render();
 });
 $("pGuardar").addEventListener("click", () => {
   const cs = cuentas(), c = {}; PAGO.forEach(id => c[id] = $(id).value.trim());
   if(!c.pNumero){ alert("Falta el N° de cuenta."); return; }
-  // si es la misma cuenta (banco y numero) se actualiza; si no, se agrega
   let i = cs.findIndex(x => x.pBanco === c.pBanco && x.pNumero === c.pNumero);
   if(i < 0){ cs.push(c); i = cs.length - 1; } else cs[i] = c;
   try{ localStorage.setItem(CLAVE_CUENTAS, JSON.stringify(cs)); }catch(_){}
+  guardarPagoLocal();
   pintarCuentas(i);
 });
 $("pBorrar").addEventListener("click", () => {
@@ -10927,27 +12396,321 @@ $("pBorrar").addEventListener("click", () => {
 });
 pintarCuentas(null);
 
+// ---------- indice de organizadores / eventos / cotizaciones ----------
+function fmtFechaAct(iso){
+  if(!iso) return "";
+  const d = new Date(iso); if(isNaN(d)) return "";
+  return d.toLocaleDateString("es-CL", {day:"2-digit", month:"2-digit"}) + " " + d.toLocaleTimeString("es-CL", {hour:"2-digit", minute:"2-digit", hour12:false});
+}
+
+function agruparCotizaciones(items, filtro){
+  const q = normTxt(filtro);
+  const orgMap = new Map();
+  items.forEach(c => {
+    const orgNombre = (c.organizador || "").trim() || "Sin organizador";
+    const orgKey = normTxt(c.organizador) || "__sin_org__";
+    const evNombre = (c.evento || "").trim() || "Sin evento";
+    const evKey = normTxt(c.evento) || "__sin_ev__";
+    if(q){
+      const hay = normTxt(orgNombre + " " + evNombre + " " + (c.numero || "") + " " + (c.resumen || "")).includes(q);
+      if(!hay) return;
+    }
+    let org = orgMap.get(orgKey);
+    if(!org){ org = {key: orgKey, nombre: orgNombre, eventosMap: new Map(), totalCots: 0, sinOrg: orgKey === "__sin_org__", ult: c.actualizada || ""}; orgMap.set(orgKey, org); }
+    let ev = org.eventosMap.get(evKey);
+    if(!ev){ ev = {key: evKey, nombre: evNombre, cots: [], ult: c.actualizada || ""}; org.eventosMap.set(evKey, ev); }
+    ev.cots.push(c);
+    org.totalCots++;
+  });
+  const orgs = [...orgMap.values()].map(o => {
+    o.eventos = [...o.eventosMap.values()].sort((a,b) => String(b.ult).localeCompare(String(a.ult)));
+    return o;
+  });
+  orgs.sort((a,b) => {
+    if(a.sinOrg !== b.sinOrg) return a.sinOrg ? 1 : -1;
+    return String(b.ult).localeCompare(String(a.ult));
+  });
+  return orgs;
+}
+
+function renderIndice(){
+  const cont = $("czListaOrgs");
+  const orgs = agruparCotizaciones(listaCot, $("czBuscar").value);
+  if(!orgs.length){
+    cont.innerHTML = `<div class="cz-vacio">${listaCot.length
+      ? "No hay cotizaciones que coincidan con la búsqueda."
+      : 'Todavía no hay cotizaciones guardadas. Crea la primera con <b>+ Nuevo organizador</b>.'}</div>`;
+    return;
+  }
+  cont.innerHTML = orgs.map(org => `<div class="cz-org">
+    <div class="cz-org-cab">
+      <div>
+        <div class="cz-org-nom">${esc(org.nombre)}</div>
+        <div class="cz-org-meta">${org.eventos.length} ${org.eventos.length===1?"evento":"eventos"} · ${org.totalCots} ${org.totalCots===1?"cotización":"cotizaciones"}</div>
+      </div>
+      <button type="button" class="btn hueco cz-chico" data-nueva-org="${esc(org.key)}">+ Nueva cotización</button>
+    </div>
+    ${org.eventos.map(ev => `<div class="cz-ev">
+      <div class="cz-ev-cab">
+        <div class="cz-ev-nom">${esc(ev.nombre)}</div>
+        <button type="button" class="btn hueco cz-chico" data-nueva-ev="${esc(org.key)}||${esc(ev.key)}">+ Nueva cotización</button>
+      </div>
+      ${ev.cots.map(c => `<div class="cz-cot-fila">
+        <button type="button" class="cz-cot-info" data-abrir="${esc(c.id)}">
+          <span class="cz-cot-num">${esc(c.numero || "Sin N°")}</span>
+          <span class="cz-cot-res">${esc(c.resumen || "Sin fechas")}</span>
+          <span class="cz-cot-fec">${esc(fmtFechaAct(c.actualizada))}</span>
+        </button>
+        <div class="cz-cot-der">
+          <span class="cz-cot-tot">${pesos(c.total || 0)}</span>
+          <button type="button" class="btn hueco cz-chico" data-abrir="${esc(c.id)}">Ver / editar</button>
+          <button type="button" class="btn hueco cz-chico" data-duplicar-cot="${esc(c.id)}">Duplicar</button>
+          <button type="button" class="btn mal cz-chico" data-borrar-cot="${esc(c.id)}">Borrar</button>
+        </div>
+      </div>`).join("")}
+    </div>`).join("")}
+  </div>`).join("");
+}
+
+function mostrarVista(cual){
+  $("czIndice").hidden = cual !== "indice";
+  $("czEditor").hidden = cual !== "editor";
+  if(cual === "indice") renderIndice();
+}
+
+function resetearFormularioBase(){
+  $("form").reset();
+  extraDates = []; $("fechasExtra").value = "[]"; reconstruirFechasExtra();
+  aplicar(PRESETS.lista);
+  aplicar(cargarPagoLocal());
+}
+
+async function abrirCotizacionPorId(cid, push){
+  let cot = COT_INICIAL && COT_INICIAL.id === cid ? COT_INICIAL : null;
+  if(!cot){
+    const r = await fetch("/panel/cotizador/" + encodeURIComponent(cid));
+    if(!r.ok){ alert("No encontré esa cotización."); mostrarVista("indice"); return; }
+    const j = await r.json();
+    cot = j.cotizacion;
+  }
+  resetearFormularioBase();
+  const d = Object.assign({fechasExtra: "[]"}, cot.datos || {});
+  aplicar(d);
+  idActual = cot.id;
+  sucio = false;
+  render();
+  actualizarEstadoBarra();
+  mostrarVista("editor");
+  if(push) history.pushState({vista:"editor", id:cot.id}, "", "/panel/cotizador?id=" + encodeURIComponent(cot.id));
+}
+
+function abrirNuevoOrganizador(push){
+  resetearFormularioBase();
+  $("cliente").value = ""; $("evento").value = "";
+  $("numero").value = numeroUnico();
+  idActual = null; sucio = false;
+  render();
+  actualizarEstadoBarra();
+  mostrarVista("editor");
+  if(push) history.pushState({vista:"editor", nuevo:true}, "", "/panel/cotizador?nuevo=1");
+  $("cliente").focus();
+}
+
+const CAMPOS_TARIFA_ORG = ["tipoEvento","cHora","cBasica","cCompleta","cPro","cLogo","cPartidos",
+  "pack","comparte","recargoExcl","gExcl","boleta","retencion","anticipo","plazo","plazoGaleria"].concat(PAGO);
+
+async function abrirNuevaPara(orgKey, evKey){
+  const plantillaItem = listaCot.find(c =>
+    (normTxt(c.organizador) || "__sin_org__") === orgKey &&
+    (!evKey || (normTxt(c.evento) || "__sin_ev__") === evKey)
+  );
+  resetearFormularioBase();
+  if(plantillaItem){
+    try{
+      const r = await fetch("/panel/cotizador/" + encodeURIComponent(plantillaItem.id));
+      if(r.ok){
+        const d = (await r.json()).cotizacion.datos || {};
+        if(d.tipoEvento){ $("tipoEvento").value = d.tipoEvento; pintarModo(); }
+        CAMPOS_TARIFA_ORG.forEach(k => {
+          const e = $(k); if(!e || !(k in d)) return;
+          if(PAGO.includes(k) && !d[k]) return;   // si la plantilla no tenia datos de banco, conserva los locales
+          if(e.type === "checkbox") e.checked = !!d[k]; else e.value = d[k];
+        });
+        $("cliente").value = plantillaItem.organizador || "";
+        if(evKey){
+          $("evento").value = plantillaItem.evento || "";
+          if(d.lugar) $("lugar").value = d.lugar;
+        }
+      }
+    }catch(_){}
+  }
+  $("numero").value = numeroUnico();
+  idActual = null; sucio = false;
+  render();
+  actualizarEstadoBarra();
+  mostrarVista("editor");
+  history.pushState({vista:"editor", nuevo:true}, "", "/panel/cotizador?nuevo=1");
+  (evKey ? $("fechaEvento") : $("evento")).focus();
+}
+
+async function duplicarCotizacion(cid){
+  const r = await fetch("/panel/cotizador/" + encodeURIComponent(cid));
+  if(!r.ok){ alert("No pude cargar la cotización."); return; }
+  const cot = (await r.json()).cotizacion;
+  resetearFormularioBase();
+  aplicar(Object.assign({fechasExtra: "[]"}, cot.datos || {}));
+  $("numero").value = numeroUnico();
+  idActual = null;
+  sucio = true;
+  render();
+  actualizarEstadoBarra();
+  mostrarVista("editor");
+  history.pushState({vista:"editor", nuevo:true}, "", "/panel/cotizador?nuevo=1");
+}
+
+async function borrarCotizacion(cid){
+  if(!confirm("¿Borrar esta cotización? Esta acción no se puede deshacer.")) return;
+  const r = await fetch("/panel/cotizador/" + encodeURIComponent(cid) + "/borrar", {method:"POST"});
+  if(!r.ok){ alert("No se pudo borrar."); return; }
+  listaCot = listaCot.filter(x => x.id !== cid);
+  if(idActual === cid){
+    idActual = null; sucio = false;
+    history.pushState({vista:"indice"}, "", "/panel/cotizador");
+    mostrarVista("indice");
+  } else {
+    renderIndice();
+  }
+}
+
+// eventos del indice
+$("czBuscar").addEventListener("input", renderIndice);
+$("nuevoOrg").addEventListener("click", () => abrirNuevoOrganizador(true));
+$("czListaOrgs").addEventListener("click", e => {
+  const abrir = e.target.closest("[data-abrir]");
+  if(abrir){ abrirCotizacionPorId(abrir.dataset.abrir, true); return; }
+  const dup = e.target.closest("[data-duplicar-cot]");
+  if(dup){ duplicarCotizacion(dup.dataset.duplicarCot); return; }
+  const bor = e.target.closest("[data-borrar-cot]");
+  if(bor){ borrarCotizacion(bor.dataset.borrarCot); return; }
+  const nOrg = e.target.closest("[data-nueva-org]");
+  if(nOrg){ abrirNuevaPara(nOrg.dataset.nuevaOrg, null); return; }
+  const nEv = e.target.closest("[data-nueva-ev]");
+  if(nEv){ const [ok, ek] = nEv.dataset.nuevaEv.split("||"); abrirNuevaPara(ok, ek); }
+});
+
+// eventos de la barra del editor y formulario
+$("volverIndice").addEventListener("click", async () => {
+  if(sucio) await guardarServidor(true);
+  history.pushState({vista:"indice"}, "", "/panel/cotizador");
+  mostrarVista("indice");
+});
+$("guardarCot").addEventListener("click", () => guardarServidor(true));
+$("guardarNueva").addEventListener("click", () => {
+  $("numero").value = numeroUnico();
+  render();
+  guardarServidor(true, true);
+});
+$("borrarCot").addEventListener("click", () => { if(idActual) borrarCotizacion(idActual); });
+
+$("tipoEvento").addEventListener("change", () => {
+  const datos = {}; ["cliente","evento","fechaEvento","lugar","numero","validez","notas","fechasExtra","fecha1Nombre","fotosModo"].concat(PAGO).forEach(id => datos[id] = $(id).value);
+  aplicar(PRESETS[{social:"social", matrimonio:"matrimonio"}[$("tipoEvento").value] || "lista"]);
+  aplicar(datos);
+  render();
+  marcarSucio();
+});
+
 document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
-  aplicar(PRESETS[b.dataset.preset]); render();
+  aplicar(PRESETS[b.dataset.preset]); render(); marcarSucio();
 }));
 $("limpiar").addEventListener("click", () => {
-  const pago = {}; PAGO.forEach(id => pago[id] = $(id).value);   // los datos de pago se mantienen
-  $("form").reset(); aplicar(PRESETS.lista); aplicar(pago);
-  $("numero").value = numeroNuevo(); render();
+  const pago = {}; PAGO.forEach(id => pago[id] = $(id).value);
+  idActual = null; sucio = false;
+  $("form").reset();
+  extraDates = []; $("fechasExtra").value = "[]"; reconstruirFechasExtra();
+  aplicar(PRESETS.lista); aplicar(pago);
+  $("numero").value = numeroUnico(); render(); actualizarEstadoBarra();
+  history.replaceState({vista:"editor", nuevo:true}, "", "/panel/cotizador?nuevo=1");
 });
 $("copiar").addEventListener("click", async () => {
+  if(sucio) guardarServidor(false);
   const txt = resumenWsp(), b = $("copiar");
   try{ await navigator.clipboard.writeText(txt); b.textContent = "¡Copiado!"; }
   catch(_){ prompt("Copia el resumen:", txt); }
   setTimeout(() => b.textContent = "Copiar resumen WhatsApp", 1800);
 });
 $("form").addEventListener("submit", e => e.preventDefault());
-$("imprimir").addEventListener("click", () => window.print());
-$("form").addEventListener("input", render);
-$("form").addEventListener("change", render);
+$("imprimir").addEventListener("click", () => { if(sucio) guardarServidor(false); window.print(); });
+$("form").addEventListener("input", e => {
+  if(e.target.closest("#czFechasExtra")) return;
+  if(e.target.id && PAGO.includes(e.target.id)) guardarPagoLocal();
+  render(); marcarSucio();
+});
+$("form").addEventListener("change", e => {
+  if(e.target.closest("#czFechasExtra")) return;
+  if(e.target.id === "tipoEvento") return;
+  if(e.target.id && PAGO.includes(e.target.id)) guardarPagoLocal();
+  render(); marcarSucio();
+});
 
-if(!cargar()){ aplicar(PRESETS.lista); $("numero").value = numeroNuevo(); }
-render();
+window.addEventListener("popstate", () => {
+  const q = new URLSearchParams(location.search);
+  if(q.get("id")) abrirCotizacionPorId(q.get("id"), false);
+  else if(q.get("nuevo")) abrirNuevoOrganizador(false);
+  else mostrarVista("indice");
+});
+
+// migra el borrador viejo que estaba solo en localStorage la primera vez
+async function migrarBorradorLocal(){
+  try{
+    if(localStorage.getItem(CLAVE_MIGRADO)) return false;
+    const raw = localStorage.getItem(CLAVE);
+    if(!raw){ localStorage.setItem(CLAVE_MIGRADO, "1"); return false; }
+    const d = JSON.parse(raw);
+    if(!d || typeof d !== "object"){ localStorage.setItem(CLAVE_MIGRADO, "1"); return false; }
+    if(d.pCuenta && !d.pNumero) d.pNumero = d.pCuenta;
+    if(+d.traslado && !+d.estac){ d.estac = d.traslado; d.gEstac = d.gTraslado; }
+    const p = {}; PAGO.forEach(id => { if(d[id]) p[id] = d[id]; });
+    if(Object.keys(p).length) localStorage.setItem(CLAVE_PAGO, JSON.stringify(p));
+    const tieneDatos = d.cliente || d.evento || d.fechaEvento || (d.fechasExtra && d.fechasExtra !== "[]");
+    const yaEsta = d.numero && listaCot.some(x => x.numero === d.numero);
+    let importo = false;
+    if(tieneDatos && !yaEsta){
+      const prevForm = leerFormulario();
+      resetearFormularioBase();
+      aplicar(d);
+      const r = calcular();
+      const resp = await fetch("/panel/cotizador/guardar", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          organizador: (d.cliente || "").trim(),
+          evento: (d.evento || "").trim(),
+          numero: (d.numero || "").trim(),
+          total: Math.round(r.total),
+          resumen: resumenCortoDe(r),
+          datos: leerFormulario()
+        })
+      });
+      if(resp.ok){
+        const j = await resp.json();
+        if(j.ok && j.cotizacion){ listaCot.unshift(j.cotizacion); importo = true; }
+      }
+      resetearFormularioBase();
+      aplicar(prevForm);
+    }
+    localStorage.setItem(CLAVE_MIGRADO, "1");
+    return importo;
+  }catch(_){ return false; }
+}
+
+(async function inicio(){
+  pintarModo();
+  const q = new URLSearchParams(location.search);
+  if(q.get("id")){ await migrarBorradorLocal(); await abrirCotizacionPorId(q.get("id"), false); }
+  else if(q.get("nuevo")){ await migrarBorradorLocal(); abrirNuevoOrganizador(false); }
+  else { mostrarVista("indice"); if(await migrarBorradorLocal() && !$("czIndice").hidden) renderIndice(); }
+})();
 })();
 </script>
 </main>"""
@@ -11046,6 +12809,7 @@ PANEL_GAL = PANEL_CSS + PANEL_BARRA + """<main>
 <span class="chips">{{ estado(gal, hoy) }}</span></div>
 <p class="migas"><a href="/panel">&larr; galerias</a> &middot; {{ total }} fotos
 &middot; {{ con_raw }} con RAW al lado
+{% if total_ind %} &middot; <b style="color:#4ade80">{{ total_ind }}</b> con indicaciones{% endif %}
 {% if con_raw < total %}<form method="post" action="/panel/{{ gal['slug'] }}/raw"
   style="display:inline;margin-left:.5rem"><button class="btn hueco"
   onclick="this.textContent='Buscando...'">Buscar RAW de nuevo</button></form>{% endif %}</p>
@@ -11313,7 +13077,7 @@ salen. Vacio = los de siempre.</span>
   title="Se busco por selfie ({{ hora_local(b['creada']) }})">Rostro ({{ b['n'] }})</a>{% endfor %}
 {% for l in listas_de.get(c['id'], []) %}<a class="btn"
   style="font-size:.75rem;padding:.2rem .6rem;margin:.1rem .25rem .1rem 0"
-  href="/panel/{{ gal['slug'] }}/lista/{{ l['id'] }}">{{ l['nombre'] }} ({{ l['n'] }})</a>{% else
+  href="/panel/{{ gal['slug'] }}/lista/{{ l['id'] }}">{{ l['nombre'] }} ({{ l['n'] }}){% if ind_por_lista.get(l['id']) %} <span style="color:#4ade80;font-weight:bold" title="Fotos con indicaciones">&#9998; {{ ind_por_lista[l['id']] }}</span>{% endif %}</a>{% else
   %}{% if not c['bajadas_fotos'] and not caras_de.get(c['id']) %}<span style="opacity:.4">-</span>{% endif %}{% endfor %}</td></tr>
 {% else %}<tr><td colspan="5">Nadie todavia.</td></tr>
 {% endfor %}</table>
@@ -11445,7 +13209,8 @@ def agregar_fotos(cx, gid, rutas, verificar=True):
 def crear_galeria(cx, nombre, rutas, verificar=True):
     """Alta de galeria. La usan igual la consola y el panel web."""
     slug = secrets.token_urlsafe(12)
-    cx.execute("INSERT INTO galeria (slug, nombre, creada) VALUES (?, ?, ?)",
+    # marca densa por defecto desde el 22/11/2026 (pedido de Renzo); se apaga en ajustes
+    cx.execute("INSERT INTO galeria (slug, nombre, creada, marca_densa) VALUES (?, ?, ?, 1)",
                (slug, nombre, datetime.now(timezone.utc).isoformat(timespec="seconds")))
     gid = cx.execute("SELECT id FROM galeria WHERE slug = ?", (slug,)).fetchone()["id"]
     puestas, faltan, _repes = agregar_fotos(cx, gid, rutas, verificar)
@@ -11652,6 +13417,636 @@ def _declaraciones_top(js):
                 if re.fullmatch(r"[A-Za-z_$][\w$]*", nom):
                     nombres.append(nom)
     return nombres
+
+
+# ------------------------------------------------------ pagina de trabajo /t/
+# Un link por trabajo que el organizador reenvia a quien decide (10/11/2026).
+# Sale de leer los chats con Mario (Coppa 135), Patricio (Babbo) y Benjamin
+# (Prime League): la informacion estaba, pero en parrafos que llegaban todos
+# juntos y a quien no decidia. Aca van 3 opciones con su total, lo acordado y
+# los plazos como FECHAS ("tienen hasta el domingo 8"), no como "120 horas".
+
+DIAS_SEM = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+         "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+DIAS_ELEGIR = 5      # dias corridos para elegir, desde que la galeria esta lista
+
+
+def fecha_larga(d):
+    return f"{DIAS_SEM[d.weekday()]} {d.day} de {MESES[d.month - 1]}"
+
+
+def mas_habiles(d, n):
+    """n dias habiles despues de d. ponytail: solo salta sabados y domingos;
+    si un feriado llega a correr una entrega, sumar una lista de feriados."""
+    while n > 0:
+        d += timedelta(days=1)
+        n -= d.weekday() < 5
+    return d
+
+
+def _dia(s):
+    try:
+        return date.fromisoformat((s or "")[:10])
+    except ValueError:
+        return None
+
+
+def _dia_local(iso):
+    """El dia en Chile de un instante guardado en UTC."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _entero(s, defecto=0):
+    """'$48.800' -> 48800. Lo que no trae digitos vale `defecto`."""
+    d = re.sub(r"\D", "", str(s or ""))
+    return int(d) if d else defecto
+
+
+def elegida(t):
+    i, ops = t.get("elegida"), t.get("opciones") or []
+    return ops[i] if isinstance(i, int) and 0 <= i < len(ops) else None
+
+
+def avance_seleccion(cx, slug):
+    """Como va la galeria de seleccion del trabajo: cuando quedo lista, cuantas
+    fotos lleva el que mas marco (Coppa: Nico dejo 18 y otro hizo las 40) y si
+    ya apretaron "Termine mi seleccion". None si no hay galeria."""
+    gal = cx.execute("SELECT id, creada FROM galeria WHERE slug = ?",
+                     (slug or "",)).fetchone()
+    if gal is None:
+        return None
+    fin = cx.execute("SELECT MIN(cuando) FROM seleccion_lista WHERE galeria_id = ?",
+                     (gal["id"],)).fetchone()[0]
+    n = cx.execute(
+        "SELECT MAX(c) FROM (SELECT COUNT(DISTINCT lista_foto.foto_id) c "
+        "FROM lista_foto JOIN lista ON lista.id = lista_foto.lista_id "
+        "JOIN cliente ON cliente.id = lista.cliente_id "
+        "WHERE cliente.galeria_id = ? AND lista.nombre <> ? GROUP BY cliente.id)",
+        (gal["id"], CARRITO)).fetchone()[0]
+    return {"lista": _dia_local(gal["creada"]), "terminada": _dia_local(fin),
+            "marcadas": n or 0, "url": "/g/" + slug}
+
+
+def pasos_trabajo(t, hoy, av=None, R=None):
+    """La linea de tiempo del trabajo con fechas de verdad. `av` es lo que dijo
+    avance_seleccion (o None). Cada paso: t (titulo), f (fecha o None),
+    cuando ("a mas tardar el"), det, link, link_txt y estado: hecho / ahora /
+    atrasado / pendiente. Solo un paso esta "ahora": el primero sin hacer."""
+    R = R or tarifas()
+    ev = _dia(t.get("fecha"))
+    if ev is None:
+        return []
+    op = elegida(t)
+    fotos = (op or {}).get("fotos") or 0
+    anticipo = t.get("anticipo") or 0
+    saldo = max(((op or {}).get("total") or 0) - anticipo, 0)
+    av = av or {}
+    lista = av.get("lista") or ev + timedelta(days=max(1, -(-R["galeria_horas"] // 24)))
+    hasta = _dia(t.get("elegir_hasta")) or lista + timedelta(days=DIAS_ELEGIR)
+    termino = av.get("terminada")
+    entrega = mas_habiles(termino or hasta, R["entrega_dias"])
+    saldo_ok = t.get("saldo_pagado") or not saldo
+    horario = " a ".join(x for x in (t.get("hora_ini"), t.get("hora_fin")) if x)
+
+    if termino:
+        det_elegir = "Listo: terminaron de elegir el %s." % fecha_larga(termino)
+    elif av:
+        quedan = (hasta - hoy).days
+        det_elegir = "Llevan %d%s. %s" % (
+            av["marcadas"], " de %d" % fotos if fotos else "",
+            "Quedan %d días." % quedan if quedan > 1 else
+            "Mañana es el último día." if quedan == 1 else
+            "Hoy es el último día." if quedan == 0 else
+            "El plazo venció hace %d día%s." % (-quedan, "s" * (quedan < -1)))
+    else:
+        det_elegir = "Se marcan con el corazón y al final se aprieta «Terminé mi selección»."
+    if t.get("entrega_link") and saldo_ok:
+        det_entrega = "Ya están listas."
+    elif saldo and not t.get("saldo_pagado"):
+        det_entrega = "Se envían apenas llega el saldo."
+    else:
+        det_entrega = "%d días hábiles desde que terminan de elegir." % R["entrega_dias"]
+
+    p = [
+        dict(t="Confirmas la opción" + (" y transfieres el anticipo de %s" % pesos(anticipo)
+                                        if anticipo else ""),
+             f=ev - timedelta(days=1), cuando="a más tardar el",
+             det="Con eso la fecha queda reservada.",
+             hecho=bool(op) and (not anticipo or t.get("anticipo_pagado"))),
+        dict(t="Día del evento", f=ev, cuando="", det=horario, hecho=hoy > ev),
+        dict(t="Galería de selección lista", f=lista,
+             cuando="" if av else "a más tardar el",
+             det=("Se entra con el correo%s." % (" y la clave %s" % t["clave_galeria"]
+                                                 if t.get("clave_galeria") else "")
+                  if av else "El link llega por WhatsApp y aparece aquí mismo."),
+             link=av.get("url"), link_txt="Abrir la galería", hecho=bool(av)),
+        dict(t="Último día para elegir %s" % ("%d fotos" % fotos if fotos else "las fotos"),
+             f=hasta, cuando="", det=det_elegir, hecho=bool(termino)),
+    ]
+    if saldo:
+        p.append(dict(t="Transfieres el saldo de %s" % pesos(saldo), f=None, cuando="",
+                      det="Cuando terminan de elegir, antes de la entrega.",
+                      hecho=bool(t.get("saldo_pagado"))))
+    p.append(dict(t="Te llegan las fotos editadas", f=entrega,
+                  cuando="" if t.get("entrega_link") else "a más tardar el",
+                  det=det_entrega,
+                  link=t.get("entrega_link") if saldo_ok else None,
+                  link_txt="Descargar las fotos",
+                  hecho=bool(t.get("entrega_link")) and saldo_ok))
+    ahora = next((x for x in p if not x["hecho"]), None)
+    for x in p:
+        x.setdefault("link", None)
+        x["estado"] = ("hecho" if x["hecho"] else "pendiente" if x is not ahora else
+                       "atrasado" if x["f"] and x["f"] < hoy else "ahora")
+    return p
+
+
+def _trabajo_de(codigo):
+    r = db().execute("SELECT datos FROM trabajo WHERE codigo = ?", (codigo,)).fetchone()
+    if r is None:
+        abort(404)
+    return json.loads(r["datos"])
+
+
+def _guardar_trabajo(cx, codigo, t):
+    cx.execute("INSERT INTO trabajo (codigo, datos, creado) VALUES (?, ?, ?) "
+               "ON CONFLICT(codigo) DO UPDATE SET datos = excluded.datos",
+               (codigo, json.dumps(t, ensure_ascii=False), ahora_iso()))
+    cx.commit()
+
+
+def _extras(t, T, R):
+    """Lo que cuesta salirse de lo acordado: las del trabajo, o las generales."""
+    fuente = {"x": t["extras"]} if t.get("extras") else {"x": T["trab_extras"]}
+    return _txl(fuente, "x", True, hora=pesos(R["hora"]))
+
+
+@app.get("/t/<codigo>")
+def trabajo_publico(codigo):
+    t = _trabajo_de(codigo)
+    R, op = tarifas(), elegida(t)
+    av = avance_seleccion(db(), t.get("galeria"))
+    saldo = max(((op or {}).get("total") or 0) - (t.get("anticipo") or 0), 0)
+    return _viz(TRABAJO_PUB, titulo="%s · rb.fotos" % (t.get("evento") or "Trabajo"),
+                desc="Opciones, plazos y entrega del trabajo.",
+                t=t, op=op, codigo=codigo, saldo=saldo, ev=_dia(t.get("fecha")),
+                pasos=pasos_trabajo(t, datetime.now(TZ).date(), av, R),
+                extras=_extras(t, textos(), R), fecha_larga=fecha_larga,
+                confirmado=hora_local(t.get("confirmado"), "%d/%m a las %H:%M"),
+                aviso=request.args.get("aviso"))
+
+
+@app.post("/t/<codigo>/confirmar")
+def trabajo_confirmar(codigo):
+    """El organizador elige una opcion y pone su nombre. Una vez confirmado no
+    se pisa desde aca: para cambiarlo, Renzo lo reabre en el panel."""
+    cx, t = db(), _trabajo_de(codigo)
+    destino = url_for("trabajo_publico", codigo=codigo)
+    if elegida(t) is not None:
+        return redirect(destino + "#acordado")
+    nombre = " ".join((request.form.get("nombre") or "").split())[:60]
+    i = _entero(request.form.get("opcion"), -1)
+    if not nombre or not 0 <= i < len(t.get("opciones") or []):
+        return redirect(destino + "?aviso=falta#opciones")
+    t.update(elegida=i, confirmo=nombre, confirmado=ahora_iso())
+    _guardar_trabajo(cx, codigo, t)
+    op = t["opciones"][i]
+    avisar_renzo("%s confirmó %s" % (nombre, op["nombre"]),
+                 "%s — %s" % (t.get("evento"), pesos(op.get("total") or 0)),
+                 "%s/panel/trabajos/%s" % (SITIO, codigo))
+    return redirect(destino + "#acordado")
+
+
+@app.get("/panel/trabajos")
+@app.get("/panel/trabajos/<codigo>")
+def trabajos_panel(codigo=None):
+    cx = db()
+    hechos = [dict(json.loads(r["datos"]), codigo=r["codigo"]) for r in
+              cx.execute("SELECT * FROM trabajo ORDER BY creado DESC")]
+    t = _trabajo_de(codigo) if codigo else {}
+    gals = cx.execute("SELECT slug, nombre FROM galeria WHERE tipo = 'seleccion' "
+                      "ORDER BY creada DESC").fetchall()
+    return render_template_string(BASE_HTML, cuerpo=render_template_string(
+        PANEL_TRABAJOS, hechos=hechos, t=t, codigo=codigo, gals=gals, R=tarifas(),
+        pesos=pesos, elegida=elegida, aviso=request.args.get("aviso")))
+
+
+@app.post("/panel/trabajos")
+def guardar_trabajo():
+    f, cx = request.form, db()
+    codigo = f.get("codigo") or ""
+    t = _trabajo_de(codigo) if codigo else {}       # conserva quien confirmo
+    evento = " ".join(f.get("evento", "").split())[:120]
+    if not evento:
+        abort(400)
+    ops = [{"nombre": n.strip()[:60], "detalle": d.strip()[:600],
+            "total": _entero(tot), "fotos": _entero(fo)}
+           for n, d, tot, fo in zip(f.getlist("op_nombre"), f.getlist("op_detalle"),
+                                    f.getlist("op_total"), f.getlist("op_fotos"))
+           if n.strip()]
+    reco, eleg = _entero(f.get("recomendada"), -1), _entero(f.get("elegida"), -1)
+    link = f.get("entrega_link", "").strip()
+    t.update(
+        cliente=f.get("cliente", "").strip()[:80], evento=evento,
+        lugar=f.get("lugar", "").strip()[:120], fecha=f.get("fecha") or None,
+        hora_ini=f.get("hora_ini") or "", hora_fin=f.get("hora_fin") or "",
+        opciones=ops, recomendada=reco if 0 <= reco < len(ops) else None,
+        anticipo=_entero(f.get("anticipo")), extras=f.get("extras", "").strip(),
+        galeria=f.get("galeria") or None,
+        clave_galeria=f.get("clave_galeria", "").strip()[:60],
+        elegir_hasta=f.get("elegir_hasta") or None,
+        # solo https: un "javascript:" en el href se ejecutaria en el cliente
+        entrega_link=link if link.startswith("https://") else "",
+        anticipo_pagado=bool(f.get("anticipo_pagado")),
+        saldo_pagado=bool(f.get("saldo_pagado")))
+    if 0 <= eleg < len(ops):
+        t["elegida"] = eleg              # acordado por WhatsApp, o la que confirmo
+    else:                                # "sin elegir": se reabre la pagina
+        for k in ("elegida", "confirmo", "confirmado"):
+            t.pop(k, None)
+    if not codigo:
+        base = re.sub(r"[^a-z0-9]+", "-", _norm(evento)).strip("-")[:40] or "trabajo"
+        codigo = "%s-%s" % (base, secrets.token_urlsafe(4).lower().replace("_", "x"))
+    _guardar_trabajo(cx, codigo, t)
+    return redirect(url_for("trabajos_panel", codigo=codigo, aviso="ok"))
+
+
+@app.post("/panel/trabajos/<codigo>/borrar")
+def borrar_trabajo(codigo):
+    cx = db()
+    cx.execute("DELETE FROM trabajo WHERE codigo = ?", (codigo,))
+    cx.commit()
+    return redirect(url_for("trabajos_panel"))
+
+
+TRABAJO_PUB = BARRA + """<style>
+.tb{max-width:46rem}
+.tb-cuando{font-family:var(--mono);font-size:.78rem;letter-spacing:.06em;color:var(--cancha);margin:.9rem 0 0}
+.tb-h2{margin:3rem 0 0;font-size:clamp(1.25rem,3vw,1.6rem);font-weight:600;letter-spacing:-.02em;color:var(--cal)}
+.tb-l{display:block;font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--humo);margin-bottom:.45rem}
+.tb-ops{display:grid;gap:.9rem;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));margin-top:1.3rem;align-items:stretch}
+.tb-op{position:relative;display:block;background:var(--panel);border:1px solid var(--linea);padding:1.3rem 1.2rem 1rem;cursor:pointer}
+.tb-op:has(input:checked){border-color:var(--cancha);box-shadow:0 0 0 1px var(--cancha)}
+.tb-op input{position:absolute;top:1.3rem;right:1.1rem;accent-color:var(--cancha);width:1.1rem;height:1.1rem}
+.tb-tag{position:absolute;top:-.7rem;left:1.1rem;background:var(--cancha);color:var(--noche);font-family:var(--mono);font-size:.58rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;padding:.2rem .55rem}
+.tb-nom{display:block;font-size:1.1rem;font-weight:600;color:var(--cal)}
+.tb-total{display:block;font-size:1.9rem;font-weight:600;color:var(--cal);letter-spacing:-.03em;margin-top:.35rem}
+.tb-op ul,.tb-acordado ul{list-style:none;padding:0;margin:.9rem 0 0;color:var(--humo);font-size:.9rem}
+.tb-op li,.tb-acordado li{padding:.35rem 0;border-top:1px solid var(--linea)}
+.tb-conf{display:flex;flex-wrap:wrap;gap:.8rem;align-items:flex-end;margin-top:1.3rem}
+.tb-conf label{flex:1 1 14rem}
+.tb-conf input{width:100%;background:var(--panel);color:var(--cal);border:1px solid var(--linea2);border-radius:2px;padding:.75rem;font:inherit;font-size:16px}
+.tb-nota{color:var(--humo);font-size:.88rem;margin:.9rem 0 0}
+.tb-nota a{color:var(--cal)}
+.tb-aviso{color:var(--foco);margin:.8rem 0 0}
+.tb-acordado{background:var(--panel);border:1px solid var(--cancha);padding:1.3rem 1.3rem 1.1rem;margin-top:2.4rem}
+.tb-acordado .tb-total{display:inline;font-size:1.3rem;margin-left:.5rem}
+.tb-pago{margin:1rem 0 0;font-size:.92rem;color:var(--cal)}
+.tb-pago span{white-space:nowrap}
+.tb-ok{color:var(--cancha)}
+.tb-quien{margin:.6rem 0 0;font-size:.8rem;color:var(--humo)}
+.tb-pasos{list-style:none;padding:0;margin:1.4rem 0 0;border-left:1px solid var(--linea2)}
+.tb-pasos li{position:relative;padding:0 0 1.5rem 1.6rem}
+.tb-pasos li::before{content:"";position:absolute;left:-.42rem;top:.25rem;width:.75rem;height:.75rem;border-radius:50%;background:var(--noche);border:1px solid var(--linea2)}
+.tb-pasos li.hecho::before{background:var(--humo);border-color:var(--humo)}
+.tb-pasos li.ahora::before{background:var(--cancha);border-color:var(--cancha);box-shadow:0 0 0 4px rgba(198,240,74,.18)}
+.tb-pasos li.atrasado::before{background:var(--foco);border-color:var(--foco)}
+.tb-pasos li.hecho>:not(.wsp){opacity:.55}
+.tb-pasos b{display:block;color:var(--cal);font-weight:600;font-size:1rem}
+.tb-pasos li.hecho b::after{content:" \\2713";color:var(--cancha)}
+.tb-fecha{display:block;font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;color:var(--humo);margin-bottom:.15rem}
+.tb-pasos li.ahora .tb-fecha{color:var(--cancha)}
+.tb-pasos li.atrasado .tb-fecha,.tb-pasos li.atrasado .tb-det{color:var(--foco)}
+.tb-det{display:block;color:var(--humo);font-size:.9rem;margin-top:.2rem}
+.tb-pasos .wsp{margin-top:.7rem}
+.tb-extras{list-style:none;padding:0;margin:1.1rem 0 0;color:var(--humo);font-size:.92rem}
+.tb-extras li{padding:.5rem 0;border-top:1px solid var(--linea)}
+.tb-extras b{color:var(--cal);font-weight:600}
+.tb-banco{background:var(--panel);border:1px solid var(--linea);padding:1rem 1.1rem;margin:1.1rem 0 .8rem;color:var(--cal);font:inherit;font-size:.92rem;white-space:pre-wrap}
+</style>
+<main class="viz"><section class="bloque tb">
+<p class="rotulo">{{ 'Trabajo acordado' if op else 'Propuesta' }}{% if t.cliente %} · {{ t.cliente }}{% endif %}</p>
+<h1 class="tit">{{ t.evento }}</h1>
+<p class="tb-cuando">{% if ev %}{{ fecha_larga(ev)|capitalize }}{% endif %}{% if t.hora_ini %} · {{ t.hora_ini }}{% if t.hora_fin %} a {{ t.hora_fin }}{% endif %}{% endif %}{% if t.lugar %} · {{ t.lugar }}{% endif %}</p>
+<p class="bajada">{{ T.trab_bajada }}</p>
+
+{% if op %}
+<div class="tb-acordado" id="acordado">
+<span class="tb-l">Acordado</span>
+<p class="tb-nom">{{ op.nombre }}<span class="tb-total">{{ pesos(op.total) }}</span></p>
+<ul>{% for l in lineas(op.detalle) %}<li>{{ l }}</li>{% endfor %}</ul>
+<p class="tb-pago">{% if t.anticipo %}<span>Anticipo {{ pesos(t.anticipo) }}
+{% if t.anticipo_pagado %}<span class="tb-ok">pagado ✓</span>{% else %}pendiente{% endif %}</span> · {% endif %}
+<span>{{ 'Saldo' if t.anticipo else 'Pago' }} {{ pesos(saldo) }}
+{% if t.saldo_pagado %}<span class="tb-ok">pagado ✓</span>{% else %}al terminar de elegir{% endif %}</span></p>
+{% if t.confirmo %}<p class="tb-quien">Confirmado por {{ t.confirmo }}{% if t.confirmado %} el {{ confirmado }}{% endif %}</p>{% endif %}
+</div>
+{% elif t.opciones %}
+<h2 class="tb-h2" id="opciones">Elige una opción</h2>
+{% if aviso == 'falta' %}<p class="tb-aviso">Marca una opción y escribe tu nombre para confirmar.</p>{% endif %}
+<form method="post" action="/t/{{ codigo }}/confirmar">
+<div class="tb-ops">{% for o in t.opciones %}
+<label class="tb-op">{% if loop.index0 == t.recomendada %}<span class="tb-tag">Recomendada</span>{% endif %}
+<input type="radio" name="opcion" value="{{ loop.index0 }}" {{ 'checked' if loop.index0 == t.recomendada }}>
+<span class="tb-nom">{{ o.nombre }}</span><span class="tb-total">{{ pesos(o.total) }}</span>
+<ul>{% for l in lineas(o.detalle) %}<li>{{ l }}</li>{% endfor %}</ul>
+</label>{% endfor %}</div>
+<div class="tb-conf">
+<label><span class="tb-l">Tu nombre</span><input name="nombre" required maxlength="60" autocomplete="name"></label>
+<button class="wsp">Confirmo esta opción</button>
+</div>
+<p class="tb-nota">Al confirmar queda reservada la fecha{% if t.anticipo %} y el anticipo de {{ pesos(t.anticipo) }} se transfiere antes del evento{% endif %}.
+¿Necesitas otra combinación? <a href="https://wa.me/{{ wsp }}">Escríbeme</a> y la agrego aquí.</p>
+</form>
+{% endif %}
+
+{% if pasos %}
+<h2 class="tb-h2">Cómo sigue</h2>
+<ol class="tb-pasos">{% for p in pasos %}
+<li class="{{ p.estado }}">
+{% if p.f %}<span class="tb-fecha">{{ ((p.cuando ~ ' ' if p.cuando else '') ~ fecha_larga(p.f))|capitalize }}</span>{% endif %}
+<b>{{ p.t }}</b>
+{% if p.det %}<span class="tb-det">{{ p.det }}</span>{% endif %}
+{% if p.link and p.estado != 'pendiente' %}<a class="wsp chico" href="{{ p.link }}" rel="noopener">{{ p.link_txt }}</a>{% endif %}
+</li>{% endfor %}</ol>
+{% endif %}
+
+<h2 class="tb-h2">Si algo cambia</h2>
+<ul class="tb-extras">{% for l in extras %}<li>{{ l }}</li>{% endfor %}</ul>
+
+{% if op and T.trab_transferencia and not (t.saldo_pagado and (t.anticipo_pagado or not t.anticipo)) %}
+<h2 class="tb-h2">Datos de transferencia</h2>
+<pre class="tb-banco" id="banco">{{ T.trab_transferencia }}</pre>
+<button class="wsp hueco chico" type="button" id="copiar">Copiar datos</button>
+<script>document.getElementById("copiar").onclick = function () {
+  navigator.clipboard.writeText(document.getElementById("banco").innerText)
+    .then(() => { this.textContent = "Copiado"; });
+};</script>
+{% endif %}
+
+<p class="botones" style="margin-top:3rem">{% if wsp %}<a class="wsp" rel="noopener"
+  href="https://wa.me/{{ wsp }}?text={{ ('Hola Renzo, sobre ' ~ t.evento ~ ': ')|urlencode }}">¿Dudas? Escríbeme</a>{% endif %}</p>
+</section>
+""" + PIE + """</main>"""
+
+PANEL_TRABAJOS = PANEL_CSS + PANEL_BARRA + """<style>
+.tj{max-width:56rem}
+.tj-lista{list-style:none;padding:0;margin:1rem 0 2rem}
+.tj-lista li{display:flex;gap:1rem;align-items:baseline;padding:.55rem 0;border-top:1px solid var(--linea, #1E241B)}
+.tj-lista .est{font-size:.75rem;opacity:.7}
+.tj form{display:grid;gap:1rem}
+.tj-fila{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr))}
+.tj label span{display:block;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:.3rem}
+.tj input,.tj textarea,.tj select{width:100%;box-sizing:border-box}
+.tj textarea{min-height:5.5rem}
+.tj-op{display:grid;gap:.6rem;grid-template-columns:2fr 1fr 1fr auto;align-items:end;padding:.8rem 0;border-top:1px solid #303A2C}
+.tj-op textarea{grid-column:1 / -1;min-height:4rem}
+.tj-chk{display:flex;gap:.5rem;align-items:center}
+.tj-chk input{width:auto}
+</style>
+<main class="tj">
+<h1 class="tit">Trabajos</h1>
+<p class="pista">Un link por trabajo para el organizador: las opciones con su total,
+lo acordado y los plazos como fechas. Él lo reenvía a quien decide.</p>
+{% if aviso == 'ok' %}<p class="pista">Guardado.</p>{% endif %}
+
+{% if hechos %}<ul class="tj-lista">{% for h in hechos %}
+<li><a href="/panel/trabajos/{{ h.codigo }}">{{ h.evento }}</a>
+<span class="est">{{ h.cliente }} · {{ h.fecha or 'sin fecha' }} ·
+{% if elegida(h) %}acordado: {{ elegida(h).nombre }}{% else %}esperando respuesta{% endif %}</span>
+<a class="btn hueco" href="/t/{{ h.codigo }}" target="_blank" rel="noopener">Ver</a></li>
+{% endfor %}</ul>{% endif %}
+
+<h2>{{ 'Editar' if codigo else 'Nuevo trabajo' }}</h2>
+{% if codigo %}<div class="link"><input id="lk" readonly value="{{ request.url_root }}t/{{ codigo }}">
+<button class="btn" type="button" id="copiar">Copiar link</button>
+<a class="btn hueco" href="/t/{{ codigo }}" target="_blank" rel="noopener">Ver como el organizador</a></div>{% endif %}
+
+<form method="post" action="/panel/trabajos">
+<input type="hidden" name="codigo" value="{{ codigo or '' }}">
+<div class="tj-fila">
+<label><span>Evento</span><input name="evento" required maxlength="120" value="{{ t.evento or '' }}" placeholder="Coppa 135 Anni · Final"></label>
+<label><span>Organizador</span><input name="cliente" maxlength="80" value="{{ t.cliente or '' }}" placeholder="CDG Scuola Italiana"></label>
+<label><span>Lugar</span><input name="lugar" maxlength="120" value="{{ t.lugar or '' }}"></label>
+</div>
+<div class="tj-fila">
+<label><span>Fecha</span><input type="date" name="fecha" value="{{ t.fecha or '' }}"></label>
+<label><span>Desde</span><input type="time" name="hora_ini" value="{{ t.hora_ini or '' }}"></label>
+<label><span>Hasta</span><input type="time" name="hora_fin" value="{{ t.hora_fin or '' }}"></label>
+<label><span>Anticipo ($)</span><input name="anticipo" inputmode="numeric" value="{{ t.anticipo or '' }}"></label>
+</div>
+
+<h3>Opciones <button class="btn hueco" type="button" id="packs">Rellenar con los 3 packs</button></h3>
+<p class="pista">Total = horas del evento × {{ pesos(R.hora) }} + el pack, redondeado a mil. La marcada con el círculo sale como recomendada.</p>
+{% for i in range(3) %}{% set o = (t.opciones or [])[i] if (t.opciones or [])|length > i else {} %}
+<div class="tj-op">
+<label><span>Nombre</span><input name="op_nombre" maxlength="60" value="{{ o.nombre or '' }}"></label>
+<label><span>Total ($)</span><input name="op_total" inputmode="numeric" value="{{ o.total or '' }}"></label>
+<label><span>Fotos a elegir</span><input name="op_fotos" inputmode="numeric" value="{{ o.fotos or '' }}"></label>
+<label class="tj-chk" title="Recomendada"><input type="radio" name="recomendada" value="{{ i }}" {{ 'checked' if t.recomendada == i }}>Reco</label>
+<textarea name="op_detalle" placeholder="Una línea por cosa que incluye">{{ o.detalle or '' }}</textarea>
+</div>{% endfor %}
+
+<h3>Seguimiento</h3>
+<div class="tj-fila">
+<label><span>Opción acordada</span><select name="elegida">
+<option value="">Sin elegir (el organizador elige en la página)</option>
+{% for o in t.opciones or [] %}<option value="{{ loop.index0 }}" {{ 'selected' if t.elegida == loop.index0 }}>{{ o.nombre }}</option>{% endfor %}
+</select></label>
+<label><span>Galería de selección</span><select name="galeria"><option value="">Todavía no</option>
+{% for gl in gals %}<option value="{{ gl.slug }}" {{ 'selected' if t.galeria == gl.slug }}>{{ gl.nombre }}</option>{% endfor %}
+</select></label>
+<label><span>Clave de la galería</span><input name="clave_galeria" maxlength="60" value="{{ t.clave_galeria or '' }}"></label>
+<label><span>Plazo para elegir (vacío = 5 días)</span><input type="date" name="elegir_hasta" value="{{ t.elegir_hasta or '' }}"></label>
+</div>
+<div class="tj-fila">
+<label><span>Link de entrega (https://)</span><input name="entrega_link" value="{{ t.entrega_link or '' }}"></label>
+<label class="tj-chk"><input type="checkbox" name="anticipo_pagado" {{ 'checked' if t.anticipo_pagado }}>Anticipo pagado</label>
+<label class="tj-chk"><input type="checkbox" name="saldo_pagado" {{ 'checked' if t.saldo_pagado }}>Saldo pagado</label>
+</div>
+{% if t.confirmo %}<p class="pista">Confirmó {{ t.confirmo }}.</p>{% endif %}
+<label><span>Si algo cambia (vacío = el texto general de /panel/textos)</span>
+<textarea name="extras">{{ t.extras or '' }}</textarea></label>
+<p><button class="btn">Guardar</button>
+{% if codigo %}<button class="btn hueco" formaction="/panel/trabajos/{{ codigo }}/borrar" formnovalidate
+  onclick="return confirm('Borrar este trabajo? El link deja de funcionar.')">Borrar</button>{% endif %}</p>
+</form>
+</main>
+<script>
+const R = {{ R|tojson }};
+const cp = document.getElementById("copiar");
+if (cp) cp.onclick = () => navigator.clipboard.writeText(document.getElementById("lk").value)
+  .then(() => { cp.textContent = "Copiado"; });
+document.getElementById("packs").onclick = () => {
+  const min = n => { const [h, m] = (document.querySelector(`[name=${n}]`).value || "").split(":").map(Number);
+                     return isNaN(h) ? null : h * 60 + (m || 0); };
+  const a = min("hora_ini"), b = min("hora_fin");
+  const nivel = ["básicas", "completas", "profesionales"];
+  const filas = document.querySelectorAll(".tj-op");
+  // tojson ordena las claves (esencial, full, liga): el orden va por precio
+  Object.values(R.packs).sort((x, y) => x.precio - y.precio).forEach((P, i) => {
+    const f = filas[i]; if (!f) return;
+    const horas = a !== null && b > a ? (b - a) / 60 : P.horas;
+    const mezcla = P.q.map((n, k) => n ? `${n} ${nivel[k]}` : "").filter(Boolean).join(" + ");
+    f.querySelector("[name=op_nombre]").value = P.nombre;
+    f.querySelector("[name=op_fotos]").value = P.q.reduce((x, y) => x + y, 0);
+    f.querySelector("[name=op_total]").value = Math.round((horas * R.hora + P.precio) / 1000) * 1000;
+    f.querySelector("[name=op_detalle]").value =
+      `${String(horas).replace(".", ",")} h de cobertura, sin límite de fotos\n${mezcla} editadas\nGalería para elegir con calma`;
+    f.querySelector("[name=recomendada]").checked = !!P.reco;
+  });
+};
+</script>"""
+
+
+def test_trabajo():
+    """La pagina de trabajo: fechas, el paso "ahora" y el confirmar."""
+    assert mas_habiles(date(2026, 11, 6), 4) == date(2026, 11, 12)   # vie + 4 = jue
+    assert fecha_larga(date(2026, 11, 8)) == "domingo 8 de noviembre"
+    assert _entero("$48.800") == 48800 and _entero("", -1) == -1
+    R = {"galeria_horas": 48, "entrega_dias": 4}
+    t = {"fecha": "2026-11-03", "anticipo": 20000,
+         "opciones": [{"nombre": "A", "total": 48000, "fotos": 40, "detalle": ""}]}
+    p = pasos_trabajo(t, date(2026, 11, 1), R=R)
+    assert [x["estado"] for x in p][:2] == ["ahora", "pendiente"], p
+    assert p[2]["f"] == date(2026, 11, 5) and p[3]["f"] == date(2026, 11, 10)
+    t.update(elegida=0, anticipo_pagado=True)
+    av = {"lista": date(2026, 11, 4), "terminada": None, "marcadas": 18, "url": "/g/x"}
+    p = pasos_trabajo(dict(t, elegir_hasta="2026-11-11"), date(2026, 11, 9), av, R)
+    elegir = next(x for x in p if x["t"].startswith("Último día"))
+    assert elegir["estado"] == "ahora" and "Llevan 18 de 40. Quedan 2 días." == elegir["det"], elegir
+    assert any(x["t"] == "Transfieres el saldo de $28.000" for x in p), p
+    p = pasos_trabajo(t, date(2026, 11, 12), av, R)      # plazo del 9 vencido
+    assert next(x for x in p if x["t"].startswith("Último día"))["estado"] == "atrasado"
+
+    with app.test_client() as c:
+        r = c.post("/panel/trabajos", data={
+            "evento": "Coppa Test", "fecha": "2026-11-26", "anticipo": "20000",
+            "op_nombre": ["Uno", "Dos", ""], "op_total": ["$30.000", "45000", ""],
+            "op_fotos": ["20", "40", ""], "op_detalle": ["a", "b", ""],
+            "recomendada": "1", "entrega_link": "javascript:alert(1)"})
+        cod = r.headers["Location"].split("/panel/trabajos/")[1].split("?")[0]
+        assert cod.startswith("coppa-test-"), cod
+        h = c.get("/t/" + cod).get_data(as_text=True)
+        assert "Elige una opción" in h and "$45.000" in h and "javascript:" not in h
+        assert "noindex" in h.split("<style>")[0], "FUGA: /t/ se puede indexar"
+        assert "falta" in c.post("/t/%s/confirmar" % cod, data={"opcion": "1"}).headers["Location"]
+        c.post("/t/%s/confirmar" % cod, data={"opcion": "1", "nombre": "Mario"})
+        h = c.get("/t/" + cod).get_data(as_text=True)
+        assert "Confirmado por Mario" in h and "Elige una opción" not in h
+        c.post("/t/%s/confirmar" % cod, data={"opcion": "0", "nombre": "Otro"})
+        assert "Confirmado por Mario" in c.get("/t/" + cod).get_data(as_text=True), \
+            "una segunda confirmacion piso la primera"
+        assert c.get("/panel/trabajos/" + cod).status_code == 200
+        assert c.get("/t/no-existe").status_code == 404
+        c.post("/panel/trabajos/%s/borrar" % cod)
+        assert c.get("/t/" + cod).status_code == 404
+
+
+def test_indicaciones():
+    """Indicaciones de encuadre y distracciones: guardado, lectura, rechazo sin completa y validacion."""
+    cx = conectar()
+    # Crear galeria temporal
+    slug, _, _ = crear_galeria(cx, "Galeria Test Ind", [], verificar=False)
+    gid = cx.execute("SELECT id FROM galeria WHERE slug = ?", (slug,)).fetchone()[0]
+    # Crear cliente
+    cx.execute("INSERT INTO cliente (galeria_id, email, visto) VALUES (?, ?, ?)",
+               (gid, "ind_test@example.com", ahora_iso()))
+    cid = cx.execute("SELECT last_insert_rowid()").fetchone()[0]
+    # Crear foto
+    cx.execute("INSERT INTO foto (galeria_id, ruta, orden) VALUES (?, ?, ?)",
+               (gid, "/tmp/test_foto.jpg", 1))
+    fid = cx.execute("SELECT last_insert_rowid()").fetchone()[0]
+    # Crear listas: una basica y una completa
+    cx.execute("INSERT INTO lista (cliente_id, nombre, orden) VALUES (?, ?, ?)",
+               (cid, "Fotos Básicas", 1))
+    lid_basica = cx.execute("SELECT last_insert_rowid()").fetchone()[0]
+    cx.execute("INSERT INTO lista (cliente_id, nombre, orden) VALUES (?, ?, ?)",
+               (cid, "Edición Completa", 2))
+    lid_completa = cx.execute("SELECT last_insert_rowid()").fetchone()[0]
+    cx.commit()
+    cx.close()
+
+    with app.test_client() as c:
+        # Sin entrar -> no autorizada (404/403)
+        assert c.get(f"/api/indicacion/{fid}").status_code in (403, 404)
+        assert c.post(f"/api/indicacion/{fid}", json={"modo": "fotografo"}).status_code in (403, 404)
+
+        # Entrar con el cliente
+        c.post(f"/g/{slug}/entrar", data={"email": "ind_test@example.com"})
+
+        # Foto todavia no esta en ninguna lista -> GET devuelve completa=False
+        r = c.get(f"/api/indicacion/{fid}")
+        assert r.status_code == 200
+        d = r.get_json()
+        assert d["completa"] is False and d["modo"] == "fotografo"
+
+        # POST sin estar en lista completa -> 400
+        r_post = c.post(f"/api/indicacion/{fid}", json={"modo": "indicado", "nota": "test"})
+        assert r_post.status_code == 400, "debio rechazar foto fuera de lista completa"
+
+        # Poner foto en lista basica -> sigue rechazando con 400
+        cx = conectar()
+        cx.execute("INSERT INTO lista_foto (lista_id, foto_id, cuando) VALUES (?, ?, ?)",
+                   (lid_basica, fid, ahora_iso()))
+        cx.commit()
+        cx.close()
+        assert c.post(f"/api/indicacion/{fid}", json={"modo": "indicado"}).status_code == 400
+
+        # Poner foto en lista completa
+        cx = conectar()
+        cx.execute("INSERT INTO lista_foto (lista_id, foto_id, cuando) VALUES (?, ?, ?)",
+                   (lid_completa, fid, ahora_iso()))
+        cx.commit()
+        cx.close()
+
+        # Ahora GET devuelve completa=True
+        assert c.get(f"/api/indicacion/{fid}").get_json()["completa"] is True
+
+        # Validacion: cajas invalidas (> 1 o x1 >= x2) -> 400
+        r_bad1 = c.post(f"/api/indicacion/{fid}", json={"protas": [[0.5, 0.2, 0.3, 0.8]]})
+        assert r_bad1.status_code == 400, "debio rechazar x1 >= x2"
+        r_bad2 = c.post(f"/api/indicacion/{fid}", json={"quitar": [[0.1, 0.2, 1.5, 0.8]]})
+        assert r_bad2.status_code == 400, "debio rechazar coord > 1"
+        r_bad3 = c.post(f"/api/indicacion/{fid}", json={"protas": [[0.1, 0.2, 0.3]]})
+        assert r_bad3.status_code == 400, "debio rechazar caja sin 4 numeros"
+        # Mas de 6 cajas -> 400
+        r_bad4 = c.post(f"/api/indicacion/{fid}", json={"protas": [[0.1, 0.1, 0.2, 0.2]] * 7})
+        assert r_bad4.status_code == 400, "debio rechazar mas de 6 cajas"
+        # Nota > 300 caracteres -> 400
+        r_bad5 = c.post(f"/api/indicacion/{fid}", json={"nota": "a" * 301})
+        assert r_bad5.status_code == 400, "debio rechazar nota larga"
+
+        # Guardar indicacion valida
+        cajas_p = [[0.2, 0.1, 0.6, 0.8]]
+        cajas_q = [[0.8, 0.0, 0.95, 0.3]]
+        r_ok = c.post(f"/api/indicacion/{fid}", json={
+            "modo": "indicado",
+            "protas": cajas_p,
+            "quitar": cajas_q,
+            "nota": "Dejar al 10 en el centro"
+        })
+        assert r_ok.status_code == 200, r_ok.get_json()
+        assert r_ok.get_json()["ok"] is True
+
+        # Leer de vuelta
+        r_get = c.get(f"/api/indicacion/{fid}")
+        assert r_get.status_code == 200
+        d_get = r_get.get_json()
+        assert d_get["modo"] == "indicado"
+        assert d_get["protas"] == cajas_p
+        assert d_get["quitar"] == cajas_q
+        assert d_get["nota"] == "Dejar al 10 en el centro"
+        assert d_get["completa"] is True
+
+    cx = conectar()
+    cx.execute("DELETE FROM galeria WHERE id = ?", (gid,))
+    cx.commit()
+    cx.close()
 
 
 def test():
@@ -13382,6 +15777,7 @@ def test():
     cx = conectar()
     slb, _p, _f = crear_galeria(cx, "Borradas", rb_, verificar=False)
     galb = cx.execute("SELECT * FROM galeria WHERE slug = ?", (slb,)).fetchone()
+    assert galb["marca_densa"] == 1, "una galeria nueva nace sin la marca densa"
 
     def quedan_():
         return cx.execute("SELECT COUNT(*) FROM foto WHERE galeria_id = ?",
@@ -13424,6 +15820,7 @@ def test():
     # analisis facial: el panel solo deja el pedido, y solo en galerias a la venta
     filas_ = [{"id": 1, "ruta": "/a/DSC1.JPG"}, {"id": 2, "ruta": "/b/DSC1.JPG"}]
     assert ids_de_caras(filas_, [["/a/DSC1.JPG", .9]]) == [1], "un DSC repetido trajo otra foto"
+    assert ids_de_caras(filas_, [["/b/DSC1.JPG", .95], ["/a/DSC1.JPG", .8]]) == [2, 1], "perdio el orden por similitud"
     assert ids_de_caras(filas_, [["DSC1-Editar.jpg", .9]]) == [1, 2], "indice viejo sin ruta"
     pedido_ = CACHE / "caras-pedido-ccc"
     with app.test_client() as c:
@@ -13651,6 +16048,33 @@ def test():
         assert ts_["hora_matrimonio"] == 20000 and 'value="matrimonio"' in cz_
         assert re.search(r'id="lCompleta" type="number" value="\d+" readonly', cz_), "la lista se puede editar"
         assert "ojeras" not in json.dumps(ts_, ensure_ascii=False)
+        # cotizador: varias fechas, organizadores/eventos y guardado en la DB
+        assert all(('id="%s"' % i) in cz_ for i in ("czIndice", "nuevoOrg", "agregarFecha", "fechasExtra", "fotosModo"))
+        assert "const COTIZACIONES" in cz_ and "const COT_INICIAL" in cz_
+        assert c.post("/panel/cotizador/guardar", data="x").status_code == 400
+        assert c.get("/panel/cotizador/no-existe").status_code == 404
+        r_cot = c.post("/panel/cotizador/guardar", json={
+            "organizador": "Mario Orellana", "evento": "Coppa 135 Anni",
+            "numero": "COT-20261117-1330", "total": 103362,
+            "resumen": "2 fechas (3 nov, 24 nov)",
+            "datos": {"cliente": "Mario Orellana", "evento": "Coppa 135 Anni",
+                      "fechaEvento": "2026-11-03", "fechasExtra": json.dumps([
+                          {"titulo": "Final", "fecha": "2026-11-24", "lugar": "Scuola"}])}})
+        assert r_cot.status_code == 200 and r_cot.get_json()["ok"] is True
+        cid_cot = r_cot.get_json()["cotizacion"]["id"]
+        assert cid_cot.startswith("mario-orellana-"), cid_cot
+        assert "Coppa 135 Anni" in c.get("/panel/cotizador").get_data(as_text=True)
+        assert "COT-20261117-1330" in c.get("/panel/cotizador?id=" + cid_cot).get_data(as_text=True)
+        got_cot = c.get("/panel/cotizador/" + cid_cot).get_json()["cotizacion"]
+        assert got_cot["total"] == 103362 and len(json.loads(got_cot["datos"]["fechasExtra"])) == 1
+        r_upd = c.post("/panel/cotizador/guardar", json={
+            "id": cid_cot, "organizador": "Mario Orellana", "evento": "Coppa 135 Anni",
+            "numero": "COT-20261117-1330", "total": 105000,
+            "resumen": "2 fechas (3 nov, 24 nov)", "datos": {"cliente": "Mario Orellana"}})
+        assert r_upd.get_json()["cotizacion"]["id"] == cid_cot
+        assert c.get("/panel/cotizador/" + cid_cot).get_json()["cotizacion"]["total"] == 105000
+        assert c.post("/panel/cotizador/" + cid_cot + "/borrar").status_code == 200
+        assert c.get("/panel/cotizador/" + cid_cot).status_code == 404
         # el editor del panel: subir la hora mueve la pagina publica; un campo
         # invalido no se guarda y no pisa lo demas; restaurar textos no las borra
         assert c.get("/panel/tarifas").status_code == 200
@@ -14039,6 +16463,14 @@ def test():
         assert en_tira == [ids_top[1], ids_top[0]], en_tira
         # las fotos de la tira salen con la marca normal (/p/<id>)
         assert c.get(f"/p/{ids_top[1]}").status_code == 200
+        # HEAD para chequear 404 no infla el contador de vistas
+        assert c.head(f"/p/{ids_top[0]}").status_code == 200
+        # la portada interior usa responsive srcset (/portada/...?h=...)
+        if 'class="tapa"' in ht:
+            tapa_sec = ht.split('class="tapa"', 1)[1].split("</section>", 1)[0]
+            assert f"/portada/{sl_top}?h=" in tapa_sec and "480w" in tapa_sec
+            if WEBP_OK:
+                assert '<source type="image/webp"' in tapa_sec
 
         # desde el panel se puede apagar ("-") o fijar a mano
         c.post(f"/panel/{sl_top}/ajustes", data={"nombre": "Top F6", "top_trabajo": OCULTO})
@@ -14049,11 +16481,17 @@ def test():
         assert 'id="topfotos"' in c.get(f"/g/{sl_top}").get_data(as_text=True), \
             "fijar el trabajo a mano no prendio la tira Top"
     cx_ = conectar()
+    assert cx_.execute("SELECT COUNT(*) FROM vista WHERE foto_id = ?",
+                       (ids_top[0],)).fetchone()[0] == 0
+    assert cx_.execute("SELECT 1 FROM sqlite_master WHERE type='index' "
+                       "AND name='ix_foto_tomada'").fetchone(), "falta ix_foto_tomada"
     cx_.execute("DELETE FROM galeria WHERE id = ?", (gid_top,))
     cx_.commit()
     cx_.close()
     shutil.rmtree(RAIZ_FOTOS / "_para_publicar", ignore_errors=True)
 
+    test_indicaciones()
+    test_trabajo()
     print("ok")
 
 
@@ -14086,9 +16524,14 @@ if __name__ == "__main__":
                     sys.argv[3] if len(sys.argv) > 3 else None)
     elif cmd == "servir":
         CACHE.mkdir(parents=True, exist_ok=True)
-        # ponytail: servidor de desarrollo de Flask (threaded), detras de Caddy.
-        # Aguanta un puñado de clientes simultaneos, que es el caso real. Si
-        # alguna vez hay decenas a la vez, pasar a gunicorn -w 4.
-        app.run(host="127.0.0.1", port=8000)
+        try:
+            from waitress import serve
+        except ImportError:
+            # sin waitress cae al servidor WSGI de desarrollo de Flask
+            app.run(host="127.0.0.1", port=8000)
+        else:
+            serve(app, host="127.0.0.1", port=8000,
+                  threads=int(os.environ.get("GALERIA_HILOS", 12)),
+                  connection_limit=200, channel_timeout=60)
     else:
         sys.exit(__doc__)
