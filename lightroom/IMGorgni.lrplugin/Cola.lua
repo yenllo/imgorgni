@@ -58,11 +58,15 @@ local EXT = { arw = 1, cr2 = 1, cr3 = 1, nef = 1, dng = 1, raf = 1, orf = 1, rw2
 -- Lightroom en Linux (Wine, 18/11/2026): en el prefijo de Wine, C:\Renzo es un enlace a ~/Renzo. Asi las rutas
 -- fijas de arriba sirven igual y los scripts de Python en Linux pueden escribir /home/renzo/Renzo/...: a_wine las
 -- traduce al leer la cola. En Windows ninguna ruta empieza con "/" y todo queda como siempre.
-local HOME_UNIX = "/home/renzo"
+-- 23/11/2026: Python resuelve los enlaces y escribe /mnt/win/Renzo/... (la particion de Windows), asi que van todas.
+local A_C = { { "/home/renzo/Renzo/", "C:\\Renzo\\" }, { "/home/yenllo/Renzo/", "C:\\Renzo\\" },
+	{ "/mnt/win/Renzo/", "C:\\Renzo\\" }, { "/mnt/win/Fotos/", "C:\\Fotos\\" } }
 local function a_wine(r)
 	if r:sub(1, 1) ~= "/" then return r end
-	local pre = HOME_UNIX .. "/Renzo/"
-	if r:sub(1, #pre):lower() == pre:lower() then return (("C:\\Renzo\\" .. r:sub(#pre + 1)):gsub("/", "\\")) end
+	for _, par in ipairs(A_C) do
+		local pre = par[1]
+		if r:sub(1, #pre):lower() == pre:lower() then return ((par[2] .. r:sub(#pre + 1)):gsub("/", "\\")) end
+	end
 	return (("Z:" .. r):gsub("/", "\\"))
 end
 local function log(msg)

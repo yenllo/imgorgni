@@ -32,6 +32,8 @@ ESPERA_MIN = 90                   # 100 RAW con presets y nivelado tardan minuto
 LOCAL = AQUI / "TrabajoFotografico"
 CATALOGO = r"C:\Fotos\otro\catalogos\Automatico\Automatico.lrcat"
 LR_EXE = r"C:\Program Files\Adobe\Adobe Lightroom Classic\Lightroom.exe"
+LR_APPIMAGE = Path.home() / "Applications" / "Lightroom_Classic_on_Linux-v1.2.0-x86_64.AppImage"  # Debian (Wine)
+BANDERA = LR / "procesar_al_abrir"
 # La completa lleva Denoise IA por foto con tope 30 (ajustes_por_foto, 28/10/2026); "IMGorgni Completa base"
 # traia Denoise a ~50 en todas, que ya no se entrega en la completa. El nivelado ya no es el de nivelar.py (columna
 # "si"): va Upright Nivel en ajustes_por_foto.
@@ -169,24 +171,63 @@ def pendientes():
 
 
 def lightroom_abierto():
+    if os.name != "nt":
+        return subprocess.run(["pgrep", "-f", "Lightroom.exe"], capture_output=True).returncode == 0
     r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Lightroom.exe", "/NH"], capture_output=True, text=True)
     return "lightroom.exe" in r.stdout.lower()
 
 
-def abrir_y_esperar(pend, espera_min=ESPERA_MIN):
-    """Deja la bandera, abre Lightroom si no estaba y espera fin.txt. El plugin (Inicio.lua) solo procesa
-    con el catalogo Automatico abierto: si Renzo tenia abierto el suyo, no toca nada y se avisa."""
-    antes = FIN.stat().st_mtime if FIN.exists() else 0
-    import ctypes   # que Windows no suspenda la notebook mientras Lightroom trabaja (de noche nadie la toca)
-    ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
-    (LR / "procesar_al_abrir").touch()
-    if lightroom_abierto():
-        log("Lightroom ya estaba abierto: no lanzo otro; procesa solo si tiene el catalogo Automatico")
-    else:
+def lanzar_lightroom():
+    if os.name == "nt":
         # Lightroom.exe tenia RUNASADMIN (Popen daba WinError 740; Renzo lo saco el 7/10).
         # ShellExecute anda en los dos casos.
         os.startfile(LR_EXE, arguments=f'"{CATALOGO}"')
-        log("Lightroom abriendo con el catalogo Automatico")
+    else:
+        # Debian: el AppImage le pasa el catalogo a Lightroom.exe. Mismo DPI que en hyprland.lua, y sin matar Wine
+        # si Lightroom se reinicia al abrir el catalogo.
+        env = dict(os.environ, LR_DPI="120", LR_KILL_ON_EXIT="0")
+        with open(LR / "lightroom_noche.log", "a") as salida:
+            subprocess.Popen([str(LR_APPIMAGE), CATALOGO], env=env, stdout=salida, stderr=salida,
+                             start_new_session=True)
+    log("Lightroom abriendo con el catalogo Automatico")
+
+
+def esperar_que_cierre(espera_min):
+    """Debian, 23/11/2026: Renzo deja abierto su catalogo de trabajo (p. ej. la Corrida Italiana). Si en 3 min
+    el plugin no tomo la bandera, el catalogo abierto no es Automatico: se espera a que cierre Lightroom."""
+    time.sleep(180)
+    if not BANDERA.exists():
+        return True  # la tomo el plugin: ya esta procesando
+    log("Lightroom tiene otro catalogo abierto: espero a que lo cierres")
+    avisar("Edicion de Renato esperando",
+           "Lightroom esta abierto con otro catalogo. Cierralo y la edicion de Renato parte sola.")
+    for _ in range(espera_min):
+        if not lightroom_abierto():
+            time.sleep(20)  # que Wine termine de bajar
+            lanzar_lightroom()
+            return True
+        time.sleep(60)
+    return False
+
+
+def abrir_y_esperar(pend, espera_min=ESPERA_MIN):
+    """Deja la bandera, abre Lightroom si no estaba y espera fin.txt. El plugin (Inicio.lua) solo procesa
+    con el catalogo Automatico abierto: si Renzo tenia abierto el suyo, en Windows no toca nada y se avisa; en
+    Debian espera a que lo cierre y abre Automatico. Que no se suspenda: en Windows aca, en Debian el servicio
+    corre dentro de systemd-inhibit."""
+    antes = FIN.stat().st_mtime if FIN.exists() else 0
+    if os.name == "nt":
+        import ctypes   # que Windows no suspenda la notebook mientras Lightroom trabaja (de noche nadie la toca)
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
+    BANDERA.touch()
+    if lightroom_abierto():
+        log("Lightroom ya estaba abierto: no lanzo otro; procesa solo si tiene el catalogo Automatico")
+        if os.name != "nt" and not esperar_que_cierre(espera_min):
+            log(f"Lightroom siguio abierto con otro catalogo {espera_min} min")
+            avisar("Lightroom no edito lo de Renato", "Quedo abierto con otro catalogo toda la noche.")
+            return
+    else:
+        lanzar_lightroom()
     for _ in range(espera_min):
         time.sleep(60)
         if FIN.exists() and FIN.stat().st_mtime > antes:

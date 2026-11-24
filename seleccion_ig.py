@@ -99,7 +99,7 @@ def raiz_trabajo():
     anda; 3/10/2026, Renzo fuera de casa con la notebook prendida). Recien despertada el wifi tarda en
     volver, por eso reintenta un rato."""
     for _ in range(36):
-        for base in ("K:\\", r"\\192.168.1.62\Fotos", r"\\100.78.164.81\Fotos"):
+        for base in ("K:\\", r"\\192.168.1.62\Fotos", r"\\100.78.164.81\Fotos", str(Path.home() / "K")):  # ~/K: Debian
             p = Path(base) / "Fotos" / "Galeria" / "Trabajo"
             if p.is_dir():
                 return p
